@@ -328,7 +328,8 @@ export const MAX_COOKS_PER_ROUND = 8
 export function validateCook(spec: CookSpec, tokens: Token[]): string | null {
   if (spec.name.trim().length < 2 || spec.name.trim().length > 24) return 'Name must be 2–24 characters'
   if (!/^[A-Z0-9]{2,8}$/.test(spec.ticker)) return 'Ticker must be 2–8 letters or digits'
-  if (tokens.some((t) => t.ticker === spec.ticker && t.status !== 'dead' && t.status !== 'rugged')) return `$${spec.ticker} already exists`
+  // Tickers are unique, except a vamp may reuse the exact ticker of the coin it's copying (that's the point of a vamp).
+  if (tokens.some((t) => t.ticker === spec.ticker && t.status !== 'dead' && t.status !== 'rugged' && t.id !== spec.vampOf)) return `$${spec.ticker} already exists`
   if (!(spec.marketing >= 0) || !(spec.devBuy >= 0)) return 'Amounts must be positive'
   const b = spec.bundle
   if (b && (!Number.isInteger(b.wallets) || b.wallets < 0 || b.wallets > BUNDLE_MAX_WALLETS || !(b.perWallet >= 0))) return `Bundle uses 0–${BUNDLE_MAX_WALLETS} wallets`

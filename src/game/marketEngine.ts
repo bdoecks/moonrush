@@ -969,10 +969,22 @@ export const COOK_FEE = 25
  * How appealing a launch looks to the (simulated) market, 0..1. Deterministic; the actual launch adds luck.
  * Meta match, socials, marketing and a clean holder spread help; a heavy dev bag hurts.
  */
-export function cookQuality(spec: CookSpec, meta: MarketState['meta'], devPct: number) {
+/**
+ * What vamping a coin does to your launch: copying a coin that's running rides its hype; copying a dead or rugged
+ * one just looks like a leftover. 0 when it isn't a vamp.
+ */
+export function vampBoost(orig: Token | undefined) {
+  if (!orig) return 0
+  if (orig.status === 'dead' || orig.status === 'rugged') return -0.1
+  const hot = orig.hype / 100 * 0.12 + clamp(orig.change['1h'] ?? 0, -0.5, 2) * 0.06 + (orig.momentumScore > 60 ? 0.04 : 0)
+  return clamp(hot, -0.05, 0.25)
+}
+
+export function cookQuality(spec: CookSpec, meta: MarketState['meta'], devPct: number, orig?: Token) {
   const socials = Number(spec.socials.x) + Number(spec.socials.tg) + Number(spec.socials.web)
   return clamp(
     0.22 +
+      vampBoost(orig) +
       (spec.narrative === meta ? 0.28 : 0) +
       socials * 0.06 +
       0.1 * Math.log10(1 + spec.marketing / 100) +
@@ -986,7 +998,8 @@ export function cookQuality(spec: CookSpec, meta: MarketState['meta'], devPct: n
 
 /** Put a player-designed token on the MoonPad curve. The dev buy is executed separately by the trading engine. */
 export function cookToken(prev: MarketState, rng: Rng, spec: CookSpec): { market: MarketState; token: Token; event: MarketEvent } {
-  const score = clamp(cookQuality(spec, prev.meta, 0) + rng.gauss() * 0.15, 0, 1)
+  const orig = spec.vampOf ? prev.tokens.find((x) => x.id === spec.vampOf) : undefined
+  const score = clamp(cookQuality(spec, prev.meta, 0, orig) + rng.gauss() * 0.15, 0, 1)
   const archetype = rng.weighted<Archetype>({ runner: 0.5 + 4 * score, chaotic: 1.5, bleeder: 2.2 - 2 * score, sleeper: 0.8 })
   const t = makeToken(rng, { ticker: spec.ticker, name: spec.name, emoji: spec.emoji, archetype, chain: spec.chain, pad: spec.pad }, prev.time, true, prev.native)
   // Your coin starts exactly at the bottom of the curve; the dev buy and bundle happen after.
@@ -1003,6 +1016,14 @@ export function cookToken(prev: MarketState, rng: Rng, spec: CookSpec): { market
   t.description = spec.description.trim() || undefined
   t.socials = { ...spec.socials }
   t.hype = clamp(20 + score * 70 + rng.range(-5, 5), 5, 100)
+  if (orig) {
+    // A vamp: the crowd chasing the original spills over for a while (and it's labelled a copycat everywhere).
+    t.vampOf = { id: orig.id, ticker: orig.ticker }
+    if (orig.status === 'bonding' || orig.status === 'graduated') {
+      t.hype = clamp(t.hype + orig.hype * 0.2, 5, 100)
+      if (orig.momentumScore > 55) t.sim.pressure += 0.002
+    }
+  }
   t.rugProb = 0 // you're the dev — the only rug risk is you
   t.devPct = 0
   t.snipers = spec.style === 'hyped' ? rng.int(8, 20) : spec.style === 'stealth' ? rng.int(0, 3) : rng.int(2, 9)

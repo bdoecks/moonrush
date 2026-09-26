@@ -180,6 +180,7 @@ export const Card = memo(function Card({ t, now, preview }: { t: Token; now: num
               {t.riskLevel === 'EXTREME' ? '☠ ' : ''}{t.riskLevel}
             </Tag>
             {t.creator === 'you' && <Tag className="border-warn/40 bg-warn/10 text-warn">🍳 YOURS</Tag>}
+            {t.vampOf && <Tag className="border-accent/40 bg-accent/10 text-accent">🧛 VAMP</Tag>}
             {t.creator !== 'you' && t.creatorName && <Tag className="border-info/40 bg-info/10 text-info">🍳 {t.creatorName.toUpperCase()}</Tag>}
             {t.bundleFlagged && <Tag className="border-down/40 bg-down/10 text-down">📦 BUNDLED</Tag>}
             {t.washFlagged && <Tag className="border-down/40 bg-down/10 text-down">🤖 WASH</Tag>}

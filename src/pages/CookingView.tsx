@@ -1,5 +1,6 @@
 import clsx from 'clsx'
-import { AlertTriangle, Bot, Check, ChefHat, ChevronDown, Dices, Flame, Globe, Send, Timer, AtSign } from 'lucide-react'
+import { AlertTriangle, Bot, Check, ChefHat, ChevronDown, Dices, Flame, Globe, Search, Send, Timer, AtSign } from 'lucide-react'
+import { ChainBadge } from '../components/chain'
 import { load, save } from '../utils/storage'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Card } from '../components/discover/Trenches'
@@ -9,7 +10,7 @@ import { useWallets } from '../hooks/useWallets'
 import { BUNDLE_WALLET_FEE, bundleDetectChance, STAGGER_FEE } from '../game/devTools'
 import { EmptyState, Segmented, TokenIcon } from '../components/ui'
 import { COOK_EMOJIS, NARRATIVES, narrativeLabel } from '../data/narratives'
-import { COOK_FEE, cookQuality, SUPPLY } from '../game/marketEngine'
+import { COOK_FEE, cookQuality, SUPPLY, vampBoost } from '../game/marketEngine'
 import { COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND, selectSpeed, useGame, validateCook } from '../game/store'
 import { creatorRate, previewBuy, SWAP_FEE } from '../game/tradingEngine'
 import { curveAt, curveLiquidityUsd, gradMcapUsd, gradRaise, launchMcapUsd } from '../game/curve'
@@ -17,7 +18,7 @@ import { defaultPad, LAUNCHPADS, padsFor } from '../data/launchpads'
 import { PadBadge } from '../components/pad'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
 import type { Chain, CookSpec, LaunchStyle, Narrative, Token } from '../types'
-import { fmtAge, fmtClock, fmtCompact, fmtUsd, toneClass } from '../utils/format'
+import { fmtAge, fmtClock, fmtCompact, fmtPct, fmtUsd, toneClass } from '../utils/format'
 
 const PREFIXES = ['Baby', 'Based', 'Turbo', 'Sir', 'Mega', 'Lil', 'Super', 'Dark', 'Giga', 'Sleepy', 'Angry', 'Rich', 'Tiny', 'Cosmic']
 const NOUNS: Record<Narrative, string[]> = {
@@ -108,7 +109,9 @@ export function CookingView() {
     return { devPct, bundlePct, mcap }
   }, [devUsd, bundleUsd, spec.pad, tax, px])
   const detect = bundleDetectChance(spec.bundle.wallets, est.bundlePct, spec.bundle.stagger)
-  const quality = cookQuality(spec, meta, est.devPct)
+  const vampOrig = spec.vampOf ? tokens.find((t) => t.id === spec.vampOf) : undefined
+  const quality = cookQuality(spec, meta, est.devPct, vampOrig)
+  const vampLift = vampBoost(vampOrig)
   const usdCosts = COOK_FEE + spec.marketing + bundleFees
   // The dev buy and bundle are paid by the deployer wallet.
   const devAcc = wallets.all.find((a) => a.id === spec.devWallet) ?? wallets.primary
@@ -139,8 +142,8 @@ export function CookingView() {
     sim: { archetype: 'runner', regime: 'sideways', regimeTicks: 0, drift: 0, volMult: 1, anchor: 0, meanRev: 0, beta: 0, pressure: 0, volBoost: 0, rugAt: null, baseTurnover: 0 },
   }), [spec, est, now, quality, devUsd, bundleUsd, px, tax])
 
-  const [tab, setTab0] = useState<'create' | 'launches'>(() => load<'create' | 'launches'>('cookTab') ?? 'create')
-  const setTab = (t: 'create' | 'launches') => {
+  const [tab, setTab0] = useState<CookTab>(() => load<CookTab>('cookTab') ?? 'create')
+  const setTab = (t: CookTab) => {
     setTab0(t)
     save('cookTab', t)
   }
@@ -152,7 +155,7 @@ export function CookingView() {
     const id = cook(spec)
     if (id) {
       const n = spec.narrative
-      setSpec((s) => ({ ...s, ...randomIdentity(n), description: '', image: undefined }))
+      setSpec((s) => ({ ...s, ...randomIdentity(n), description: '', image: undefined, vampOf: undefined }))
       setTab('launches') // see it go live
     }
   }
@@ -175,7 +178,7 @@ export function CookingView() {
             <h1 className="font-display text-[17px] font-bold">Cooking</h1>
           </div>
           <div role="tablist" className="flex gap-1 rounded-md border border-line2 bg-bg p-0.5">
-            {([['create', 'Create coin'], ['launches', `My launches${launches.length ? ` · ${launches.length}` : ''}`]] as const).map(([k, label]) => (
+            {([['create', 'Create coin'], ['vamp', '🧛 Vamp coin'], ['launches', `My launches${launches.length ? ` · ${launches.length}` : ''}`]] as const).map(([k, label]) => (
               <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={clsx('rounded px-3 py-1 text-[12px] font-bold transition-colors', tab === k ? 'bg-raise text-ink' : 'text-dim hover:text-muted')}>
                 {label}
               </button>
@@ -201,6 +204,15 @@ export function CookingView() {
             <MyLaunches onCreate={() => setTab('create')} />
             <RecentlyCooked tokens={tokens} now={now} onOpen={(id) => select(id)} />
           </>
+        ) : tab === 'vamp' ? (
+          <VampPicker
+            tokens={tokens}
+            now={now}
+            onVamp={(orig, style) => {
+              setSpec((s) => vampSpec(s, orig, style))
+              setTab('create')
+            }}
+          />
         ) : (
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="space-y-3">
@@ -210,6 +222,25 @@ export function CookingView() {
                 <Dices size={12} /> Randomize
               </button>
             }>
+              {spec.vampOf && (
+                <div className={clsx('mb-3 flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-2 text-[12px]', vampLift > 0 ? 'border-accent/40 bg-accent/5' : 'border-warn/40 bg-warn/5')}>
+                  <span className="text-[16px]">🧛</span>
+                  {vampOrig ? (
+                    <>
+                      <span>
+                        Vamping <b>${vampOrig.ticker}</b> <span className="num text-dim">{fmtCompact(vampOrig.mcap)} MC · 1h <span className={toneClass(vampOrig.change['1h'] ?? 0)}>{fmtPct(vampOrig.change['1h'] ?? 0)}</span></span>
+                      </span>
+                      <span className={clsx('num text-[11px] font-semibold', vampLift > 0 ? 'text-up' : 'text-warn')}>
+                        {vampLift > 0 ? `riding its hype: +${Math.round(vampLift * 100)} vibe` : vampOrig.status === 'dead' || vampOrig.status === 'rugged' ? `it's ${vampOrig.status}: ${Math.round(vampLift * 100)} vibe` : 'not much hype to ride right now'}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-muted">The coin you were vamping is gone.</span>
+                  )}
+                  <span className="text-[10px] text-dim">Your coin will be tagged as a vamp.</span>
+                  <button onClick={() => up({ vampOf: undefined })} className="ml-auto rounded border border-line2 px-2 py-0.5 text-[11px] text-muted hover:text-ink">Stop vamping</button>
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-[auto_1fr]">
                 <ImagePicker image={spec.image} emoji={spec.emoji} hue={spec.hue} onChange={(image) => up({ image })} onHue={(hue) => up({ hue })} />
                 <div className="space-y-2">
@@ -386,6 +417,7 @@ export function CookingView() {
                 <Factor ok={spec.marketing >= 250}>{spec.marketing ? `${fmtUsd(spec.marketing, 0)} marketing` : 'No marketing'}</Factor>
                 <Factor ok={est.devPct <= 6}>Dev bag {est.devPct.toFixed(1)}%</Factor>
                 {bundleOn && <Factor ok={detect < 0.3}>Bundle {Math.round(detect * 100)}% spot risk</Factor>}
+                {spec.vampOf && <Factor ok={vampLift > 0}>{vampLift > 0 ? `Vamp riding $${vampOrig?.ticker}` : 'Vamp of a cold coin'}</Factor>}
               </ul>
             </div>
 
@@ -476,6 +508,113 @@ function Line({ label, children }: { label: ReactNode; children: ReactNode }) {
 }
 function Factor({ ok, children }: { ok: boolean; children: ReactNode }) {
   return <li className={clsx('flex items-center gap-1.5', ok ? 'text-up' : 'text-muted')}>{ok ? '✓' : '·'} {children}</li>
+}
+
+// ─── Vamp coin: clone a live coin to ride its hype ───────────────────────────
+type CookTab = 'create' | 'vamp' | 'launches'
+type VampStyle = 'exact' | 'baby' | 'two' | 'inu'
+const VAMP_STYLES: { id: VampStyle; label: string }[] = [
+  { id: 'exact', label: 'Exact copy' },
+  { id: 'baby', label: 'Baby ___' },
+  { id: 'two', label: '___ 2.0' },
+  { id: 'inu', label: '___ Inu' },
+]
+
+function vampName(o: Pick<Token, 'name' | 'ticker'>, style: VampStyle) {
+  switch (style) {
+    case 'exact': return { name: o.name.slice(0, 24), ticker: o.ticker }
+    case 'baby': return { name: `Baby ${o.name}`.slice(0, 24), ticker: `B${o.ticker}`.slice(0, 8) }
+    case 'two': return { name: `${o.name} 2.0`.slice(0, 24), ticker: `${o.ticker.slice(0, 7)}2` }
+    case 'inu': return { name: `${o.name} Inu`.slice(0, 24), ticker: `${o.ticker.slice(0, 5)}INU` }
+  }
+}
+
+/** Fill the launch form from a live coin: its look, story, socials and launchpad; your money settings stay yours. */
+function vampSpec(base: CookSpec, o: Token, style: VampStyle): CookSpec {
+  const chain = o.chain
+  const pad = padsFor(chain).some((p) => p.id === o.pad) ? o.pad : defaultPad(chain)
+  const sameChain = chain === base.chain
+  return {
+    ...base,
+    ...vampName(o, style),
+    emoji: o.emoji,
+    hue: o.hue,
+    image: o.image,
+    description: o.description ?? '',
+    narrative: o.narrative ?? base.narrative,
+    socials: o.socials ? { ...o.socials } : base.socials,
+    chain,
+    pad,
+    devBuy: sameChain ? base.devBuy : CHAINS[chain].quick[1],
+    bundle: sameChain ? base.bundle : { ...base.bundle, perWallet: CHAINS[chain].quick[0] },
+    vampOf: o.id,
+  }
+}
+
+function VampPicker({ tokens, now, onVamp }: { tokens: Token[]; now: number; onVamp: (t: Token, style: VampStyle) => void }) {
+  const [q, setQ] = useState('')
+  const [style, setStyle] = useState<VampStyle>(() => load<VampStyle>('vampStyle') ?? 'exact')
+  const pickStyle = (s: VampStyle) => {
+    setStyle(s)
+    save('vampStyle', s)
+  }
+  const needle = q.trim().toLowerCase().replace('$', '')
+  const vamps = new Map<string, number>()
+  for (const t of tokens) if (t.vampOf) vamps.set(t.vampOf.id, (vamps.get(t.vampOf.id) ?? 0) + 1)
+  // Hottest first: what people vamp is whatever is running right now.
+  const list = tokens
+    .filter((t) => (t.status === 'bonding' || t.status === 'graduated') && t.creator !== 'you' && (!needle || t.ticker.toLowerCase().includes(needle) || t.name.toLowerCase().includes(needle)))
+    .sort((a, b) => b.hype + b.momentumScore + Math.max(-50, Math.min(200, (b.change['1h'] ?? 0) * 100)) - (a.hype + a.momentumScore + Math.max(-50, Math.min(200, (a.change['1h'] ?? 0) * 100))))
+    .slice(0, 40)
+  return (
+    <div className="rounded-md border border-line bg-panel">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2.5">
+        <div>
+          <div className="text-[14px] font-bold">🧛 Vamp a coin</div>
+          <div className="text-[11px] text-dim">Launch a copycat of something that's running and ride its hype. Hot coins give your launch a head start; cold ones don't.</div>
+        </div>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Segmented value={style} onChange={pickStyle} options={VAMP_STYLES.map((s) => ({ value: s.id, label: s.label }))} />
+          <div className="relative w-44">
+            <Search size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-dim" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search coin" aria-label="Search coins to vamp" className="h-7 w-full rounded-md border border-line2 bg-bg pl-6 pr-2 text-[12px] outline-none placeholder:text-dim focus:border-accent/60" />
+          </div>
+        </div>
+      </div>
+      {list.length === 0 ? <EmptyState icon="🧛" title="Nothing to vamp" hint="No live coins match" /> : (
+        <div className="divide-y divide-line/50">
+          {list.map((t) => {
+            const lift = vampBoost(t)
+            const n = vamps.get(t.id) ?? 0
+            const next = vampName(t, style)
+            return (
+              <div key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 hover:bg-panel2">
+                <TokenIcon token={t} size={30} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-[13px] font-bold">
+                    <span className="truncate">{t.ticker}</span>
+                    <ChainBadge chain={t.chain} />
+                    <span className="truncate text-[11px] font-normal text-dim">{t.name}</span>
+                    {n > 0 && <span className="rounded bg-raise px-1 text-[9px] font-semibold text-muted" title="Copycats already out there">{n} vamp{n > 1 ? 's' : ''}</span>}
+                  </div>
+                  <div className="num text-[11px] text-muted">
+                    {fmtCompact(t.mcap)} MC · 1h <span className={toneClass(t.change['1h'] ?? 0)}>{fmtPct(t.change['1h'] ?? 0)}</span> · {fmtAge(now - t.createdAt)} · {t.status === 'bonding' ? `curve ${t.bondingProgress.toFixed(0)}%` : 'migrated'}
+                  </div>
+                </div>
+                <span className={clsx('num w-20 text-right text-[11px] font-semibold', lift >= 0.1 ? 'text-up' : lift > 0.03 ? 'text-warn' : 'text-dim')} title="How much hype your launch borrows">
+                  {lift >= 0.1 ? '🔥 ' : ''}+{Math.round(Math.max(0, lift) * 100)} vibe
+                </span>
+                <button onClick={() => onVamp(t, style)} className="flex items-center gap-1 rounded-md bg-accent/15 px-2.5 py-1 text-[12px] font-bold text-accent hover:bg-accent/25" title={`Fill the launch form as ${next.name} ($${next.ticker})`}>
+                  Vamp → ${next.ticker}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <p className="px-3 py-2 text-[10px] text-dim">Vamping copies the name, ticker (or a spin-off), picture, story, socials and launchpad. You still set the dev buy, marketing and style, and can tweak anything before cooking.</p>
+    </div>
+  )
 }
 
 function MyLaunches({ onCreate }: { onCreate: () => void }) {

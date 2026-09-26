@@ -356,6 +356,7 @@ export interface Token {
   creator?: 'you'
   creatorId?: string // multiplayer: the player who cooked it
   creatorName?: string
+  vampOf?: { id: string; ticker: string } // a copycat launch of this coin
   image?: string // custom icon: small data URL or an https image link
   narrative?: Narrative
   description?: string
@@ -395,6 +396,7 @@ export interface CookSpec {
   devWallet?: string // which of your wallets deploys (the dev); defaults to your primary
   sideBuys?: { walletId: string; amount: number }[] // other wallets buying at launch (chain coin each)
   sideDelay?: boolean // spread side buys over the first minute instead of the launch block
+  vampOf?: string // id of the live coin this launch copies ("vamping" it to ride its hype)
 }
 
 export interface BundleSpec {
