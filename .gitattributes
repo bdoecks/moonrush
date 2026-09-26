@@ -1,0 +1,6 @@
+# Keep line endings exactly as written (LF), on Windows and on the Linux hosting servers alike.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary

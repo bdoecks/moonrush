@@ -1,0 +1,23 @@
+// Fictional rival traders for the simulated leaderboard.
+export const RIVALS: { name: string; avatar: string; skill: number; level: number }[] = [
+  { name: 'MoonBoy', avatar: '🌝', skill: 0.8, level: 31 },
+  { name: 'ExitLiquidity', avatar: '🚪', skill: -0.6, level: 12 },
+  { name: 'PepeHunter', avatar: '🏹', skill: 0.5, level: 22 },
+  { name: 'DiamondHands', avatar: '💎', skill: 0.2, level: 18 },
+  { name: 'RugSurvivor', avatar: '🩹', skill: 0.1, level: 27 },
+  { name: 'ChadTrader', avatar: '🗿', skill: 0.6, level: 40 },
+  { name: 'PaperHandsPete', avatar: '🧻', skill: -0.3, level: 6 },
+  { name: 'CandleWick', avatar: '🕯️', skill: 0.3, level: 15 },
+  { name: 'GreenDildoGod', avatar: '📈', skill: 0.9, level: 48 },
+  { name: 'BagHolderBob', avatar: '👜', skill: -0.8, level: 9 },
+  { name: 'SniperSally', avatar: '🎯', skill: 0.7, level: 35 },
+  { name: 'FOMOfrank', avatar: '😱', skill: -0.4, level: 8 },
+  { name: 'ApeTogether', avatar: '🦍', skill: 0.0, level: 14 },
+  { name: 'LiquidityLarry', avatar: '💧', skill: 0.2, level: 20 },
+  { name: 'Trench_Rat', avatar: '🐀', skill: 0.4, level: 25 },
+  { name: 'NoSleepNate', avatar: '☕', skill: 0.1, level: 11 },
+  { name: 'WenLambo', avatar: '🏎️', skill: -0.2, level: 7 },
+  { name: 'SmartMoneySam', avatar: '🧠', skill: 1.0, level: 52 },
+  { name: 'DegenDiana', avatar: '🎰', skill: 0.3, level: 29 },
+  { name: 'GasGuzzler', avatar: '⛽', skill: -0.5, level: 5 },
+]
