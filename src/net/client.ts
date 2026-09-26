@@ -128,6 +128,12 @@ function open(opts: { create?: boolean; room?: string; name: string; avatar: str
       return
     }
     if (!s.online) return
+    // Server unreachable for ~2 minutes: stop retrying and go back to solo instead of trying forever.
+    if (retries >= 12) {
+      save('mpNotice', `Lost connection to room ${s.online.code}. You're back in single-player.`)
+      leaveRoom()
+      return
+    }
     // Dropped mid-game: keep playing on the last market we saw and try to get back in.
     useGame.getState().patchState({ online: { ...s.online, conn: 'reconnecting' } })
     const delay = Math.min(10_000, 1000 * 2 ** retries++)
