@@ -35,7 +35,10 @@ const http = createServer((req, res) => {
   if (existsSync(DIST)) {
     const path = normalize(join(DIST, url.pathname === '/' ? 'index.html' : url.pathname))
     const file = path.startsWith(DIST) && existsSync(path) && statSync(path).isFile() ? path : join(DIST, 'index.html')
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' })
+    // Built assets have content hashes in their names, so browsers (phones!) can keep them forever; the page itself
+    // is always re-checked so a new deploy shows up on the next load.
+    const cache = url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache'
+    res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': cache })
     res.end(readFileSync(file))
     return
   }

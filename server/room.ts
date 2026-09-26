@@ -9,11 +9,27 @@ import { flagBundle, runBotTick, sleuthBundle } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { GameMode, MarketEngine, MarketEvent, MarketState, SimWallet, SocialPost, VolumeBot } from '../src/types'
-import type { BotRun, ClientMsg, NetMarket, NetToken, RoomPlayer, RoundInfo, ServerMsg, TickMsg } from '../src/net/protocol'
+import type { BotRun, ClientMsg, NetMarket, NetToken, RoomPlayer, RoundInfo, ServerMsg, TickMsg, TokenDiff, WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
+const KEYFRAME_TICKS = 30 // a full market refresh every ~30s; ticks in between only carry what changed
 const live = (t: { status: string }) => t.status === 'bonding' || t.status === 'graduated'
+
+// Numbers go over the wire with 6 significant digits (3 for volumes on chart points): plenty for prices and
+// balances, and a third of the bytes of a raw double.
+const r6 = (x: number) => (Number.isInteger(x) ? x : Number(x.toPrecision(6)))
+const r3 = (x: number) => (Number.isInteger(x) ? x : Number(x.toPrecision(3)))
+function round(v: unknown): unknown {
+  if (typeof v === 'number') return Number.isFinite(v) ? r6(v) : v
+  if (Array.isArray(v)) return v.map(round)
+  if (v && typeof v === 'object') {
+    const o: Record<string, unknown> = {}
+    for (const [k, x] of Object.entries(v)) o[k] = round(x)
+    return o
+  }
+  return v
+}
 
 interface Member {
   info: RoomPlayer
@@ -38,6 +54,8 @@ export class Room {
   private bots = new Map<string, VolumeBot>() // tokenId → a player's volume bot on their own coin
   private lastTapeId = 0
   private lastWalletTradeId = 0
+  private sentTokens = new Map<string, Record<string, string>>() // coin → field → JSON last sent (for diffs)
+  private sentWallets = new Map<string, string>() // wallet → JSON last sent (without trades)
   private playersDirty = false
   private timer: ReturnType<typeof setInterval>
 
@@ -64,7 +82,7 @@ export class Room {
     this.emptySince = null
     this.send(ws, {
       t: 'welcome', you: msg.playerId, code: this.code, hostId: this.hostId, players: this.playerList(), round: this.round,
-      market: this.netMarket(false), wallets: this.wallets, posts: this.posts, events: this.events,
+      market: this.netMarket(), wallets: round(this.wallets) as SimWallet[], posts: this.posts, events: this.events,
     })
     this.broadcastPlayers()
   }
@@ -145,6 +163,8 @@ export class Room {
     this.events = []
     this.bots.clear()
     this.freshIds.clear()
+    this.sentTokens?.clear() // new market: the next tick sends every coin in full
+    this.sentWallets?.clear()
     this.pending = new Map()
     this.lastTapeId = this.market.nextTradeId - 1
     this.lastWalletTradeId = this.market.nextTradeId - 1
@@ -155,7 +175,7 @@ export class Room {
     if (!MODES[mode]) return
     this.newMarket({ id: this.round.id + 1, state: 'running', mode, durationTicks, startTick: 0, seed: 0, startTime: 0, engine })
     for (const m of this.members.values()) m.info = { ...m.info, equity: 0, startEquity: 0, trades: 0, wins: 0, finished: false }
-    this.broadcast({ t: 'round', round: this.round, market: this.netMarket(false), wallets: this.wallets })
+    this.broadcast({ t: 'round', round: this.round, market: this.netMarket(), wallets: round(this.wallets) as SimWallet[] })
     this.broadcastPlayers()
   }
 
@@ -232,9 +252,16 @@ export class Room {
     this.events = [...events.slice().reverse(), ...this.events].slice(0, EVENTS_KEPT)
     this.posts = [...posts.slice().reverse(), ...this.posts].slice(0, POSTS_KEPT)
 
+    // Every ~30s, forget what was sent so this tick is a full refresh (repairs anything a client missed).
+    if (market.tick % KEYFRAME_TICKS === 0) {
+      this.sentTokens.clear()
+      this.sentWallets.clear()
+    }
+    const points: TickMsg['points'] = {}
+    for (const [id, pts] of this.pending) points[id] = pts.map(([time, price, prev, vol]) => [time, r6(price), r6(prev), r3(vol)])
     const msg: TickMsg = {
-      t: 'tick', market: this.netMarket(true), wallets: this.walletDiff(), events, posts, actions: wr.actions,
-      points: Object.fromEntries(this.pending), newCandles, bots,
+      t: 'tick', market: this.tickMarketDiff(), wallets: this.walletDiff(), events, posts, actions: wr.actions,
+      points, newCandles, bots,
     }
     this.pending = new Map()
     setCandleLog(null)
@@ -248,26 +275,62 @@ export class Room {
   }
 
   // ─── Wire formats ──────────────────────────────────────────────────────────
-  /** The market; with `diff`, each coin's tape only carries trades new since the last tick. */
-  private netMarket(diff: boolean): NetMarket {
-    const since = this.lastTapeId
-    let max = since
-    const tokens = this.market.tokens.map((t) => {
-      for (const e of t.tape) if (e.id > max) max = e.id
-      return diff ? { ...t, tape: t.tape.filter((e) => e.id > since) } : t
-    })
-    if (diff) this.lastTapeId = max
-    return { ...this.market, tokens }
+  /** The whole market, numbers rounded (welcome / round start). */
+  private netMarket(): NetMarket {
+    let max = this.lastTapeId
+    for (const t of this.market.tokens) for (const e of t.tape) if (e.id > max) max = e.id
+    return round({ ...this.market, tokens: this.market.tokens }) as NetMarket
   }
 
-  private walletDiff(): SimWallet[] {
+  /**
+   * This tick's market: every coin as `id` + only the fields that changed since the last tick (rounded), plus its new
+   * trades. `sim` (the hidden simulation state) goes out once per coin: browsers only read its constant archetype.
+   */
+  private tickMarketDiff(): TickMsg['market'] {
+    const since = this.lastTapeId
+    let max = since
+    const tokens: TokenDiff[] = this.market.tokens.map((t) => {
+      const prev = this.sentTokens.get(t.id)
+      const snap: Record<string, string> = prev ?? {}
+      const out: TokenDiff = { id: t.id }
+      for (const [k, v] of Object.entries(t)) {
+        if (k === 'id' || k === 'tape' || (k === 'sim' && prev)) continue
+        const rv = round(v)
+        const js = JSON.stringify(rv)
+        if (!prev || prev[k] !== js) {
+          ;(out as Record<string, unknown>)[k] = rv
+          snap[k] = js
+        }
+      }
+      this.sentTokens.set(t.id, snap)
+      const tape = t.tape.filter((e) => e.id > since)
+      for (const e of tape) if (e.id > max) max = e.id
+      if (tape.length) out.tape = round(tape) as TokenDiff['tape']
+      return out
+    })
+    for (const id of this.sentTokens.keys()) if (!this.market.tokens.some((t) => t.id === id)) this.sentTokens.delete(id)
+    this.lastTapeId = max
+    const { tokens: _all, ...rest } = this.market
+    void _all
+    return { ...(round(rest) as Omit<NetMarket, 'tokens'>), tokens }
+  }
+
+  /** Only wallets that changed (a trade, a position) go out; `trades` carries just the new ones. */
+  private walletDiff(): WalletDiff[] {
     const since = this.lastWalletTradeId
     let max = since
-    const out = this.wallets.map((w) => {
+    const out: WalletDiff[] = []
+    for (const w of this.wallets) {
       const trades = w.trades.filter((tr) => tr.id > since)
       for (const tr of trades) if (tr.id > max) max = tr.id
-      return { ...w, trades }
-    })
+      const { trades: _t, ...rest } = w
+      void _t
+      const rw = round(rest) as Omit<SimWallet, 'trades'>
+      const js = JSON.stringify(rw)
+      if (this.sentWallets.get(w.id) === js && !trades.length) continue
+      this.sentWallets.set(w.id, js)
+      out.push({ ...rw, trades: round(trades) as SimWallet['trades'] })
+    }
     this.lastWalletTradeId = max
     return out
   }

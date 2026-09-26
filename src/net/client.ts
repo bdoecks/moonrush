@@ -251,7 +251,15 @@ function onTick(msg: TickMsg) {
   if (!s.online) return
   const me = s.online.you
   const prevTokens = new Map(s.market.tokens.map((t) => [t.id, t]))
-  const market: MarketState = { ...msg.market, tokens: msg.market.tokens.map((t) => localToken(t, prevTokens.get(t.id), me, true)) }
+  // Coins arrive as diffs: merge each onto what we had. A coin we've never seen comes in full (new, or a keyframe);
+  // a stray partial one for an unknown coin waits for the next keyframe.
+  const tokens: Token[] = []
+  for (const d of msg.market.tokens) {
+    const prev = prevTokens.get(d.id)
+    if (!prev && !d.sim) continue
+    tokens.push(localToken(d, prev, me))
+  }
+  const market: MarketState = { ...msg.market, tokens }
 
   // Charts: whole histories for new coins, recorded points for the rest.
   for (const [id, c] of Object.entries(msg.newCandles)) candleStore.set(id, c)
@@ -259,8 +267,12 @@ function onTick(msg: TickMsg) {
   const ids = new Set(market.tokens.map((t) => t.id))
   for (const id of candleStore.keys()) if (!ids.has(id)) candleStore.delete(id)
 
-  const prevW = new Map(s.wallets.map((w) => [w.id, w]))
-  const wallets = msg.wallets.map((w) => ({ ...w, trades: [...w.trades, ...(prevW.get(w.id)?.trades ?? [])].slice(0, WALLET_TRADES) }))
+  // Only wallets that changed are sent; the rest stay as they were.
+  const changed = new Map(msg.wallets.map((w) => [w.id, w]))
+  const wallets = s.wallets.map((w) => {
+    const d = changed.get(w.id)
+    return d ? { ...w, ...d, trades: [...(d.trades ?? []), ...w.trades].slice(0, WALLET_TRADES) } : w
+  })
 
   // Your volume bots run on the server; you pay for them here, and stop them when the money runs out.
   const botRuns = new Map<string, BotTickRun>()
@@ -298,16 +310,20 @@ function onTick(msg: TickMsg) {
 }
 
 // ─── Wire → local ────────────────────────────────────────────────────────────
-/** Your own coins keep `creator: 'you'`; your trades on the tape show as YOU. */
-function localToken(t: NetToken, prev: Token | undefined, me: string, diff: boolean): Token {
-  let tape = t.tape.map((e) => (e.pid === me ? { ...e, wallet: 'YOU', tag: 'you' as const } : e))
-  // Merge new trades onto what we had, dropping local-only copies of our own trades (the server echo replaces them).
-  if (diff && prev) tape = [...tape, ...prev.tape.filter((e) => !(e.tag === 'you' && !e.pid))].slice(0, TAPE_LEN)
-  return { ...t, tape, creator: t.creatorId === me ? 'you' : undefined }
+/**
+ * A coin from the server (full, or a diff merged onto what we had). Your own coins keep `creator: 'you'`; your trades
+ * on the tape show as YOU.
+ */
+function localToken(d: Partial<NetToken> & { id: string }, prev: Token | undefined, me: string): Token {
+  const fresh = (d.tape ?? []).map((e) => (e.pid === me ? { ...e, wallet: 'YOU', tag: 'you' as const } : e))
+  // New trades go on top of what we had, dropping local-only copies of our own trades (the server echo replaces them).
+  const tape = prev ? [...fresh, ...prev.tape.filter((e) => !(e.tag === 'you' && !e.pid))].slice(0, TAPE_LEN) : fresh
+  const t = { ...(prev ?? {}), ...d, tape } as Token
+  return { ...t, creator: t.creatorId === me ? 'you' : undefined }
 }
 
 function localMarket(m: NetMarket, me: string): MarketState {
-  return { ...m, tokens: m.tokens.map((t) => localToken(t, undefined, me, false)) }
+  return { ...m, tokens: m.tokens.map((t) => localToken(t, undefined, me)) }
 }
 
 function pickDefault(m: MarketState) {

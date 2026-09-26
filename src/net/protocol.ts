@@ -57,10 +57,17 @@ export type ClientMsg =
   | { t: 'event'; event: MarketEvent } // something you did to your own coin (dev sells, bundle dumps)
 
 // ─── Server → browser ────────────────────────────────────────────────────────
+/** A coin in a tick: `id` plus only the fields that changed since the last tick (`tape` = new trades only). */
+export type TokenDiff = Partial<NetToken> & { id: string }
+/** A bot wallet in a tick: only wallets that changed are sent; `trades` = new trades only. */
+export type WalletDiff = Partial<SimWallet> & { id: string }
+
 export interface TickMsg {
   t: 'tick'
-  market: NetMarket // token `tape` holds only entries new since the last tick
-  wallets: SimWallet[] // `trades` holds only trades new since the last tick
+  // Every live coin is listed (so order and delistings are known), each as a diff. A full refresh ("keyframe")
+  // is sent every ~30s, and coins new to the market always arrive in full.
+  market: Omit<NetMarket, 'tokens'> & { tokens: TokenDiff[] }
+  wallets: WalletDiff[]
   events: MarketEvent[]
   posts: SocialPost[]
   actions: WalletAction[]
