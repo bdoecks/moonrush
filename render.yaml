@@ -1,14 +1,14 @@
 # Render Blueprint: one web service runs the multiplayer server, which also serves the built game.
 # Render → New → Blueprint → pick this repo, and it fills everything in from here.
+# Node version comes from "engines" in package.json.
 services:
   - type: web
     name: moonrush
     runtime: node
-    plan: starter # always on (~$7/mo). "free" works too but sleeps when idle (first visitor waits ~1 min).
+    # free sleeps after ~15 min idle (first visitor waits ~1 min). For always-on, change to 0.5c-512mb (~$7/mo),
+    # here or in the Render dashboard.
+    plan: free
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run server
     healthCheckPath: /health
-    autoDeploy: true # every push to main redeploys
-    envVars:
-      - key: NODE_VERSION
-        value: "22"
+    autoDeployTrigger: commit # every push to main redeploys
