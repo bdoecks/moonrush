@@ -5,7 +5,7 @@ import { load, save } from '../utils/storage'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Card } from '../components/discover/Trenches'
 import { ImagePicker } from '../components/cook/ImagePicker'
-import { BundlerSection, SideWalletsSection, VolumeBotPanel } from '../components/cook/DevTools'
+import { AirdropPanel, BundlerSection, SideWalletsSection, VolumeBotPanel } from '../components/cook/DevTools'
 import { useWallets } from '../hooks/useWallets'
 import { BUNDLE_WALLET_FEE, bundleDetectChance, STAGGER_FEE } from '../game/devTools'
 import { EmptyState, Segmented, TokenIcon } from '../components/ui'
@@ -725,7 +725,7 @@ function MyLaunches({ onCreate }: { onCreate: () => void }) {
                       <div className="flex justify-end gap-1">
                         <button disabled={!t} onClick={() => t && select(t.id)} className="rounded border border-line2 px-1.5 py-0.5 text-[10px] font-semibold text-muted hover:text-ink disabled:opacity-30">Chart</button>
                         <button onClick={() => setOpenBot(expanded ? null : r.tokenId)} className={clsx('flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold', expanded || r.bot?.on ? 'border-info/50 bg-info/10 text-info' : 'border-line2 text-muted hover:text-ink')} aria-expanded={expanded}>
-                          <Bot size={11} /> Bot
+                          <Bot size={11} /> Bot · Airdrop
                         </button>
                         <button disabled={!pos} onClick={() => pos && sell(pos.qty / 2, r.tokenId, undefined, 'all')} className="rounded border border-line2 px-1.5 py-0.5 text-[10px] font-semibold text-muted hover:border-down/50 hover:text-down disabled:opacity-30" title="Sell half your dev bag (the market will notice)">Sell 50%</button>
                         <button disabled={!pos} onClick={() => pos && sell(pos.qty, r.tokenId, undefined, 'all')} className="rounded border border-down/40 bg-down/10 px-1.5 py-0.5 text-[10px] font-bold text-down hover:bg-down hover:text-white disabled:opacity-30" title="Dump your whole dev bag (the market will notice)">Dump bag</button>
@@ -748,6 +748,7 @@ function MyLaunches({ onCreate }: { onCreate: () => void }) {
               <button onClick={() => setOpenBot(null)} className="text-dim hover:text-ink">Close ✕</button>
             </div>
             <VolumeBotPanel key={r.tokenId} rec={r} t={map.get(r.tokenId)} />
+            <AirdropPanel key={`drop-${r.tokenId}`} rec={r} t={map.get(r.tokenId)} />
           </div>
         )
       })()}

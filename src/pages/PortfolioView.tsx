@@ -1,5 +1,6 @@
 import clsx from 'clsx'
-import { Check as CheckIcon, Copy, Search, Share2, X } from 'lucide-react'
+import { Check as CheckIcon, Coins, Copy, Search, Share2, X } from 'lucide-react'
+import { FundWalletsModal } from '../components/FundWallets'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ChainBadge, WalletChip } from '../components/chain'
@@ -113,6 +114,7 @@ export function PortfolioView() {
   const [period, setPeriod] = useState<Period>('ALL')
   const [tab, setTab] = useState<Tab>('holding')
   const [share, setShare] = useState(false)
+  const [funding, setFunding] = useState<string[] | null>(null) // wallets to pre-select ([] = default)
   // GMGN-style: show money in USD or in each coin's own chain coin; look at all wallets or one.
   const [unit, setUnitState] = useState<Unit>(() => load<Unit>('pfUnit') ?? 'usd')
   const setUnit = (u: Unit) => {
@@ -220,6 +222,7 @@ export function PortfolioView() {
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Segmented value={unit} onChange={setUnit} options={[{ value: 'usd', label: 'USD' }, { value: 'native', label: 'SOL · BNB · ETH' }]} />
           <Segmented value={period} onChange={setPeriod} options={[{ value: '1H', label: '1H' }, { value: '24H', label: '24H' }, { value: 'ALL', label: 'All' }]} />
+          <button onClick={() => setFunding([])} className="flex items-center gap-1 rounded-md border border-accent/50 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent hover:bg-accent/20"><Coins size={12} /> Fund wallets</button>
           <button onClick={() => setShare(true)} className="flex items-center gap-1 rounded-md border border-line2 px-2.5 py-1 text-[11px] font-semibold text-muted hover:text-ink"><Share2 size={12} /> Share PnL</button>
         </div>
       </div>
@@ -350,10 +353,11 @@ export function PortfolioView() {
             {tab === 'pnl' && <RecentPnl rows={inWindow} m={m} />}
             {tab === 'activity' && <Activity trades={windowTrades} m={m} showWallet={!acc && accounts.length > 1} />}
             {tab === 'deployed' && <Deployed />}
-            {tab === 'groups' && <Groups onView={(id) => setWalletSel(`g:${id}`)} viewing={group?.id} />}
+            {tab === 'groups' && <Groups onView={(id) => setWalletSel(`g:${id}`)} onFund={(ids) => setFunding(ids)} viewing={group?.id} />}
           </div>
         </div>
       </div>
+      {funding && <FundWalletsModal initialTo={funding.length ? funding : undefined} onClose={() => setFunding(null)} />}
       {share && <ShareCard onClose={() => setShare(false)} realized={realizedWin} total={v.stats.totalPnl} totalPct={v.stats.totalPnlPct} winRate={winRate} traded={traded.length} best={best} period={period} />}
     </div>
   )
@@ -404,7 +408,7 @@ function mergePositions(list: Account[]): Record<string, Position> {
 }
 
 /** Axiom-style wallet groups: bundle wallets, see them as one, and trade from the whole group in one click. */
-function Groups({ onView, viewing }: { onView: (id: string) => void; viewing?: string }) {
+function Groups({ onView, onFund, viewing }: { onView: (id: string) => void; onFund: (walletIds: string[]) => void; viewing?: string }) {
   const groups = useWalletGroups((s) => s.groups)
   const add = useWalletGroups((s) => s.add)
   const update = useWalletGroups((s) => s.update)
@@ -501,6 +505,7 @@ function Groups({ onView, viewing }: { onView: (id: string) => void; viewing?: s
                 >
                   {trading ? '✓ Trading from group' : 'Trade from group'}
                 </button>
+                <button onClick={() => onFund(ids)} disabled={!ids.length} className="rounded-md border border-line2 px-2 py-1 text-[11px] font-semibold text-muted hover:text-ink disabled:opacity-40" title="Top up every wallet in this group">Fund</button>
                 <button onClick={() => onView(g.id)} className="rounded-md border border-line2 px-2 py-1 text-[11px] font-semibold text-muted hover:text-ink" title="Show this group's PnL, holdings and activity above">View PnL</button>
                 <button onClick={() => remove(g.id)} className="rounded p-1 text-dim hover:text-down" aria-label={`Delete ${g.name}`} title="Delete group (wallets are kept)"><X size={13} /></button>
               </span>

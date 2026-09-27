@@ -159,6 +159,17 @@ export class Room {
         return this.post(me, msg)
       case 'send':
         return this.transfer(me, msg)
+      case 'airdrop': {
+        // Recipients of a player's airdrop who'll dump what they got (on the shared market, for everyone).
+        const t = this.market.tokens.find((x) => x.id === msg.tokenId) as NetToken | undefined
+        if (!t || t.creatorId !== playerId || !Array.isArray(msg.queue)) return
+        const tick = this.market.tick
+        const queue = msg.queue.slice(0, 200).filter((q) => q && q.side === 'sell' && q.qty! > 0 && q.qty! < 1e12).map((q) => ({
+          tokenId: t.id, atTick: Math.min(tick + 3600, Math.max(tick + 1, Math.round(+q.atTick || 0))), usd: 0, wallet: String(q.wallet ?? '').slice(0, 24), side: 'sell' as const, qty: +q.qty!,
+        }))
+        this.market = { ...this.market, shillQueue: [...(this.market.shillQueue ?? []), ...queue] }
+        return
+      }
       case 'chat': {
         const text = msg.text.trim().slice(0, 200)
         if (text) this.broadcast({ t: 'chat', from: playerId, name: me.info.name, avatar: me.info.avatar, text, time: Date.now() })

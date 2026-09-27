@@ -464,6 +464,7 @@ export interface LaunchRecord {
   linkedWallets?: string[] // side wallets sleuths have tied to the dev
   bundleWallets?: number
   bot?: VolumeBot
+  airdropped?: { qty: number; wallets: number; count: number } // everything you've airdropped of this coin
 }
 
 export interface MarketState {
@@ -481,15 +482,16 @@ export interface MarketState {
   /** classic = fast-forward clock (6s per tick) and regime-driven prices; realistic = real-time clock and
    *  order-flow-driven pump.fun coins with real launch rates and trade sizes. */
   engine?: MarketEngine
-  /** Buys from people who read a player's call, landing over the next few seconds. */
-  shillQueue?: { tokenId: string; atTick: number; usd: number; wallet: string }[]
+  /** Buys from people who read a player's call, landing over the next few seconds; also airdrop recipients
+   *  dumping what a dev gave them (`side: 'sell'`, `qty` tokens). */
+  shillQueue?: { tokenId: string; atTick: number; usd: number; wallet: string; side?: 'sell'; qty?: number }[]
 }
 
 export type MarketEngine = 'classic' | 'realistic'
 
 export type EventKind =
   | 'trending' | 'whale' | 'momentum' | 'liquidity' | 'panic' | 'viral' | 'volatility'
-  | 'smartmoney' | 'devsell' | 'kol' | 'graduation' | 'rug' | 'launch' | 'marketup' | 'marketdown' | 'meta' | 'cook' | 'bundle' | 'wash'
+  | 'smartmoney' | 'devsell' | 'kol' | 'graduation' | 'rug' | 'launch' | 'marketup' | 'marketdown' | 'meta' | 'cook' | 'bundle' | 'wash' | 'airdrop'
 
 export interface MarketEvent {
   id: number

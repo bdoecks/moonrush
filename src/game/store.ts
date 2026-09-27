@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { SocialProfile, CashbackState, SniperTask, Trade, VolumeBot, Chain, Challenge, CookSpec, CopyConfig, GameMode, LaunchRecord, MarketEvent, MarketState, Player, Portfolio, Profile, RunStatus, Settings, PriceAlert, RewardClaim, RewardsState, SimWallet, SocialPost, Toast, Token, TrackerSettings, WalletAction, WalletActionKind, WalletLabel } from '../types'
-import { Rng } from '../utils/rng'
+import { clamp, Rng } from '../utils/rng'
 import { fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { fakeAddress } from '../utils/address'
 import { playSfx, type Sfx } from '../utils/sound'
@@ -9,11 +9,11 @@ import { createChallenges, evaluateChallenges, type ChallengeContext } from './c
 import { rollEvents } from './eventEngine'
 import { createRivals, tickRivals } from './leaderboardEngine'
 import { freshSeason, isRanked, placementPoints, seasonNumber, tierFor, type SeasonState } from './season'
-import { candleStore, COOK_FEE, cookToken, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, tickMarket, walletName } from './marketEngine'
-import { BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
+import { candleStore, COOK_FEE, cookToken, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, SUPPLY, tickMarket, walletName } from './marketEngine'
+import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
 import { lengthTicks, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS, type RoundLength } from './progression'
-import { accountOf, activeAccounts, commitView, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf, withAccount } from './accounts'
+import { accountOf, activeAccounts, aggregate, commitView, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf, withAccount } from './accounts'
 import { emptyBalances, executeBuy, executeSell, nativePrice, swap, type Asset } from './tradingEngine'
 import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
@@ -266,6 +266,8 @@ export interface GameState {
   updateCopy: (id: string, patch: Partial<CopyConfig>) => void
   stopCopy: (id: string, sellAll: boolean) => void
   toggleTrackWallet: (walletId: string) => void
+  /** Give part of your dev bag away to `wallets` recipients (existing holders or fresh wallets). */
+  airdrop: (tokenId: string, pct: number, wallets: number, target: AirdropTarget) => boolean
   openWallet: (walletId: string | null) => void
   toggleFollowAccount: (accountId: string) => void
   setWalletLabel: (walletId: string, patch: Partial<WalletLabel>) => void
@@ -292,6 +294,8 @@ export interface GameState {
   deleteWallet: (id: string) => boolean
   setActiveWallets: (ids: string[]) => void
   transferNative: (fromId: string, toId: string, chain: Chain, amount: number) => boolean
+  /** Put the same amount of a chain coin into several wallets: swapped from the USD bank (`amountEach` in USD) or sent from one wallet (in coin). Returns how many got funded. */
+  fundWallets: (source: 'usd' | string, toIds: string[], chain: Chain, amountEach: number) => number
   /** Buy using an amount of the token's chain coin (e.g. 0.5 SOL). */
   buyNative: (amount: number, tokenId?: string, slot?: number) => boolean
   /** Start, retune or stop the volume bot on one of your launches. */
@@ -1698,6 +1702,56 @@ export const useGame = create<GameState>()((set, get) => {
       persist()
       return true
     },
+    fundWallets: (source, toIds, chain, amountEach) => {
+      const s = get()
+      if (s.runStatus !== 'running') {
+        s.notify({ title: 'ROUND NOT ACTIVE', body: 'Start a round to fund wallets', tone: 'warn', icon: '⏸' })
+        return 0
+      }
+      const targets = toIds.filter((id) => id !== source && accountOf(s.portfolio, id))
+      if (!targets.length || !(amountEach > 0)) return 0
+      let portfolio = s.portfolio
+      let done = 0
+      let got = 0
+      const errors: string[] = []
+      for (const id of targets) {
+        if (source === 'usd') {
+          // Swap from the USD bank straight into that wallet.
+          const r = withAccount(portfolio, id, (view) => swap(view, s.market, 'usd', chain, amountEach))
+          if (!r.res.ok) {
+            errors.push(r.res.error ?? 'swap failed')
+            break
+          }
+          portfolio = r.portfolio
+          got += r.res.received
+        } else {
+          const from = accountOf(portfolio, source)
+          if (!from || from.balances[chain] < amountEach - 1e-12) {
+            errors.push(`${from?.name ?? 'Source'} ran out of ${CHAINS[chain].native}`)
+            break
+          }
+          const amt = Math.min(amountEach, from.balances[chain])
+          const accounts = (portfolio.accounts ?? []).map((a) =>
+            a.id === source
+              ? { ...a, balances: { ...a.balances, [chain]: a.balances[chain] - amt } }
+              : a.id === id
+                ? { ...a, balances: { ...a.balances, [chain]: a.balances[chain] + amt }, fundedBy: { ...(a.fundedBy ?? {}), [source]: s.market.tick } }
+                : a,
+          )
+          portfolio = ensureAccounts({ ...portfolio, accounts })
+          got += amt
+        }
+        done++
+      }
+      if (done) {
+        set({ portfolio })
+        persist()
+      }
+      const src = source === 'usd' ? 'USD bank' : `${accountOf(s.portfolio, source)?.emoji ?? ''} ${accountOf(s.portfolio, source)?.name ?? ''}`
+      if (done) s.notify({ title: `FUNDED ${done} WALLET${done > 1 ? 'S' : ''}`, body: `${fmtNative(got, chain)} total from ${src}${errors.length ? ` · stopped: ${errors[0]}` : ''}`, tone: errors.length ? 'warn' : 'info', icon: '💸' }, 'click')
+      else s.notify({ title: 'FUNDING FAILED', body: errors[0] ?? 'Nothing to fund', tone: 'warn', icon: '⛔' }, 'alert')
+      return done
+    },
     buyNative: (amount, tokenId, slot) => {
       const s = get()
       const id = tokenId ?? s.selectedId
@@ -1766,6 +1820,71 @@ export const useGame = create<GameState>()((set, get) => {
           ? { title: 'CALL POSTED', body: `$${t.ticker} · ${res.likes} likes · ${res.buyers ? `${res.buyers} aped 🦍` : 'nobody bit yet'}`, tone: res.buyers ? 'up' : 'info', icon: '📣', tokenId: t.id }
           : { title: 'POSTED', body: `${res.likes} likes`, tone: 'info', icon: '🐦' },
       )
+      persist()
+      return true
+    },
+    airdrop: (tokenId, pct, wallets, target) => {
+      const s = get()
+      const fail = (body: string) => {
+        s.notify({ title: 'AIRDROP FAILED', body, tone: 'warn', icon: '🪂' }, 'alert')
+        return false
+      }
+      if (s.runStatus !== 'running') return fail('Start a round first')
+      const rec = s.launches.find((r) => r.tokenId === tokenId)
+      const t = s.market.tokens.find((x) => x.id === tokenId)
+      if (!rec || !t || t.creator !== 'you') return fail('You can only airdrop coins you cooked')
+      if (t.status !== 'bonding' && t.status !== 'graduated') return fail(`$${t.ticker} is ${t.status}`)
+      const n = Math.round(clamp(wallets, 1, AIRDROP_MAX_WALLETS))
+      if (target === 'holders' && t.holders < n) return fail(`$${t.ticker} only has ${t.holders} holders. Pick fewer, or send to fresh wallets.`)
+      const devW = devSet(s.portfolio, rec)[0]
+      const acc = accountOf(s.portfolio, devW)
+      const pos = acc?.positions[tokenId]
+      // Only the dev's visible bag can be airdropped; the hidden bundle stays put.
+      const free = Math.max(0, (pos?.qty ?? 0) - (rec.bundleQty ?? 0))
+      const qty = free * clamp(pct, 0, 1)
+      if (!acc || !pos || !(qty > 0)) return fail('Your dev wallet has no tokens of this coin to give away')
+      const fee = airdropFeePerWallet(t.chain, target) * n
+      if (acc.balances[t.chain] < fee) return fail(`Needs ${fmtNative(fee, t.chain)} in your dev wallet for network fees (${n} transfers)`)
+      const rng = new Rng((s.market.seed ^ Math.imul(s.market.tick + 1, 0x2c1b3c6d) ^ n) >>> 0)
+      const plan = planAirdrop(t, qty, n, target, rng, s.market.tick, secPerTickOf(s.market))
+      // The tokens leave your bag for nothing: their cost is written off as a realized loss.
+      const frac = qty / pos.qty
+      const lost = pos.costBasis * frac
+      const left = pos.qty - qty
+      const nextPos = left > 0 ? { ...pos, qty: left, costBasis: pos.costBasis - lost, realized: pos.realized - lost } : undefined
+      const positions = { ...acc.positions }
+      if (nextPos) positions[tokenId] = nextPos
+      else delete positions[tokenId]
+      const portfolio = aggregate({
+        ...s.portfolio,
+        realized: s.portfolio.realized - lost,
+        accounts: (s.portfolio.accounts ?? []).map((a) => (a.id === devW ? { ...a, positions, balances: { ...a.balances, [t.chain]: a.balances[t.chain] - fee } } : a)),
+      })
+      const launches = s.launches.map((r) => (r.tokenId === tokenId ? { ...r, airdropped: { qty: (r.airdropped?.qty ?? 0) + qty, wallets: (r.airdropped?.wallets ?? 0) + n, count: (r.airdropped?.count ?? 0) + 1 } } : r))
+      const stake = devStake(portfolio, rec, tokenId)
+      let market = patchToken(s.market, tokenId, (x) => {
+        x.devPct = stake.devPct
+        x.bundlePct = stake.bundlePct
+        x.holders += plan.holdersAdd
+        x.top10Pct = Math.max(1, x.top10Pct - plan.top10Drop)
+        x.hype = Math.min(100, x.hype + plan.hype)
+      })
+      if (!s.online) market = { ...market, shillQueue: [...(market.shillQueue ?? []), ...plan.queue] }
+      const pctTxt = `${((qty / SUPPLY) * 100).toFixed(2)}% of supply`
+      const ev: MarketEvent = {
+        id: s.market.tick * 100 + 93, tick: s.market.tick, time: s.market.time, kind: 'airdrop', tokenId, ticker: t.ticker,
+        text: `Dev airdropped ${pctTxt} of $${t.ticker} to ${n} ${target === 'fresh' ? 'fresh wallets' : 'holders'}`, icon: '🪂', tone: 'info',
+      }
+      set({ portfolio, market, launches, events: [ev, ...s.events].slice(0, 120) })
+      if (s.online) {
+        netHooks.send?.({ t: 'airdrop', tokenId, queue: plan.queue })
+        netHooks.send?.({ t: 'event', event: ev })
+        sendTokenPatch(tokenId)
+      }
+      s.notify({
+        title: 'AIRDROP SENT', tone: 'info', icon: '🪂', tokenId,
+        body: `${pctTxt} to ${n} ${target === 'fresh' ? 'fresh wallets' : 'holders'} · fees ${fmtNative(fee, t.chain)}${plan.dumpers ? ` · watch out: ~${plan.dumpers} look like farmers` : ''}`,
+      }, 'click')
       persist()
       return true
     },

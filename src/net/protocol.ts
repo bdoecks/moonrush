@@ -65,6 +65,7 @@ export type ClientMsg =
   | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[]; addrs?: string[] }
   | { t: 'candles'; tokenId: string }
   | { t: 'chat'; text: string }
+  | { t: 'airdrop'; tokenId: string; queue: NonNullable<MarketState['shillQueue']> } // recipients of your airdrop who'll dump
   | { t: 'event'; event: MarketEvent } // something you did to your own coin (dev sells, bundle dumps)
   // Send coins to another player: to their main wallet (`to` = player id) or to any wallet address they gave you.
   | { t: 'send'; ref: number; to?: string; toAddr?: string; asset: SendAsset; amount: number; usd: number; main: boolean; fromAddr: string }

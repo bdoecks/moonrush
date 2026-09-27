@@ -1,6 +1,6 @@
 // Dev tools for tokens you cooked: a launch bundler and a volume bot. Both are fictional game mechanics that show
 // how these tactics look on-chain and why they tend to backfire: sleuths flag them, and the market punishes it.
-import type { MarketEvent, MarketState, Token, VolumeBot } from '../types'
+import type { Chain, MarketEvent, MarketState, Token, VolumeBot } from '../types'
 import { clamp, type Rng } from '../utils/rng'
 import { tradeFee } from './tradingEngine'
 import { addWin, getWin } from './windows'
@@ -100,6 +100,47 @@ export function runBotTick(t: Token, bot: VolumeBot, m: MarketState, rng: Rng): 
     }
   }
   return { vol, cost, event }
+}
+
+// ─── Airdrop ─────────────────────────────────────────────────────────────────
+export type AirdropTarget = 'holders' | 'fresh'
+export const AIRDROP_MAX_WALLETS = 200
+/**
+ * Network cost per recipient, in the chain's coin. On Solana a fresh wallet needs a token account opened for it
+ * (~0.002 SOL rent); wallets that already hold the coin only cost the tx fee. EVM chains pay gas per transfer.
+ */
+export const airdropFeePerWallet = (chain: Chain, target: AirdropTarget) => (chain === 'sol' ? (target === 'fresh' ? 0.00204 : 0.00002) : chain === 'bsc' ? 0.00005 : 0.000012)
+
+export interface AirdropPlan {
+  queue: NonNullable<MarketState['shillQueue']> // recipients who dump, and when
+  dumpers: number
+  holdersAdd: number
+  hype: number
+  top10Drop: number // percentage points the top-10 share falls
+}
+
+/**
+ * Dev gives `qty` tokens away across `wallets` recipients. Existing holders mostly keep it (goodwill, a hype bump);
+ * fresh wallets pump the holder count but many are airdrop farmers who dump within minutes.
+ */
+export function planAirdrop(t: Token, qty: number, wallets: number, target: AirdropTarget, rng: Rng, tick: number, secPerTick: number): AirdropPlan {
+  const share = qty / Math.max(1, wallets)
+  const supplyPct = (qty / SUPPLY) * 100
+  const dumpChance = target === 'fresh' ? 0.55 : 0.22
+  const queue: AirdropPlan['queue'] = []
+  for (let i = 0; i < wallets; i++) {
+    if (!rng.chance(dumpChance)) continue
+    const delaySec = 15 + Math.pow(rng.next(), 1.6) * 480 // most dump in the first couple of minutes
+    queue.push({ tokenId: t.id, atTick: tick + Math.max(1, Math.round(delaySec / secPerTick)), usd: 0, wallet: walletName(rng), side: 'sell', qty: share * (0.6 + rng.next() * 0.4) })
+  }
+  const reach = Math.log2(1 + wallets)
+  return {
+    queue,
+    dumpers: queue.length,
+    holdersAdd: target === 'fresh' ? wallets : 0,
+    hype: Math.min(25, (target === 'holders' ? 1.6 : 1.1) * reach + supplyPct * 0.8),
+    top10Drop: Math.min(t.top10Pct * 0.5, supplyPct * (target === 'fresh' ? 0.9 : 0.4)),
+  }
 }
 
 /** Your hidden bundle share and your visible dev share, given your total bag and the bundled part of it. */

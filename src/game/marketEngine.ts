@@ -898,6 +898,22 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
       const t = tokens.find((x) => x.id === q.tokenId)
       if (!t || (t.status !== 'bonding' && t.status !== 'graduated')) continue
       const prev = t.price
+      if (q.side === 'sell') {
+        // An airdrop recipient cashing out what the dev gave them.
+        const qty = Math.max(0, q.qty ?? 0)
+        if (!(qty > 0)) continue
+        const usd = qty * t.price
+        t.price = Math.max(1e-13, quoteSell(t, qty).newPrice)
+        t.mcap = t.price * SUPPLY
+        touchCandles(t, m.time, prev, usd, native)
+        t.volume += usd
+        t.sells += 1
+        t.win = addWin(getWin(t, m.time), usd, 0, 1)
+        t.holders = Math.max(1, t.holders - 1)
+        addTape(m, t, { time: m.time, side: 'sell', usd, price: t.price, wallet: q.wallet })
+        if (t.status === 'bonding') syncCurve(t, nativeUsdOf(native, t.chain))
+        continue
+      }
       t.price = quoteBuy(t, q.usd).newPrice
       t.mcap = t.price * SUPPLY
       t.ath = Math.max(t.ath, t.mcap)
