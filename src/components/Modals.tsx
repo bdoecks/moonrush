@@ -230,6 +230,9 @@ function SettingsModal() {
         <Row label="Notifications" hint="All pop-up toasts (trades, alerts, events)"><Toggle label="Notifications" on={settings.notifications} onChange={(v) => update({ notifications: v })} /></Row>
         <Row label="Market event pop-ups" hint="Parabolic runs, whales, KOLs, market moves. Off still warns if your bag rugs"><Toggle label="Market event pop-ups" on={settings.eventToasts !== false} onChange={(v) => update({ eventToasts: v })} /></Row>
         <Row label="Auto-swap when short" hint="Top up SOL / BNB / ETH from USD if a buy needs more"><Toggle label="Auto-swap" on={settings.autoSwap} onChange={(v) => update({ autoSwap: v })} /></Row>
+        <Row label="Show portfolio in" hint="Top bar: portfolio, P&L, realized / unrealized">
+          <Segmented value={settings.portfolioUnit ?? 'usd'} onChange={(v) => update({ portfolioUnit: v })} options={[{ value: 'usd', label: 'USD' }, { value: 'sol', label: 'SOL' }, { value: 'bsc', label: 'BNB' }, { value: 'hood', label: 'ETH' }]} />
+        </Row>
         <Row label="Chart style">
           <Segmented value={settings.chartStyle} onChange={(v) => update({ chartStyle: v })} options={[{ value: 'candles', label: 'Candles' }, { value: 'line', label: 'Line' }]} />
         </Row>

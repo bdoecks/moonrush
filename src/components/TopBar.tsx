@@ -8,12 +8,15 @@ import { useDockPrefs } from './tracker/TrackerDock'
 import { useValuation } from '../hooks/useDerived'
 import { levelFromXp, MODES, titleFor } from '../game/progression'
 import { selectSpeed, useGame, type View } from '../game/store'
+import { nativePrice } from '../game/tradingEngine'
 import { fmtClock, fmtUsd, toneClass } from '../utils/format'
 import { FlashNum } from './ui'
 import { WalletChip } from './chain'
 import { WalletSelector } from './wallets'
 import { GlobalSearch } from './GlobalSearch'
 import { RoomChip } from './Multiplayer'
+
+const UNITS = ['usd', 'sol', 'bsc', 'hood'] as const
 
 export function Logo({ small }: { small?: boolean }) {
   return (
@@ -165,6 +168,15 @@ export function TopBar() {
   const sound = useGame((s) => s.settings.sound)
   const updateSettings = useGame((s) => s.updateSettings)
   const pnl = v.stats.totalPnl
+  // Show the top-bar numbers in USD or in a chain coin (Settings, or tap "Portfolio" to cycle).
+  const unit = useGame((s) => s.settings.portfolioUnit ?? 'usd')
+  const market = useGame((s) => s.market)
+  const money = (usd: number, signed = false) => {
+    const sign = signed && usd >= 0 ? '+' : ''
+    if (unit === 'usd') return sign + fmtUsd(usd)
+    return sign + fmtNative(usd / nativePrice(market, unit), unit)
+  }
+  const cycleUnit = () => updateSettings({ portfolioUnit: UNITS[(UNITS.indexOf(unit) + 1) % UNITS.length] })
   const rewardReady = useGame((s) => s.rewards.commissionPending >= 0.01 || s.rewards.checkIn.lastDate !== new Date().toDateString())
 
   return (
@@ -180,16 +192,16 @@ export function TopBar() {
 
       <div className="ml-auto lg:ml-3 flex items-center gap-4 whitespace-nowrap">
         <div className="text-right">
-          <div className="text-[9px] uppercase tracking-wider text-dim">Portfolio</div>
-          <FlashNum value={Math.round(v.equity)} className="text-[14px] font-bold">{fmtUsd(v.equity)}</FlashNum>
+          <button onClick={cycleUnit} className="block w-full text-right text-[9px] uppercase tracking-wider text-dim hover:text-ink" title="Show in USD / SOL / BNB / ETH">Portfolio · {unit === 'usd' ? 'USD' : CHAINS[unit].native}</button>
+          <FlashNum value={Math.round(v.equity)} className="text-[14px] font-bold">{money(v.equity)}</FlashNum>
           <div className={clsx('num text-[10px] leading-none sm:hidden', toneClass(pnl))}>
-            {pnl >= 0 ? '+' : ''}{fmtUsd(pnl)} ({pnl >= 0 ? '+' : ''}{(v.stats.totalPnlPct * 100).toFixed(2)}%)
+            {money(pnl, true)} ({pnl >= 0 ? '+' : ''}{(v.stats.totalPnlPct * 100).toFixed(2)}%)
           </div>
         </div>
         <div className="hidden sm:block text-right">
           <div className="text-[9px] uppercase tracking-wider text-dim">Total P&amp;L</div>
           <div className={clsx('num text-[12px] font-semibold', toneClass(pnl))}>
-            {pnl >= 0 ? '+' : ''}{fmtUsd(pnl)} <span className="text-[10px] opacity-80">({pnl >= 0 ? '+' : ''}{(v.stats.totalPnlPct * 100).toFixed(2)}%)</span>
+            {money(pnl, true)} <span className="text-[10px] opacity-80">({pnl >= 0 ? '+' : ''}{(v.stats.totalPnlPct * 100).toFixed(2)}%)</span>
           </div>
         </div>
         <WalletSelector compact className="hidden sm:block" />
@@ -198,11 +210,11 @@ export function TopBar() {
         </div>
         <div className="hidden xl:block text-right">
           <div className="text-[9px] uppercase tracking-wider text-dim">Unrealized</div>
-          <div className={clsx('num text-[12px]', toneClass(v.unrealized))}>{v.unrealized >= 0 ? '+' : ''}{fmtUsd(v.unrealized)}</div>
+          <div className={clsx('num text-[12px]', toneClass(v.unrealized))}>{money(v.unrealized, true)}</div>
         </div>
         <div className="hidden xl:block text-right">
           <div className="text-[9px] uppercase tracking-wider text-dim">Realized</div>
-          <div className={clsx('num text-[12px]', toneClass(v.portfolio.realized))}>{v.portfolio.realized >= 0 ? '+' : ''}{fmtUsd(v.portfolio.realized)}</div>
+          <div className={clsx('num text-[12px]', toneClass(v.portfolio.realized))}>{money(v.portfolio.realized, true)}</div>
         </div>
         <CashbackChip />
       </div>
