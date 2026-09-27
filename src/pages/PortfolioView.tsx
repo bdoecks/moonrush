@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { Copy, Search, Share2, X } from 'lucide-react'
+import { Check as CheckIcon, Copy, Search, Share2, X } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ChainBadge, WalletChip } from '../components/chain'
@@ -9,14 +9,16 @@ import { useTokenMap, useValuation } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK, SUPPLY } from '../game/marketEngine'
 import { levelFromXp, MODES, titleFor } from '../game/progression'
 import { useGame } from '../game/store'
-import type { Chain, Token, Trade } from '../types'
+import { GROUP_EMOJIS, useWalletGroups } from '../game/walletGroups'
+import { accountValue } from '../game/accounts'
+import type { Account, Chain, Position, Token, Trade } from '../types'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
 import { load, save } from '../utils/storage'
 import { fakeAddress } from '../utils/address'
 import { fmtAge, fmtCompact, fmtNum, fmtPct, fmtPrice, fmtTime, fmtUsd, toneClass } from '../utils/format'
 
 type Period = '1H' | '24H' | 'ALL'
-type Tab = 'holding' | 'pnl' | 'activity' | 'deployed'
+type Tab = 'holding' | 'pnl' | 'activity' | 'deployed' | 'groups'
 const PERIOD_SEC: Record<Period, number> = { '1H': 3600, '24H': 86400, ALL: Infinity } // converted with the market's clock when used
 
 type Unit = 'usd' | 'native'
@@ -120,9 +122,16 @@ export function PortfolioView() {
   const [walletSel, setWalletSel] = useState<string>('all')
   const accounts = p.accounts ?? []
   const firstId = accounts[0]?.id
+  const groups = useWalletGroups((s) => s.groups)
+  const group = walletSel.startsWith('g:') ? groups.find((g) => `g:${g.id}` === walletSel) : undefined
+  const groupAccs = useMemo(() => (group ? accounts.filter((a) => group.walletIds.includes(a.id)) : []), [group, accounts])
   const acc = accounts.find((a) => a.id === walletSel)
-  const scopeTrades = useMemo(() => (acc ? p.trades.filter((t) => (t.walletId ?? firstId) === acc.id) : p.trades), [acc, p.trades, firstId])
-  const scopePositions = acc ? acc.positions : p.positions
+  const scopeTrades = useMemo(() => {
+    if (acc) return p.trades.filter((t) => (t.walletId ?? firstId) === acc.id)
+    if (group) return p.trades.filter((t) => groupAccs.some((a) => a.id === (t.walletId ?? firstId)))
+    return p.trades
+  }, [acc, group, groupAccs, p.trades, firstId])
+  const scopePositions = useMemo(() => (acc ? acc.positions : group ? mergePositions(groupAccs) : p.positions), [acc, group, groupAccs, p.positions])
   const fromTick = period === 'ALL' ? -Infinity : tick - PERIOD_SEC[period] / SIM_SEC_PER_TICK
   const px = (c: Chain) => native?.[c]?.price ?? CHAINS[c].basePrice
   const m: Money = (usd, chain, signed) => {
@@ -135,7 +144,7 @@ export function PortfolioView() {
   const traded = inWindow.filter((r) => r.sells > 0)
   const realizedWin = inWindow.reduce((a, r) => a + r.realizedInWindow, 0)
   const unrealized = rows.reduce((a, r) => a + r.unrealized, 0)
-  const totalPnl = acc ? rows.reduce((a, r) => a + r.total, 0) : v.stats.totalPnl
+  const totalPnl = acc || group ? rows.reduce((a, r) => a + r.total, 0) : v.stats.totalPnl
   // Multi-chain totals in coin mode: one figure per chain coin.
   const byChain = (pick: (r: TokenPnl) => number, list = rows) => {
     const sums: Partial<Record<Chain, number>> = {}
@@ -189,8 +198,13 @@ export function PortfolioView() {
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-dim">Balance{acc ? ` · ${acc.emoji} ${acc.name}` : ''}</div>
-          {acc ? (
+          <div className="text-[10px] text-dim">Balance{acc ? ` · ${acc.emoji} ${acc.name}` : group ? ` · ${group.emoji} ${group.name} (${groupAccs.length} wallets)` : ''}</div>
+          {group ? (
+            <>
+              <div className="num text-[22px] font-bold leading-none">{fmtUsd(rows.reduce((a, r) => a + r.value, 0) + CHAIN_IDS.reduce((a, c) => a + groupAccs.reduce((s, x) => s + x.balances[c], 0) * px(c), 0))}</div>
+              <div className="num mt-0.5 text-[11px] text-muted">{CHAIN_IDS.map((c) => fmtNative(groupAccs.reduce((s, x) => s + x.balances[c], 0), c)).join(' · ')} · bags {fmtUsd(rows.reduce((a, r) => a + r.value, 0))}</div>
+            </>
+          ) : acc ? (
             <>
               <div className="num text-[22px] font-bold leading-none">{fmtUsd(rows.reduce((a, r) => a + r.value, 0) + CHAIN_IDS.reduce((a, c) => a + acc.balances[c] * px(c), 0))}</div>
               <div className="num mt-0.5 text-[11px] text-muted">{CHAIN_IDS.map((c) => fmtNative(acc.balances[c], c)).join(' · ')} · bags {fmtUsd(rows.reduce((a, r) => a + r.value, 0))}</div>
@@ -225,6 +239,21 @@ export function PortfolioView() {
               {a.name}
             </button>
           ))}
+          {groups.length > 0 && <span className="mx-1 h-4 w-px shrink-0 bg-line2" />}
+          {groups.map((g) => (
+            <button
+              key={g.id}
+              onClick={() => setWalletSel(`g:${g.id}`)}
+              aria-pressed={walletSel === `g:${g.id}`}
+              title={`Group: ${accounts.filter((a) => g.walletIds.includes(a.id)).map((a) => a.name).join(', ') || 'no wallets'}`}
+              className={clsx('flex shrink-0 items-center gap-1 rounded-md border border-dashed px-2 py-0.5 text-[11px] font-semibold', walletSel === `g:${g.id}` ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')}
+            >
+              <span>{g.emoji}</span>
+              {g.name}
+              <span className="num text-[9px] text-dim">{accounts.filter((a) => g.walletIds.includes(a.id)).length}</span>
+            </button>
+          ))}
+          <button onClick={() => setTab('groups')} className="ml-1 shrink-0 text-[11px] text-dim hover:text-ink">Groups…</button>
           <button onClick={() => setWalletsOpen(true)} className="ml-1 shrink-0 text-[11px] text-dim hover:text-ink">Manage…</button>
         </div>
       )}
@@ -238,7 +267,7 @@ export function PortfolioView() {
             headline={
               <div className={clsx('num font-bold leading-tight', toneClass(realizedWin), unit === 'native' ? 'text-[20px]' : 'text-[28px]')}>
                 {total(realizedWin, (r) => r.realizedInWindow, inWindow)}
-                {unit === 'usd' && !acc && <span className="ml-2 text-[14px]">{fmtPct(realizedWin / p.startBalance, 2)}</span>}
+                {unit === 'usd' && !acc && !group && <span className="ml-2 text-[14px]">{fmtPct(realizedWin / p.startBalance, 2)}</span>}
               </div>
             }
             trades={scopeTrades}
@@ -248,7 +277,7 @@ export function PortfolioView() {
           <div className="rounded-md border border-line bg-panel p-3">
             <div className="mb-2 text-[12px] font-bold">Analysis</div>
             <div className="space-y-2 text-[12px]">
-              <Line label="Total PnL"><span className={toneClass(totalPnl)}>{total(totalPnl, (r) => r.total)}{unit === 'usd' && !acc && ` (${fmtPct(v.stats.totalPnlPct)})`}</span></Line>
+              <Line label="Total PnL"><span className={toneClass(totalPnl)}>{total(totalPnl, (r) => r.total)}{unit === 'usd' && !acc && !group && ` (${fmtPct(v.stats.totalPnlPct)})`}</span></Line>
               <Line label="Unrealized PnL"><span className={toneClass(unrealized)}>{total(unrealized, (r) => r.unrealized)}</span></Line>
               <Line label="Win rate"><span className={winRate >= 0.5 ? 'text-up' : 'text-ink'}>{traded.length ? `${(winRate * 100).toFixed(1)}%` : '--'}</span></Line>
               <Line label="TXs"><span className="text-up">{buysN}</span>/<span className="text-down">{sellsN}</span></Line>
@@ -308,6 +337,7 @@ export function PortfolioView() {
               ['pnl', `Recent PnL ${inWindow.length}`],
               ['activity', `Activity ${windowTrades.length}`],
               ['deployed', `Deployed ${launches.length}`],
+              ['groups', `Wallet groups ${groups.length}`],
             ] as [Tab, string][]).map(([id, label]) => (
               <button key={id} onClick={() => setTab(id)} className={clsx('relative h-10 shrink-0 text-[13px] font-semibold', tab === id ? 'text-ink' : 'text-dim hover:text-muted')}>
                 {label}
@@ -316,10 +346,11 @@ export function PortfolioView() {
             ))}
           </div>
           <div className="max-h-[560px] overflow-auto">
-            {tab === 'holding' && <Holding rows={rows.filter((r) => r.qty > 0)} equity={v.equity} m={m} positions={scopePositions} scope={acc ? acc.id : 'all'} />}
+            {tab === 'holding' && <Holding rows={rows.filter((r) => r.qty > 0)} equity={v.equity} m={m} positions={scopePositions} scope={acc ? acc.id : group ? groupAccs.map((a) => a.id) : 'all'} />}
             {tab === 'pnl' && <RecentPnl rows={inWindow} m={m} />}
             {tab === 'activity' && <Activity trades={windowTrades} m={m} showWallet={!acc && accounts.length > 1} />}
             {tab === 'deployed' && <Deployed />}
+            {tab === 'groups' && <Groups onView={(id) => setWalletSel(`g:${id}`)} viewing={group?.id} />}
           </div>
         </div>
       </div>
@@ -351,6 +382,159 @@ function TokenCell({ r }: { r: TokenPnl }) {
         <span className="num block text-[10px] text-dim">{r.t ? `${fmtCompact(r.t.mcap)} MC · ${fmtAge(now - r.t.createdAt)}` : 'delisted'}{r.t?.status === 'rugged' && <span className="ml-1 font-bold text-down">RUGGED</span>}</span>
       </span>
     </button>
+  )
+}
+
+// ─── Wallet groups ───────────────────────────────────────────────────────────
+
+/** All the bags of several wallets, added up per coin. */
+function mergePositions(list: Account[]): Record<string, Position> {
+  const out: Record<string, Position> = {}
+  for (const a of list) {
+    for (const [id, pos] of Object.entries(a.positions)) {
+      const o = out[id]
+      if (!o) out[id] = { ...pos }
+      else {
+        const qty = o.qty + pos.qty
+        out[id] = { ...o, qty, costBasis: o.costBasis + pos.costBasis, avgEntry: qty > 0 ? (o.costBasis + pos.costBasis) / qty : 0, openedAt: Math.min(o.openedAt, pos.openedAt), realized: o.realized + pos.realized }
+      }
+    }
+  }
+  return out
+}
+
+/** Axiom-style wallet groups: bundle wallets, see them as one, and trade from the whole group in one click. */
+function Groups({ onView, viewing }: { onView: (id: string) => void; viewing?: string }) {
+  const groups = useWalletGroups((s) => s.groups)
+  const add = useWalletGroups((s) => s.add)
+  const update = useWalletGroups((s) => s.update)
+  const remove = useWalletGroups((s) => s.remove)
+  const accounts = useGame((s) => s.portfolio.accounts) ?? []
+  const active = useGame((s) => s.portfolio.active)
+  const trades = useGame((s) => s.portfolio.trades)
+  const market = useGame((s) => s.market)
+  const setActive = useGame((s) => s.setActiveWallets)
+  const setWalletsOpen = useGame((s) => s.setWalletsOpen)
+  const notify = useGame((s) => s.notify)
+  const [name, setName] = useState('')
+  const [emoji, setEmoji] = useState(GROUP_EMOJIS[0])
+  const [pick, setPick] = useState<string[]>([])
+  const firstId = accounts[0]?.id
+  const price = useMemo(() => new Map(market.tokens.map((t) => [t.id, t.price])), [market.tokens])
+  const nativeUsd = (c: Chain) => market.native?.[c]?.price ?? CHAINS[c].basePrice
+  const valueOf = (a: Account) => accountValue(a, (id) => price.get(id) ?? 0, nativeUsd)
+  const activeIds = active ?? (firstId ? [firstId] : [])
+
+  const create = () => {
+    if (!pick.length) return notify({ title: 'WALLET GROUP', body: 'Pick at least one wallet for the group', tone: 'warn', icon: '📁' })
+    add(name, emoji, pick)
+    notify({ title: 'GROUP CREATED', body: `${emoji} ${name.trim() || 'New group'} · ${pick.length} wallet${pick.length > 1 ? 's' : ''}`, tone: 'up', icon: '📁' }, 'click')
+    setName('')
+    setPick([])
+    setEmoji(GROUP_EMOJIS[(groups.length + 1) % GROUP_EMOJIS.length])
+  }
+
+  if (accounts.length < 2) {
+    return (
+      <div className="p-6 text-center text-[12px] text-dim">
+        <div className="mb-1 text-[22px]">📁</div>
+        Groups bundle several wallets together. You only have one wallet right now.
+        <div className="mt-2"><button onClick={() => setWalletsOpen(true)} className="rounded-md border border-accent/50 bg-accent/10 px-3 py-1 text-[12px] font-semibold text-accent hover:bg-accent/20">Create more wallets</button></div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3 p-3 text-[12px]">
+      {/* New group */}
+      <div className="rounded-md border border-line bg-bg/50 p-3">
+        <div className="mb-2 text-[12px] font-bold">New group</div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <select value={emoji} onChange={(e) => setEmoji(e.target.value)} className="h-8 rounded-md border border-line2 bg-bg text-[14px]" aria-label="Group icon">
+            {GROUP_EMOJIS.map((em) => <option key={em}>{em}</option>)}
+          </select>
+          <input value={name} maxLength={20} onChange={(e) => setName(e.target.value)} placeholder="Group name (e.g. Snipers, Stealth, Bundle)" className="h-8 min-w-0 flex-1 rounded-md border border-line2 bg-bg px-2 outline-none focus:border-accent/60" />
+          <button onClick={create} className="h-8 rounded-md bg-accent px-3 text-[12px] font-bold text-accent-ink hover:brightness-110">Create</button>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {accounts.map((a) => {
+            const on = pick.includes(a.id)
+            return (
+              <button key={a.id} onClick={() => setPick(on ? pick.filter((x) => x !== a.id) : [...pick, a.id])} aria-pressed={on} className={clsx('flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold', on ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')}>
+                {on && <CheckIcon size={10} />}{a.emoji} {a.name}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {groups.length === 0 && <EmptyState icon="📁" title="No groups yet" hint="Make one above, then trade from the whole group with one click." />}
+
+      {groups.map((g) => {
+        const members = accounts.filter((a) => g.walletIds.includes(a.id))
+        const ids = members.map((a) => a.id)
+        const value = members.reduce((s, a) => s + valueOf(a), 0)
+        const pos = mergePositions(members)
+        const bags = Object.values(pos).reduce((s, p) => s + p.qty * (price.get(p.tokenId) ?? 0), 0)
+        const unreal = bags - Object.values(pos).reduce((s, p) => s + p.costBasis, 0)
+        const mine = trades.filter((t) => ids.includes(t.walletId ?? firstId ?? ''))
+        const realized = mine.reduce((s, t) => s + (t.pnl ?? 0), 0)
+        const trading = ids.length > 0 && ids.length === activeIds.length && ids.every((id) => activeIds.includes(id))
+        return (
+          <div key={g.id} className={clsx('rounded-md border p-3', viewing === g.id ? 'border-accent/50 bg-accent/5' : 'border-line')}>
+            <div className="flex flex-wrap items-center gap-2">
+              <select value={g.emoji} onChange={(e) => update(g.id, { emoji: e.target.value })} className="h-7 rounded border border-line2 bg-bg text-[14px]" aria-label="Group icon">
+                {GROUP_EMOJIS.map((em) => <option key={em}>{em}</option>)}
+              </select>
+              <input defaultValue={g.name} maxLength={20} onBlur={(e) => e.target.value.trim() && update(g.id, { name: e.target.value.trim() })} className="h-7 w-40 rounded border border-transparent bg-transparent px-1 font-bold outline-none hover:border-line2 focus:border-accent/60" aria-label="Group name" />
+              <span className="text-[10px] text-dim">{members.length} wallet{members.length === 1 ? '' : 's'}</span>
+              <span className="ml-auto flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    if (!ids.length) return
+                    setActive(ids)
+                    notify({ title: 'TRADING FROM GROUP', body: `${g.emoji} ${g.name}: buys split across ${ids.length} wallet${ids.length > 1 ? 's' : ''}`, tone: 'info', icon: '📁' }, 'click')
+                  }}
+                  disabled={!ids.length}
+                  className={clsx('rounded-md border px-2 py-1 text-[11px] font-semibold disabled:opacity-40', trading ? 'border-accent bg-accent text-accent-ink' : 'border-accent/50 bg-accent/10 text-accent hover:bg-accent/20')}
+                  title="Tick exactly these wallets in the trade panel"
+                >
+                  {trading ? '✓ Trading from group' : 'Trade from group'}
+                </button>
+                <button onClick={() => onView(g.id)} className="rounded-md border border-line2 px-2 py-1 text-[11px] font-semibold text-muted hover:text-ink" title="Show this group's PnL, holdings and activity above">View PnL</button>
+                <button onClick={() => remove(g.id)} className="rounded p-1 text-dim hover:text-down" aria-label={`Delete ${g.name}`} title="Delete group (wallets are kept)"><X size={13} /></button>
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Mini label="Value">{fmtUsd(value)}</Mini>
+              <Mini label="Bags">{fmtUsd(bags)}</Mini>
+              <Mini label="Unrealized"><span className={toneClass(unreal)}>{unreal >= 0 ? '+' : '-'}{fmtUsd(Math.abs(unreal))}</span></Mini>
+              <Mini label="Realized"><span className={toneClass(realized)}>{realized >= 0 ? '+' : '-'}{fmtUsd(Math.abs(realized))}</span> <span className="text-[10px] font-normal text-dim">· {mine.length} TXs</span></Mini>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1">
+              {accounts.map((a) => {
+                const on = g.walletIds.includes(a.id)
+                return (
+                  <button key={a.id} onClick={() => update(g.id, { walletIds: on ? g.walletIds.filter((x) => x !== a.id) : [...g.walletIds, a.id] })} aria-pressed={on} title={on ? 'Remove from group' : 'Add to group'} className={clsx('flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px]', on ? 'border-line2 bg-raise font-semibold text-ink' : 'border-dashed border-line2 text-dim hover:text-muted')}>
+                    {a.emoji} {a.name}
+                    {on && <span className="num text-[10px] text-muted">{fmtUsd(valueOf(a), 0)}</span>}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function Mini({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="rounded-md border border-line bg-bg px-2 py-1.5">
+      <div className="text-[9px] uppercase tracking-wider text-dim">{label}</div>
+      <div className="num text-[13px] font-bold">{children}</div>
+    </div>
   )
 }
 
@@ -419,7 +603,7 @@ function Check({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =>
 
 type HoldKey = 'value' | 'share' | 'unrealized' | 'realized' | 'total' | 'held'
 
-function Holding({ rows, equity, m, positions, scope }: { rows: TokenPnl[]; equity: number; m: Money; positions: Record<string, { qty: number; avgEntry: number; openedAt: number }>; scope: string }) {
+function Holding({ rows, equity, m, positions, scope }: { rows: TokenPnl[]; equity: number; m: Money; positions: Record<string, { qty: number; avgEntry: number; openedAt: number }>; scope: string | string[] }) {
   const tick = useGame((s) => s.market.tick)
   const sell = useGame((s) => s.sell)
   const f = useTableFilter()

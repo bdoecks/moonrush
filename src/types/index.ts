@@ -619,6 +619,7 @@ export interface Settings {
   compact: boolean
   chartStyle: ChartStyle
   notifications: boolean
+  eventToasts?: boolean // market-event pop-ups (parabolic, whales, market moves…); off still warns when your own bag rugs
   practiceBalance: number
   engine?: MarketEngine // market engine for your next solo round (Classic / Realistic pump.fun)
   speed: 1 | 2 | 4

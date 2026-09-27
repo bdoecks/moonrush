@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
 import { accountValue, MAX_WALLETS, WALLET_EMOJIS } from '../game/accounts'
 import { useGame } from '../game/store'
+import { useWalletGroups } from '../game/walletGroups'
 import { nativePrice } from '../game/tradingEngine'
 import { useWallets } from '../hooks/useWallets'
 import type { Account, Chain } from '../types'
@@ -41,6 +42,7 @@ export function WalletSelector({ chain, className, compact, dropUp, align = 'rig
   const setActive = useGame((s) => s.setActiveWallets)
   const openManager = useGame((s) => s.setWalletsOpen)
   const values = useWalletValues(all)
+  const groups = useWalletGroups((s) => s.groups)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -75,6 +77,19 @@ export function WalletSelector({ chain, className, compact, dropUp, align = 'rig
             <span>Trade from</span>
             <button onClick={() => setActive(all.map((a) => a.id))} className="normal-case text-accent hover:underline">Select all</button>
           </div>
+          {groups.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1 px-1">
+              {groups.map((g) => {
+                const ids = all.filter((a) => g.walletIds.includes(a.id)).map((a) => a.id)
+                const on = ids.length > 0 && ids.length === activeIds.length && ids.every((id) => activeIds.includes(id))
+                return (
+                  <button key={g.id} type="button" disabled={!ids.length} onClick={() => setActive(ids)} title={`Trade from group ${g.name} (${ids.length} wallets)`} className={clsx('flex items-center gap-1 rounded-md border border-dashed px-1.5 py-0.5 text-[10px] font-semibold disabled:opacity-40', on ? 'border-accent bg-accent/15 text-accent' : 'border-line2 text-muted hover:text-ink')}>
+                    {g.emoji} {g.name} <span className="num text-dim">{ids.length}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <div className="max-h-[300px] space-y-0.5 overflow-y-auto">
             {all.map((a) => {
               const on = activeIds.includes(a.id)

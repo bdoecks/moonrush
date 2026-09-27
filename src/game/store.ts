@@ -1038,11 +1038,14 @@ export const useGame = create<GameState>()((set, get) => {
       })
 
       // Notifications: anything touching your bags or watchlist, market-wide moves, and a throttled sample of the rest.
+      const eventToasts = s.settings.eventToasts !== false
       for (const e of newEvents) {
         const mine = e.tokenId && (held.includes(e.tokenId) || s.watchlist.includes(e.tokenId))
         const ev = { kind: 'event' as const, tokenId: e.tokenId }
         if (e.kind === 'rug' && e.tokenId && held.includes(e.tokenId)) {
           s.notify({ title: 'POSITION RUGGED', body: e.text, tone: 'down', icon: '💀', ...ev }, 'rug')
+        } else if (!eventToasts) {
+          continue
         } else if (mine || e.kind === 'marketup' || e.kind === 'marketdown') {
           s.notify({ title: mine ? 'YOUR TOKEN' : 'MARKET EVENT', body: e.text, tone: e.tone, icon: e.icon, ...ev }, 'alert')
         } else if (e.kind === 'viral' && e.icon === '🚀') {

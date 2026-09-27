@@ -227,7 +227,8 @@ function SettingsModal() {
         <Row label="Sound effects" hint="Synth blips for trades, alerts and level-ups"><Toggle label="Sound" on={settings.sound} onChange={(v) => update({ sound: v })} /></Row>
         <Row label="Animations" hint="Price flashes, slide-ins, marquee"><Toggle label="Animations" on={settings.animations} onChange={(v) => update({ animations: v })} /></Row>
         <Row label="Compact mode" hint="Denser rows and smaller type"><Toggle label="Compact mode" on={settings.compact} onChange={(v) => update({ compact: v })} /></Row>
-        <Row label="Notifications" hint="Event and trade toasts"><Toggle label="Notifications" on={settings.notifications} onChange={(v) => update({ notifications: v })} /></Row>
+        <Row label="Notifications" hint="All pop-up toasts (trades, alerts, events)"><Toggle label="Notifications" on={settings.notifications} onChange={(v) => update({ notifications: v })} /></Row>
+        <Row label="Market event pop-ups" hint="Parabolic runs, whales, KOLs, market moves. Off still warns if your bag rugs"><Toggle label="Market event pop-ups" on={settings.eventToasts !== false} onChange={(v) => update({ eventToasts: v })} /></Row>
         <Row label="Auto-swap when short" hint="Top up SOL / BNB / ETH from USD if a buy needs more"><Toggle label="Auto-swap" on={settings.autoSwap} onChange={(v) => update({ autoSwap: v })} /></Row>
         <Row label="Chart style">
           <Segmented value={settings.chartStyle} onChange={(v) => update({ chartStyle: v })} options={[{ value: 'candles', label: 'Candles' }, { value: 'line', label: 'Line' }]} />
