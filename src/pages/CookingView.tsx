@@ -309,7 +309,7 @@ export function CookingView() {
                       <span className="text-right text-muted">{fmtCompact(launchMcapUsd(p.id, px))}</span>
                       <span className="text-right text-muted">{fmtCompact(gradMcapUsd(p.id, px))} <span className="text-dim">→ {p.dex}</span></span>
                       <span className="text-right text-dim">{fmtFee(p.fee)}</span>
-                      <span className="text-right text-up">{p.tax ? 'tax' : fmtFee(p.creatorFee)}</span>
+                      <span className="text-right text-up" title={p.pumpSwap ? 'On the curve, then PumpSwap’s dynamic creator fee after migrating (0.95%, tapering to 0.05% as the coin grows)' : undefined}>{p.tax ? 'tax' : p.pumpSwap ? `${fmtFee(p.creatorFee)}→0.95%` : fmtFee(p.creatorFee)}</span>
                     </button>
                   )
                 })}
@@ -625,15 +625,21 @@ function MyLaunches({ onCreate }: { onCreate: () => void }) {
   const now = useGame((s) => s.market.time)
   const select = useGame((s) => s.select)
   const sell = useGame((s) => s.sell)
+  const claim = useGame((s) => s.claimCreatorFees)
+  const native = useGame((s) => s.market.native)
   const [openBot, setOpenBot] = useState<string | null>(null)
   const map = new Map(tokens.map((t) => [t.id, t]))
   const th = 'px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-dim whitespace-nowrap'
   const td = 'px-3 py-2 whitespace-nowrap border-b border-line/50'
+  const unclaimedUsd = launches.reduce((a, r) => a + (r.unclaimed ?? 0) * (native?.[r.chain ?? 'sol']?.price ?? CHAINS[r.chain ?? 'sol'].basePrice), 0)
   return (
     <div className="rounded-md border border-line bg-panel">
-      <div className="flex items-center justify-between border-b border-line px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <div className="text-[12px] font-bold">Your launches</div>
         <div className="text-[10px] text-dim">Net = creator earnings + bag + sells − fees, marketing, buys and bot costs</div>
+        <button disabled={!(unclaimedUsd > 0.001)} onClick={() => claim()} title="Creator fees wait in the vault until you claim them (anything left is paid out when the round ends)" className="ml-auto flex items-center gap-1 rounded-md bg-up px-2.5 py-1 text-[11px] font-extrabold text-black hover:brightness-110 disabled:opacity-40">
+          💰 Claim all creator fees · {fmtUsd(unclaimedUsd, unclaimedUsd < 10 ? 2 : 0)}
+        </button>
       </div>
       {launches.length === 0 ? (
         <EmptyState icon="🍳" title="Nothing cooked yet this round" hint={<button onClick={onCreate} className="text-accent underline">Create your first coin</button>} />
@@ -707,7 +713,13 @@ function MyLaunches({ onCreate }: { onCreate: () => void }) {
                         {!(r.bundleQty ?? 0) && !r.bundleWallets && !r.bot?.on && !t?.washFlagged && <span className="font-normal text-dim">—</span>}
                       </div>
                     </td>
-                    <td className={clsx(td, 'num text-right text-up')}>{fmtUsd(r.fees)}</td>
+                    <td className={clsx(td, 'num text-right')}>
+                      <div className="text-up">{fmtUsd(r.fees)}</div>
+                      <div className="flex items-center justify-end gap-1 text-[10px] text-dim">
+                        {fmtNative(r.unclaimed ?? 0, r.chain ?? 'sol')} unclaimed
+                        <button disabled={!((r.unclaimed ?? 0) > 1e-9)} onClick={() => claim(r.tokenId)} className="rounded bg-up/15 px-1 font-bold text-up hover:bg-up/25 disabled:opacity-30">Claim</button>
+                      </div>
+                    </td>
                     <td className={clsx(td, 'num text-right font-bold', toneClass(net))}>{net >= 0 ? '+' : ''}{fmtUsd(net)}</td>
                     <td className={clsx(td, 'text-right')}>
                       <div className="flex justify-end gap-1">

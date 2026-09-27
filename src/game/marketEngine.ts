@@ -6,6 +6,7 @@ import { TF_SECONDS, TIMEFRAMES } from '../types'
 import { clamp, Rng } from '../utils/rng'
 import { LAUNCHPADS, padFromId, padsFor } from '../data/launchpads'
 import { addWin, getWin, stepWin } from './windows'
+import { creatorRate } from './tradingEngine'
 import { curveAt, curveK, curveLiquidityUsd, gradMcapUsd, gradPriceNative, launchMcapUsd, migratedLiquidityUsd, migrationPriceNative, startPriceNative } from './curve'
 
 // ─── Clock ───────────────────────────────────────────────────────────────────
@@ -316,6 +317,7 @@ function makeToken(rng: Rng, seed: { ticker: string; name: string; emoji: string
     change: { '1m': 0, '5m': 0, '1h': 0, '24h': 0 },
     tape: [],
     sim,
+    volMark: volume, // creator fees count trades from here on (the made-up opening volume doesn't earn anything)
   }
   // Most devs buy in the launch block; that's the first DEV marker on the chart.
   if (bonding && t.devPct > 0.3) logDev(t, { time: t.createdAt, side: 'buy', usd: (t.devPct / 100) * launchMc * 1.15 })
@@ -515,6 +517,7 @@ function launchFlowToken(rng: Rng, m: MarketState, base: { ticker: string; name:
   t.mcap = t.ath = t.price * SUPPLY
   syncCurve(t, nu)
   t.volume = (t.devPct / 100) * t.mcap
+  t.volMark = 0 // the dev's launch-block buy paid the curve fee, so it counts toward creator fees
   t.buys = t.devPct > 0.3 ? 1 : 0 // a brand-new coin has only its dev buy (classic launches start with made-up counts)
   t.sells = 0
   t.win = undefined
@@ -706,6 +709,15 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
     const prevPrice = t.price
     const age = m.time - t.createdAt
 
+    // Creator fees: this tick's volume plus anything traded since the last tick (bot wallets, players, follower buys),
+    // at the coin's current creator rate (pump.fun: 0.30% on the curve, PumpSwap's tiered 0.95%→0.05% after).
+    const volBetween = Math.max(0, old.volume - (old.volMark ?? old.volume))
+    const accrue = () => {
+      const tickVol = Math.max(0, t.volume - old.volume * DECAY_1H) + volBetween
+      if (tickVol > 0) t.creatorFees = (t.creatorFees ?? 0) + tickVol * creatorRate(t)
+      t.volMark = t.volume
+    }
+
     // Realistic engine: pump.fun coins on their curve trade by order flow; dead ones leave the lists within a minute.
     if (realistic && s.flow) {
       if ((t.status === 'dead' || t.status === 'rugged') && t.diedAt && m.time - t.diedAt > FLOW.delistAfter && !opts.protectedIds.has(t.id) && t.creator !== 'you') {
@@ -714,6 +726,7 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
       }
       if (t.status === 'bonding') {
         stepFlow(t, m, rng, native, emit)
+        accrue()
         tokens.push(t)
         continue
       }
@@ -873,6 +886,7 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
     const risk = computeRisk(t, m.time)
     t.riskScore = risk.score
     t.riskLevel = risk.level
+    accrue()
     tokens.push(t)
   }
 
@@ -1030,6 +1044,7 @@ export function cookToken(prev: MarketState, rng: Rng, spec: CookSpec): { market
   syncCurve(t, nu)
   t.tax = LAUNCHPADS[t.pad].tax ? { ...spec.tax } : undefined
   t.devTrades = []
+  t.volMark = t.volume // your dev buy and first trades (before the coin's first tick) earn creator fees too
   t.hue = spec.hue
   t.creator = 'you'
   if (spec.image) t.image = spec.image

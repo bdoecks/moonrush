@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { fakeAddress } from '../utils/address'
-import { CHAINS } from '../data/chains'
+import { CHAINS, fmtNative } from '../data/chains'
+import { creatorRate, tradeFee } from '../game/tradingEngine'
 import { ChainBadge } from '../components/chain'
 import { PadBadge, PadTag } from '../components/pad'
 import { LAUNCHPADS } from '../data/launchpads'
@@ -221,6 +222,8 @@ function Header({ t }: { t: Token }) {
   const now = useGame((s) => s.market.time)
   const setView = useGame((s) => s.setView)
   const select = useGame((s) => s.select)
+  const rec = useGame((s) => (t.creator === 'you' ? s.launches.find((r) => r.tokenId === t.id) : undefined))
+  const claim = useGame((s) => s.claimCreatorFees)
   const toggleWatch = useGame((s) => s.toggleWatch)
   const notify = useGame((s) => s.notify)
   const watched = useGame((s) => s.watchlist.includes(t.id))
@@ -287,7 +290,16 @@ function Header({ t }: { t: Token }) {
         <HeaderStat label="Price"><FlashNum value={t.price}>{fmtPrice(t.price)}</FlashNum></HeaderStat>
         <HeaderStat label="Liq">{fmtCompact(t.liquidity)}</HeaderStat>
         <HeaderStat label="1h Vol">{fmtCompact(t.volume)}</HeaderStat>
-        <HeaderStat label="Fees 1h">{fmtCompact(t.volume * 0.01)}</HeaderStat>
+        <HeaderStat label="Fees 1h">{fmtCompact(t.volume * tradeFee(t, 'buy'))}</HeaderStat>
+        <HeaderStat label={`Creator rewards · ${(creatorRate(t) * 100).toFixed(2).replace(/\.?0+$/, '')}%`}>
+          <span className="text-up" title="Creator fees this coin has paid its creator so far (the creator's cut of every trade, like pump.fun's creator rewards)">{fmtCompact(t.creatorFees ?? 0)}</span>
+          {rec && (
+            <span className="ml-1.5 inline-flex items-center gap-1 align-middle">
+              <span className="text-[10px] font-normal text-dim">{fmtNative(rec.unclaimed ?? 0, t.chain)} unclaimed</span>
+              <button disabled={!((rec.unclaimed ?? 0) > 1e-9)} onClick={() => claim(t.id)} className="rounded bg-up/15 px-1.5 text-[10px] font-bold text-up hover:bg-up/25 disabled:opacity-40">Claim</button>
+            </span>
+          )}
+        </HeaderStat>
         <HeaderStat label="Supply">{fmtNum(SUPPLY)}</HeaderStat>
         <HeaderStat label="ATH MC"><span className="text-warn">{fmtCompact(t.ath)}</span></HeaderStat>
         <HeaderStat label="From ATH"><span className="text-down">{(((t.mcap / t.ath) - 1) * 100).toFixed(1)}%</span></HeaderStat>

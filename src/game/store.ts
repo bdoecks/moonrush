@@ -9,12 +9,12 @@ import { createChallenges, evaluateChallenges, type ChallengeContext } from './c
 import { rollEvents } from './eventEngine'
 import { createRivals, tickRivals } from './leaderboardEngine'
 import { freshSeason, isRanked, placementPoints, seasonNumber, tierFor, type SeasonState } from './season'
-import { candleStore, COOK_FEE, cookToken, createMarket, HOUR_TICKS, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, tickMarket, walletName } from './marketEngine'
+import { candleStore, COOK_FEE, cookToken, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, tickMarket, walletName } from './marketEngine'
 import { BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
 import { lengthTicks, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS, type RoundLength } from './progression'
 import { accountOf, activeAccounts, commitView, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf, withAccount } from './accounts'
-import { creatorRate, emptyBalances, executeBuy, executeSell, nativePrice, swap, type Asset } from './tradingEngine'
+import { emptyBalances, executeBuy, executeSell, nativePrice, swap, type Asset } from './tradingEngine'
 import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
 import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
@@ -298,6 +298,8 @@ export interface GameState {
   setBot: (tokenId: string, patch: Partial<VolumeBot>) => void
   /** Post on the (simulated) X timeline; attach a coin to make it a call that bots may ape. */
   postSocial: (text: string, tokenId?: string) => boolean
+  /** Claim creator fees from one of your coins (or all of them) into its dev wallet. */
+  claimCreatorFees: (tokenId?: string, silent?: boolean) => void
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -894,6 +896,8 @@ export const useGame = create<GameState>()((set, get) => {
   }
 
   function finishRun(reason: string, won: boolean, noBonus = false) {
+    // Creator fees still in the vault are paid out first, so they count toward your final result.
+    if (get().launches.some((r) => (r.unclaimed ?? 0) > 1e-9)) get().claimCreatorFees(undefined, true)
     const s = get()
     const map = new Map(s.market.tokens.map((t) => [t.id, t]))
     const v = valuePortfolio(s.portfolio, map, s.market)
@@ -987,22 +991,15 @@ export const useGame = create<GameState>()((set, get) => {
       const botStops: string[] = []
       if (running && launches.length) {
         const oldMap = new Map(s.market.tokens.map((t) => [t.id, t]))
-        // Creator fees are paid to each launch's dev wallet, in the token's chain coin: wallet id → chain → coins.
-        const earnedBy = new Map<string, Record<Chain, number>>()
-        const portfolioNow = portfolio
+        // Creator fees (like pump.fun's creator vault) pile up unclaimed, in the coin's chain coin, until you claim them.
         launches = launches.map((r) => {
           const nt = map.get(r.tokenId)
           if (!nt) return r
           const old = oldMap.get(r.tokenId)
-          const tickVol = old ? Math.max(0, nt.volume - old.volume * (1 - 1 / HOUR_TICKS)) : 0
           const justGrad = !r.graduated && nt.status === 'graduated'
-          const fee = tickVol * creatorRate(nt) + (justGrad ? GRAD_BONUS : 0)
-          if (fee > 0) {
-            const w = devSet(portfolioNow, r)[0]
-            const e = earnedBy.get(w) ?? { sol: 0, bsc: 0, hood: 0 }
-            e[nt.chain] += fee / nativePrice(market, nt.chain)
-            earnedBy.set(w, e)
-          }
+          // Everything the coin has earned since last tick (from 0 for a coin you just cooked).
+          const fee = Math.max(0, (nt.creatorFees ?? 0) - (old ? old.creatorFees ?? 0 : nt.creatorFees ?? 0)) + (justGrad ? GRAD_BONUS : 0)
+          const unclaimed = (r.unclaimed ?? 0) + fee / nativePrice(market, nt.chain)
           if (justGrad) graduatedNow.push(nt.ticker)
           const run = botRuns.get(r.tokenId)
           let bot = r.bot
@@ -1013,12 +1010,8 @@ export const useGame = create<GameState>()((set, get) => {
               if (s.online) netHooks.send?.({ t: 'bot', tokenId: r.tokenId, bot: null })
             }
           }
-          return { ...r, bot, fees: r.fees + fee, peakMcap: Math.max(r.peakMcap, nt.mcap), lastMcap: nt.mcap, status: nt.status, graduated: r.graduated || nt.status === 'graduated' }
+          return { ...r, bot, fees: r.fees + fee, unclaimed, peakMcap: Math.max(r.peakMcap, nt.mcap), lastMcap: nt.mcap, status: nt.status, graduated: r.graduated || nt.status === 'graduated' }
         })
-        for (const [walletId, add] of earnedBy) {
-          const view = viewOf(portfolio, walletId)
-          portfolio = commitView(portfolio, walletId, { ...view, balances: { sol: view.balances.sol + add.sol, bsc: view.balances.bsc + add.bsc, hood: view.balances.hood + add.hood } })
-        }
         if (graduatedNow.length) runStats = { ...runStats, cookedGrads: (runStats.cookedGrads ?? 0) + graduatedNow.length }
       }
 
@@ -1708,6 +1701,23 @@ export const useGame = create<GameState>()((set, get) => {
       const t = id ? s.market.tokens.find((x) => x.id === id) : undefined
       if (!t) return false
       return s.buy(amount * nativePrice(s.market, t.chain), t.id, slot)
+    },
+    claimCreatorFees: (tokenId, silent) => {
+      const s = get()
+      const recs = s.launches.filter((r) => (!tokenId || r.tokenId === tokenId) && (r.unclaimed ?? 0) > 1e-9)
+      if (!recs.length) return
+      let portfolio = s.portfolio
+      const paid: string[] = []
+      for (const r of recs) {
+        const chain = r.chain ?? 'sol'
+        const w = devSet(portfolio, r)[0]
+        const view = viewOf(portfolio, w)
+        portfolio = commitView(portfolio, w, { ...view, balances: { ...view.balances, [chain]: view.balances[chain] + (r.unclaimed ?? 0) } })
+        paid.push(`${fmtNative(r.unclaimed ?? 0, chain)} from $${r.ticker}`)
+      }
+      set({ portfolio, launches: s.launches.map((r) => (recs.includes(r) ? { ...r, unclaimed: 0 } : r)) })
+      if (!silent) s.notify({ title: 'CREATOR FEES CLAIMED', body: `${paid.slice(0, 3).join(' · ')}${paid.length > 3 ? ` +${paid.length - 3} more` : ''} → your dev wallet`, tone: 'up', icon: '💰' }, 'profit')
+      persist()
     },
     postSocial: (text, tokenId) => {
       const s = get()

@@ -381,6 +381,8 @@ export interface Token {
   creatorId?: string // multiplayer: the player who cooked it
   creatorName?: string
   vampOf?: { id: string; ticker: string } // a copycat launch of this coin
+  creatorFees?: number // USD of creator fees this coin has generated (all trading, at its launchpad's creator rate)
+  volMark?: number // volume at the end of the last tick (to catch trades that happen between ticks)
   image?: string // custom icon: small data URL or an https image link
   narrative?: Narrative
   description?: string
@@ -449,7 +451,8 @@ export interface LaunchRecord {
   launchedTick: number
   launchedTime: number
   spent: number // launch fee + marketing
-  fees: number // creator fees earned
+  fees: number // creator fees earned (USD, all time)
+  unclaimed?: number // creator fees waiting in the vault, in the coin's chain coin (claim them to your dev wallet)
   peakMcap: number
   lastMcap: number
   status: TokenStatus

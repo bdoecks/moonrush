@@ -23,7 +23,8 @@ export interface Launchpad {
   // Market-cap-tiered DEX fee: [market cap in the chain's coin, fee]. Below each cap the step applies; the last
   // segment eases (log-linearly) down to the final fee. Overrides dexFee.
   dexFeeTiers?: [number, number][]
-  creatorFee: number // share of volume paid to the creator
+  creatorFee: number // share of volume paid to the creator (on the curve; see pumpSwap for after migration)
+  pumpSwap?: boolean // migrates to a canonical PumpSwap pool: fees and the creator's cut follow PUMPSWAP_FEES
   weight: number // share of launches on its chain
   blurb: string
   tax?: boolean // coins can have buy/sell taxes paid to the creator
@@ -39,11 +40,24 @@ const PUMP = { vNative: 30, vTokens: 1_073_000_000, curveTokens: 793_100_000 } /
 // PumpSwap canonical-pool fee by market cap in SOL (pump.fun fee docs): 1.25% under 420, 1.20% to 1,470, down to 0.30%.
 const PUMPSWAP_TIERS: [number, number][] = [[420, 0.0125], [1_470, 0.012], [98_240, 0.003]]
 
+/**
+ * pump.fun's PumpSwap dynamic fees (pump.fun/docs/fees, "Project Ascend"), by market cap in SOL:
+ * [MC upper bound in SOL, creator fee, total fee]. Protocol 0.05% and LP 0.20% make up the rest above 420 SOL.
+ * On the bonding curve it's a flat 1.25% total, 0.30% of it to the creator.
+ */
+export const PUMPSWAP_FEES: [number, number, number][] = [
+  [420, 0.003, 0.0125], [1_470, 0.0095, 0.012], [2_460, 0.009, 0.0115], [3_440, 0.0085, 0.011], [4_420, 0.008, 0.0105],
+  [9_820, 0.0075, 0.01], [14_740, 0.007, 0.0095], [19_650, 0.0065, 0.009], [24_560, 0.006, 0.0085], [29_470, 0.0055, 0.008],
+  [34_380, 0.005, 0.0075], [39_300, 0.0045, 0.007], [44_210, 0.004, 0.0065], [49_120, 0.0035, 0.006], [54_030, 0.003, 0.0055],
+  [58_940, 0.00275, 0.00525], [63_860, 0.0025, 0.005], [68_770, 0.00225, 0.00475], [73_681, 0.002, 0.0045], [78_590, 0.00175, 0.00425],
+  [83_500, 0.0015, 0.004], [88_400, 0.00125, 0.00375], [93_330, 0.001, 0.0035], [98_240, 0.00075, 0.00325], [Infinity, 0.0005, 0.003],
+]
+
 export const LAUNCHPADS: Record<PadId, Launchpad> = {
   pump: {
     id: 'pump', chain: 'sol', name: 'pump.fun', mono: 'P', color: '#4ade80', bg: '#0f2a1b', dex: 'PumpSwap', ...PUMP,
-    fee: 0.0125, dexFee: 0.003, dexFeeTiers: PUMPSWAP_TIERS, creatorFee: 0.003, weight: 0.46,
-    blurb: 'The classic curve: starts ~28 SOL MC, 85 SOL raise, migrates to PumpSwap at ~411 SOL MC. Tiered DEX fee after.',
+    fee: 0.0125, dexFee: 0.003, dexFeeTiers: PUMPSWAP_TIERS, creatorFee: 0.003, pumpSwap: true, weight: 0.46,
+    blurb: 'The classic curve: starts ~28 SOL MC, 85 SOL raise, migrates to PumpSwap at ~411 SOL MC. Creators earn 0.30% on the curve, then 0.95% on PumpSwap, tapering as the coin grows.',
   },
   bonk: {
     id: 'bonk', chain: 'sol', name: 'bonk.fun', mono: 'B', color: '#ff9d2e', bg: '#2e1a06', dex: 'Raydium', ...PUMP,
@@ -63,7 +77,7 @@ export const LAUNCHPADS: Record<PadId, Launchpad> = {
   },
   mayhem: {
     id: 'mayhem', chain: 'sol', name: 'Mayhem', mono: 'M', color: '#f43f5e', bg: '#2e0a12', dex: 'PumpSwap', ...PUMP,
-    fee: 0.0125, dexFee: 0.003, dexFeeTiers: PUMPSWAP_TIERS, creatorFee: 0.003, weight: 0.1, mayhem: true,
+    fee: 0.0125, dexFee: 0.003, dexFeeTiers: PUMPSWAP_TIERS, creatorFee: 0.003, pumpSwap: true, weight: 0.1, mayhem: true,
     blurb: 'pump.fun curve plus an AI agent that trades the coin for its first 24h. Much wilder candles.',
   },
   four: {

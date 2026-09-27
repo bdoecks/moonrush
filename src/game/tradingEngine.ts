@@ -1,5 +1,5 @@
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
-import { LAUNCHPADS } from '../data/launchpads'
+import { LAUNCHPADS, PUMPSWAP_FEES } from '../data/launchpads'
 import { SPEED_REF_USD } from '../data/tradeSettings'
 import type { Chain, MarketState, Portfolio, Position, Token, Trade, TradeSetting } from '../types'
 import { applyPlayerTrade, quoteBuy, quoteSell } from './marketEngine'
@@ -13,8 +13,14 @@ export const MIN_TRADE = 1
  */
 export function tradeFee(t: Pick<Token, 'status' | 'tax'> & { pad?: Token['pad']; mcap?: number; chain?: Chain }, side: 'buy' | 'sell') {
   const pad = t.pad ? LAUNCHPADS[t.pad] : undefined
-  const base = pad ? (t.status === 'bonding' ? pad.fee : dexFee(pad.dexFeeTiers, pad.dexFee, t)) : FEE_RATE
+  const base = !pad ? FEE_RATE : t.status === 'bonding' ? pad.fee : pad.pumpSwap ? pumpSwapTier(t)[2] : dexFee(pad.dexFeeTiers, pad.dexFee, t)
   return base + (t.tax ? (side === 'buy' ? t.tax.buy : t.tax.sell) : 0)
+}
+
+/** The PumpSwap fee tier a migrated pump.fun coin is in right now: [upper MC in SOL, creator fee, total fee]. */
+export function pumpSwapTier(t: { mcap?: number; chain?: Chain }) {
+  const mcSol = (t.mcap ?? 0) / CHAINS[t.chain ?? 'sol'].basePrice
+  return PUMPSWAP_FEES.find((r) => mcSol < r[0]) ?? PUMPSWAP_FEES[PUMPSWAP_FEES.length - 1]
 }
 
 /** Market-cap-tiered DEX fee (PumpSwap-style). Market cap is measured in the chain's coin at its anchor price. */
@@ -28,8 +34,11 @@ function dexFee(tiers: [number, number][] | undefined, flat: number, t: { mcap?:
 }
 
 /** Share of a token's volume paid to its creator: the pad's creator fee plus the average tax. */
-export function creatorRate(t: Pick<Token, 'pad' | 'tax'>) {
-  return (LAUNCHPADS[t.pad]?.creatorFee ?? 0) + (t.tax ? (t.tax.buy + t.tax.sell) / 2 : 0)
+export function creatorRate(t: Pick<Token, 'pad' | 'tax'> & { status?: Token['status']; mcap?: number; chain?: Chain }) {
+  const pad = LAUNCHPADS[t.pad]
+  // pump.fun after migration: PumpSwap's dynamic creator fee (0.95% just after, tapering to 0.05% as it grows).
+  const base = pad?.pumpSwap && t.status === 'graduated' ? pumpSwapTier(t)[1] : pad?.creatorFee ?? 0
+  return base + (t.tax ? (t.tax.buy + t.tax.sell) / 2 : 0)
 }
 
 export interface BuyPreview {
