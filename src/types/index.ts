@@ -667,6 +667,7 @@ export interface InstantPrefs {
   buyUsd: number[][] // USD buy presets per P slot
   sellUsd: number[][] // USD sell presets per P slot
   sellNative: Record<Chain, number[][]> // chain-coin sell presets per P slot
+  showHoldings?: boolean // GMGN: list each of your wallets with its bag of this coin on the Trade tab
 }
 
 export interface Profile {

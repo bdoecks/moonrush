@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import { useSelectedToken, useTokenMap } from '../../hooks/useDerived'
 import { slotSetting, useGame } from '../../game/store'
 import { previewBuy, previewSell, qtyForProceeds, SWAP_FEE, tradeFee } from '../../game/tradingEngine'
+import { SUPPLY } from '../../game/marketEngine'
 import type { InstantPrefs, Token } from '../../types'
 import { CHAINS, fmtNative } from '../../data/chains'
 import { ChainBadge } from '../chain'
@@ -306,6 +307,11 @@ export function InstantTrade() {
           <UnitSwitch value={ip.statsUnit} onChange={(v) => setIp({ statsUnit: v })} options={[{ value: 'usd', label: 'USD' }, { value: 'native', label: meta.native }]} label="Show amounts in" />
           <UnitSwitch value={ip.pnlUnit} onChange={(v) => setIp({ pnlUnit: v })} options={[{ value: 'value', label: 'PnL $' }, { value: 'pct', label: 'PnL %' }]} label="Show PnL as" />
         </div>
+        <button type="button" onClick={() => setIp({ showHoldings: !ip.showHoldings })} aria-pressed={!!ip.showHoldings} className={clsx('mb-1 flex w-full items-center gap-1 rounded px-1 py-0.5 text-[10px] font-semibold', ip.showHoldings ? 'text-accent' : 'text-dim hover:text-muted')} title="Show every wallet's bag of this coin">
+          <span className={clsx('grid size-3 place-items-center rounded-sm border', ip.showHoldings ? 'border-accent bg-accent text-black' : 'border-line2')}>{ip.showHoldings && <Check size={9} strokeWidth={3} />}</span>
+          Show wallet holdings
+        </button>
+        {ip.showHoldings && <WalletHoldings t={t} inNative={inNative} px={px} />}
         <div className="grid grid-cols-4 gap-1">
           <div><div className="text-dim">Bal</div><div className="num text-ink">{stats.value ? money(stats.value, stats.value / px) : '--'}</div></div>
           <div><div className="text-dim">Bought</div><div className="num text-up">{stats.bought ? money(stats.bought, stats.boughtN) : '--'}</div></div>
@@ -324,6 +330,69 @@ export function InstantTrade() {
         <span>Drag to move</span>
         <span><Kbd>I</Kbd> toggle</span>
       </div>
+    </div>
+  )
+}
+
+/**
+ * GMGN-style "show holdings": every wallet you own with how much of this coin it holds, its value and PnL, and its
+ * chain coin. Tick a wallet to trade from it; the red button sells that one wallet's bag.
+ */
+function WalletHoldings({ t, inNative, px }: { t: Token; inNative: boolean; px: number }) {
+  const { all, activeIds } = useWallets()
+  const setActive = useGame((s) => s.setActiveWallets)
+  const sell = useGame((s) => s.sell)
+  const running = useGame((s) => s.runStatus === 'running')
+  const rows = all.map((a) => {
+    const p = a.positions[t.id]
+    const qty = p?.qty ?? 0
+    const value = qty * t.price
+    return { a, qty, value, pnl: p ? value - p.costBasis : 0, cost: p?.costBasis ?? 0, pct: p ? (qty / SUPPLY) * 100 : 0 }
+  })
+  const holding = rows.filter((r) => r.qty > 0).length
+  const totalQty = rows.reduce((s, r) => s + r.qty, 0)
+  const toggle = (id: string) => {
+    const on = activeIds.includes(id)
+    if (on && activeIds.length === 1) return
+    setActive(on ? activeIds.filter((x) => x !== id) : [...activeIds, id])
+  }
+  return (
+    <div className="mb-1.5 rounded border border-line bg-bg/60">
+      <div className="flex items-center justify-between border-b border-line/60 px-1.5 py-0.5 text-[9px] text-dim">
+        <span>{holding}/{all.length} wallets hold {t.ticker}</span>
+        <span className="num">{fmtNum(totalQty)} · {((totalQty / SUPPLY) * 100).toFixed(2)}% supply</span>
+      </div>
+      <ul className="max-h-[180px] overflow-y-auto">
+        {rows.map((r) => {
+          const on = activeIds.includes(r.a.id)
+          return (
+            <li key={r.a.id} className={clsx('flex items-center gap-1 border-b border-line/30 px-1.5 py-1 last:border-0', r.qty <= 0 && 'opacity-60')}>
+              <button type="button" onClick={() => toggle(r.a.id)} aria-pressed={on} title={on ? 'Trading from this wallet' : 'Trade from this wallet too'} className={clsx('grid size-3.5 shrink-0 place-items-center rounded-sm border', on ? 'border-accent bg-accent text-black' : 'border-line2')}>
+                {on && <Check size={9} strokeWidth={3} />}
+              </button>
+              <span className="text-[12px]">{r.a.emoji}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[10px] font-semibold text-ink">{r.a.name}</span>
+                <span className="num block text-[9px] text-dim">{fmtNative(r.a.balances[t.chain], t.chain)}</span>
+              </span>
+              <span className="text-right">
+                <span className="num block text-[10px] text-ink">{r.qty > 0 ? fmtNum(r.qty) : '0'}</span>
+                <span className="num block text-[9px] text-dim">{r.qty > 0 ? (inNative ? fmtNative(r.value / px, t.chain, false) : fmtUsd(r.value, r.value < 10 ? 2 : 0)) : '—'}</span>
+              </span>
+              <span className={clsx('num w-11 text-right text-[9px]', r.qty > 0 ? toneClass(r.pnl) : 'text-dim')}>{r.qty > 0 && r.cost > 0 ? fmtPct(r.pnl / r.cost) : '—'}</span>
+              <button
+                type="button"
+                disabled={!running || r.qty <= 0}
+                onClick={() => sell(r.qty, t.id, undefined, r.a.id)}
+                title={`Sell all of ${r.a.name}'s ${t.ticker}`}
+                className="rounded border border-down/50 px-1 text-[9px] font-bold leading-[16px] text-down hover:bg-down hover:text-white disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-down"
+              >
+                Sell
+              </button>
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
