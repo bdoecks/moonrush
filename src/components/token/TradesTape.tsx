@@ -1,5 +1,6 @@
 import clsx from 'clsx'
-import { ArrowDownUp, Bell, Eye, Filter, X, Zap } from 'lucide-react'
+import { ArrowDownUp, Bell, Eye, Filter, List as ListIcon, X, Zap } from 'lucide-react'
+import { inPick, pickFor, useTradePick } from './tradePick'
 import { addrKey, playerKey, useFriends } from '../../net/friends'
 import { useMemo, useState, type ReactNode } from 'react'
 import { CHAINS, fmtNative } from '../../data/chains'
@@ -36,6 +37,8 @@ export function TradesTape({ token }: { token: Token }) {
   const portfolio = useGame((s) => s.portfolio)
   const instantOpen = useGame((s) => s.instantOpen)
   const toggleInstant = useGame((s) => s.toggleInstant)
+  const tradesOpen = useTradePick((s) => s.open)
+  const toggleTrades = useTradePick((s) => s.toggle)
   const [tab, setTab] = useState<Tab>('trades')
   const [walletFilter, setWalletFilter] = useState<string | null>(null)
   const book = bookOf(token, now)
@@ -67,6 +70,16 @@ export function TradesTape({ token }: { token: Token }) {
           </button>
         ))}
         <span className="ml-auto" />
+        <button
+          onClick={() => toggleTrades()}
+          title="Trades panel next to the chart (click a candle to see its trades)"
+          className={clsx(
+            'hidden shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-bold transition-colors md:flex',
+            tradesOpen ? 'border-info bg-info text-black' : 'border-info/50 text-info hover:bg-info/10',
+          )}
+        >
+          <ListIcon size={11} /> Trades
+        </button>
         <button
           onClick={() => toggleInstant()}
           title="Instant trade panel (I)"
@@ -179,8 +192,11 @@ function TradesTab({ token, walletFilter, setWalletFilter }: { token: Token; wal
   const [inNative, setInNative] = useState(false)
   const book = bookOf(token, now)
   const coin = CHAINS[token.chain].native
+  const pick = useTradePick((s) => pickFor(s.pick, token.id))
+  const setPick = useTradePick((s) => s.setPick)
   const rows = book.log.filter(
     (t) =>
+      inPick(t.time, pick) &&
       (side === 'all' || t.side === side) &&
       t.usd >= minUsd &&
       (!walletFilter || t.wallet === walletFilter) &&
@@ -204,6 +220,12 @@ function TradesTab({ token, walletFilter, setWalletFilter }: { token: Token; wal
         {[0, 100, 500, 1000].map((v) => (
           <Chip key={v} on={minUsd === v} onClick={() => setMinUsd(v)}>{v === 0 ? 'Any size' : `≥$${fmtNum(v)}`}</Chip>
         ))}
+        {pick && (
+          <span className="ml-1 flex shrink-0 items-center gap-1 rounded-md bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">
+            🕯 Candle {fmtTime(pick.from)}
+            <button onClick={() => setPick(null)} className="hover:text-ink" aria-label="Clear candle filter"><X size={11} /></button>
+          </span>
+        )}
         {walletFilter && (
           <span className="ml-1 flex shrink-0 items-center gap-1 rounded-md bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">
             <Filter size={10} /> {displayAddress(walletFilter, token.chain)}

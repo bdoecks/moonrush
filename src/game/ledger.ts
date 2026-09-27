@@ -43,7 +43,7 @@ interface Book {
   offset: number // tokens held by small wallets we don't list individually (older graduated coins)
 }
 
-const LOG_LEN = 300
+const LOG_LEN = 2000 // enough history that clicking an older candle still shows its trades
 const MAX_HOLDERS = 400
 const books = new Map<string, Book>()
 let lastTick = -1

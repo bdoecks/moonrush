@@ -25,6 +25,7 @@ import { useGame } from '../../game/store'
 import type { Candle, ChartStyle, Timeframe } from '../../types'
 import { TF_SECONDS } from '../../types'
 import { TradeBubbles, type Bubble } from './bubbles'
+import { pickFor, useTradePick } from './tradePick'
 import { MARKER_KINDS, type MarkerKind, type MarkerKinds } from './markers'
 import { fmtCompact, fmtPrice } from '../../utils/format'
 
@@ -63,6 +64,8 @@ export function PriceChart(o: ChartOptions) {
   const main = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Area'> | null>(null)
   const vol = useRef<ISeriesApi<'Histogram'> | null>(null)
   const markers = useRef<TradeBubbles | null>(null)
+  const pickSeries = useRef<ISeriesApi<'Histogram'> | null>(null)
+  const pick = useTradePick((s) => pickFor(s.pick, tokenId))
   const athLine = useRef<IPriceLine | null>(null)
   const entryLine = useRef<IPriceLine | null>(null)
   const migLine = useRef<IPriceLine | null>(null)
@@ -154,6 +157,20 @@ export function PriceChart(o: ChartOptions) {
     }
     c.subscribeCrosshairMove(onMove)
 
+    // Click a candle (Axiom-style): the Trades panels narrow to that candle's trades. Click it again to clear.
+    const hl = c.addSeries(HistogramSeries, { priceScaleId: 'pick', lastValueVisible: false, priceLineVisible: false, color: 'rgba(198,255,61,0.10)' })
+    c.priceScale('pick').applyOptions({ scaleMargins: { top: 0, bottom: 0 }, visible: false })
+    pickSeries.current = hl
+    const onClick = (p: MouseEventParams<Time>) => {
+      const { pick, setPick, toggle, open } = useTradePick.getState()
+      if (!p.time) return
+      const from = Number(p.time)
+      if (pick && pick.tokenId === tokenId && pick.from === from) return setPick(null)
+      setPick({ tokenId, from, to: from + TF_SECONDS[tf], tf })
+      if (!open && window.innerWidth >= 768) toggle(true)
+    }
+    c.subscribeClick(onClick)
+
     // Scroll over the right price axis zooms the price scale (like TradingView / GMGN), anchored at the cursor.
     // Captured before the chart sees it, so it doesn't also zoom time. Double-click the axis or Reset to go back to auto.
     const host = el.current
@@ -184,6 +201,8 @@ export function PriceChart(o: ChartOptions) {
     return () => {
       host.removeEventListener('wheel', onWheel, { capture: true })
       c.unsubscribeCrosshairMove(onMove)
+      c.unsubscribeClick(onClick)
+      pickSeries.current = null
       c.remove()
       chart.current = null
       main.current = null
@@ -192,6 +211,13 @@ export function PriceChart(o: ChartOptions) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenId, tf, style, unit, accent])
+
+  // Highlight the picked candle (only if it's on this timeframe's grid).
+  useEffect(() => {
+    const hl = pickSeries.current
+    if (!hl) return
+    hl.setData(pick && pick.tf === tf ? [{ time: pick.from as UTCTimestamp, value: 1 }] : [])
+  }, [pick, tf, tokenId, style, unit, accent])
 
   // Scale mode, volume visibility, crosshair magnet.
   useEffect(() => {

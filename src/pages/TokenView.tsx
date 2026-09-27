@@ -14,6 +14,8 @@ import { PriceChart, type ScaleMode } from '../components/token/PriceChart'
 import { RiskPanel } from '../components/token/RiskPanel'
 import { TradePanel } from '../components/token/TradePanel'
 import { TradesTape } from '../components/token/TradesTape'
+import { TradesSide } from '../components/token/TradesSide'
+import { useTradePick } from '../components/token/tradePick'
 import { EmptyState, FlashNum, RiskBadge, TokenIcon } from '../components/ui'
 import { useSelectedToken } from '../hooks/useDerived'
 import { SUPPLY } from '../game/marketEngine'
@@ -103,6 +105,7 @@ export function TokenView() {
   const [showMarkers, setShowMarkers] = usePersisted('chartMarkers', true)
   const [magnet, setMagnet] = usePersisted('chartMagnet', false)
   const [kinds, setKinds] = usePersisted<MarkerKinds>('chartMarkerKinds', { me: true, dev: true, tracked: true })
+  const tradesOpen = useTradePick((s) => s.open)
   const [fitSignal, setFitSignal] = useState(0)
   const [autoSignal, setAutoSignal] = useState(0)
 
@@ -148,6 +151,7 @@ export function TokenView() {
           <div className="min-w-0 flex-1 bg-grid">
             <PriceChart tokenId={t.id} ticker={t.ticker} tf={tf} style={chartStyle} unit={unit} scale={scale} showVolume={showVolume} showMarkers={showMarkers} markerKinds={kinds} magnet={magnet} fitSignal={fitSignal} autoSignal={autoSignal} />
           </div>
+          {tradesOpen && <TradesSide token={t} className="hidden w-[300px] shrink-0 md:flex" />}
         </div>
 
         <div className="flex h-7 shrink-0 items-center gap-3 border-t border-line px-3 text-[11px]">
