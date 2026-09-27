@@ -9,9 +9,11 @@ import { netHooks, roomRivals, useGame, type BotTickRun, type ChatLine, type MpS
 import type { Chain, MarketEngine, MarketState, SimWallet, TapeTrade, Token, Trade } from '../types'
 import { walletAddress } from '../utils/address'
 import { fmtCompact, fmtUsd } from '../utils/format'
+import { aggregate } from '../game/accounts'
+import { CHAINS } from '../data/chains'
 import { load, remove, save } from '../utils/storage'
 import { myAddresses, recordPlayerTrades, useFriends } from './friends'
-import { MP_PATH, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type ServerMsg, type TickMsg } from './protocol'
+import { MP_PATH, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TransferMsg } from './protocol'
 
 const STATUS_MS = 2000
 const TAPE_LEN = 40
@@ -151,6 +153,73 @@ export function send(msg: ClientMsg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
 
+// ─── Sending coins to friends ────────────────────────────────────────────────
+export type SendResult = { ok: boolean; error?: string; toName?: string }
+let sendRef = 0
+const sends = new Map<number, { apply: () => void; resolve: (r: SendResult) => void }>()
+
+/** A coin amount with up to 4 decimals ("1.2345"). */
+export const fmtAmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: n < 1 ? 4 : 3 })
+
+export const assetLabel = (a: SendAsset) => (a === 'usdc' ? 'USDC' : CHAINS[a].native)
+
+/** How much of an asset you can send from a wallet (USDC comes from the shared USD bank). */
+export function sendable(asset: SendAsset, walletId: string) {
+  const p = useGame.getState().portfolio
+  return asset === 'usdc' ? p.cash : p.accounts?.find((a) => a.id === walletId)?.balances[asset] ?? 0
+}
+
+/**
+ * Send SOL / BNB / ETH / USDC to another player: to their main wallet (`to` = player id) or to a wallet address
+ * they gave you. From your main wallet they see your name; from a side wallet they only see its address.
+ * Transfers count like deposits/withdrawals, so they don't change anyone's % return on the leaderboard.
+ */
+export function sendFunds(o: { to?: string; toAddr?: string; asset: SendAsset; amount: number; fromWallet: string }): Promise<SendResult> {
+  const s = useGame.getState()
+  if (!s.online || !ws || ws.readyState !== WebSocket.OPEN) return Promise.resolve({ ok: false, error: 'Not connected to a room' })
+  if (s.runStatus !== 'running') return Promise.resolve({ ok: false, error: 'Transfers work during a round' })
+  if (!(o.amount > 0)) return Promise.resolve({ ok: false, error: 'Enter an amount' })
+  if (o.amount > sendable(o.asset, o.fromWallet) + 1e-12) return Promise.resolve({ ok: false, error: `Not enough ${assetLabel(o.asset)} in that wallet` })
+  const main = mainWalletId()
+  const fromMain = o.asset === 'usdc' || !main || o.fromWallet === main
+  const usd = o.asset === 'usdc' ? o.amount : o.amount * nativePrice(s.market, o.asset)
+  const ref = ++sendRef
+  return new Promise((resolve) => {
+    sends.set(ref, {
+      resolve,
+      apply: () => {
+        const amount = Math.min(o.amount, sendable(o.asset, o.fromWallet))
+        moveFunds(o.asset, -amount, o.fromWallet, -usd * (amount / o.amount))
+      },
+    })
+    send({ t: 'send', ref, to: o.to, toAddr: o.toAddr, asset: o.asset, amount: o.amount, usd, main: fromMain, fromAddr: walletAddress(playerId(), main ? o.fromWallet : 'main', 'sol') })
+    setTimeout(() => {
+      if (!sends.delete(ref)) return
+      resolve({ ok: false, error: 'No answer from the room. Nothing was sent.' })
+    }, 8000)
+  })
+}
+
+/** Add (or take away) coins in one wallet; the round's starting balance moves with it, like a deposit. */
+function moveFunds(asset: SendAsset, amount: number, walletId: string, usd: number) {
+  const s = useGame.getState()
+  let p = s.portfolio
+  if (asset === 'usdc') p = { ...p, cash: Math.max(0, p.cash + amount) }
+  else p = aggregate({ ...p, accounts: (p.accounts ?? []).map((a) => (a.id === walletId ? { ...a, balances: { ...a.balances, [asset]: Math.max(0, a.balances[asset] + amount) } } : a)) })
+  p = { ...p, startBalance: Math.max(1, p.startBalance + usd), dayStartEquity: p.dayStartEquity + usd }
+  s.patchState({ portfolio: p })
+}
+
+function onRecv(msg: TransferMsg) {
+  const s = useGame.getState()
+  const accounts = s.portfolio.accounts ?? []
+  const main = accounts[0]?.id ?? 'w-main'
+  const to = msg.toAddr ? accounts.find((a) => walletAddress(playerId(), a.id, 'sol') === msg.toAddr) ?? accounts[0] : accounts[0]
+  moveFunds(msg.asset, msg.amount, to?.id ?? main, msg.usd)
+  const amt = msg.asset === 'usdc' ? fmtUsd(msg.amount) : `${fmtAmt(msg.amount)} ${assetLabel(msg.asset)}`
+  s.notify({ title: 'COINS RECEIVED', body: `${amt} from ${msg.from} → ${to ? `${to.emoji} ${to.name}` : 'your wallet'}`, tone: 'up', icon: '💸' }, 'click')
+}
+
 // ─── Incoming ────────────────────────────────────────────────────────────────
 function onMessage(msg: ServerMsg) {
   const st = useGame.getState()
@@ -174,6 +243,15 @@ function onMessage(msg: ServerMsg) {
       const line: ChatLine = { from: msg.from, name: msg.name, avatar: msg.avatar, text: msg.text, time: msg.time }
       return st.patchState({ online: { ...st.online, chat: [...st.online.chat, line].slice(-60) } })
     }
+    case 'sendResult': {
+      const p = sends.get(msg.ref)
+      if (!p) return
+      sends.delete(msg.ref)
+      if (msg.ok) p.apply()
+      return p.resolve({ ok: msg.ok, error: msg.error, toName: msg.toName })
+    }
+    case 'recv':
+      return onRecv(msg)
     case 'error':
       if (pending) {
         pending.reject(new Error(msg.message))
@@ -431,6 +509,7 @@ function startLoops() {
       seasonPoints: s.profile.season?.id === seasonNumber() ? s.profile.season.points : 0,
       // Your main wallet's bags are public on-chain; side wallets are never included.
       holdings: running ? mainHoldings() : [],
+      addrs: [...ownAddrs()], // private: lets friends send coins to a wallet by its address
       protect: [...Object.keys(s.portfolio.positions), ...s.watchlist, ...(s.selectedId ? [s.selectedId] : [])],
     })
   }

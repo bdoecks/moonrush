@@ -1,5 +1,6 @@
 import clsx from 'clsx'
-import { Bell, BellOff, ChevronDown, ChevronUp, Crown, Timer, X } from 'lucide-react'
+import { Bell, BellOff, ChevronDown, ChevronUp, Crown, Send, Timer, X } from 'lucide-react'
+import { SendFundsModal } from '../components/SendFunds'
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { EmptyState, TokenIcon } from '../components/ui'
 import { ChainBadge } from '../components/chain'
@@ -259,6 +260,7 @@ function FriendProfile({ r, total, onClose }: { r: Row; total: number; onClose: 
   const now = useGame((s) => s.market.time)
   const select = useGame((s) => s.select)
   const allTrades = useFriends((s) => s.trades)
+  const [sending, setSending] = useState(false)
   const map = useTokenMap()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -298,6 +300,7 @@ function FriendProfile({ r, total, onClose }: { r: Row; total: number; onClose: 
               <span className="rounded border border-accent/40 px-1 text-[9px] font-semibold leading-[14px] text-accent">🧑 Real player · main wallet</span>
             </div>
           </div>
+          <button onClick={() => setSending(true)} className="inline-flex items-center gap-1 rounded-md border border-line2 px-2 py-0.5 text-[11px] font-semibold text-muted hover:border-accent/40 hover:text-ink" title={`Send SOL / BNB / ETH / USDC to ${r.name}`}><Send size={11} /> Send</button>
           <TrackButton id={r.id} label />
           <button onClick={onClose} className="rounded p-1 text-muted hover:bg-raise hover:text-ink" aria-label="Close"><X size={16} /></button>
         </div>
@@ -341,6 +344,7 @@ function FriendProfile({ r, total, onClose }: { r: Row; total: number; onClose: 
               </button>
             ))}
           </Section>
+          {sending && <SendFundsModal toPid={r.id} onClose={() => setSending(false)} />}
           <p className="px-3 py-2 text-[10px] text-dim">Like on-chain: you see {r.name}'s main wallet. Side wallets trade under a bare address; to follow one you need its address (they share it, or you spot it on a coin's trades tab and hit 👁).</p>
         </div>
       </aside>

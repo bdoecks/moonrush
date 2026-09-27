@@ -9,7 +9,7 @@ import { flagBundle, runBotTick, sleuthBundle } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { GameMode, MarketEngine, MarketEvent, MarketState, SimWallet, SocialPost, VolumeBot } from '../src/types'
-import type { BotRun, ClientMsg, NetMarket, NetToken, RoomPlayer, RoundInfo, ServerMsg, TickMsg, TokenDiff, WalletDiff } from '../src/net/protocol'
+import type { BotRun, ClientMsg, NetMarket, NetToken, RoomPlayer, RoundInfo, ServerMsg, TickMsg, TokenDiff, TransferMsg, WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
@@ -36,6 +36,8 @@ interface Member {
   ws: WebSocket | null
   protect: string[]
   lastPostTick?: number
+  addrs?: string[] // their wallet addresses (private: only used to route transfers sent to an address)
+  inbox?: TransferMsg[] // transfers that arrived while they were offline
 }
 
 export class Room {
@@ -79,13 +81,14 @@ export class Room {
       ? { ...existing.info, name: msg.name, avatar: msg.avatar, level: msg.level, online: true }
       : { id: msg.playerId, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, equity: 0, startEquity: 0, trades: 0, wins: 0 }
     existing?.ws?.close(4000, 'Joined from another tab')
-    this.members.set(msg.playerId, { info, ws, protect: existing?.protect ?? [] })
+    this.members.set(msg.playerId, { info, ws, protect: existing?.protect ?? [], addrs: existing?.addrs })
     if (!this.hostId) this.hostId = msg.playerId
     this.emptySince = null
     this.send(ws, {
       t: 'welcome', you: msg.playerId, code: this.code, hostId: this.hostId, players: this.playerList(), round: this.round,
       market: this.netMarket(), wallets: round(this.wallets) as SimWallet[], posts: this.posts, events: this.events,
     })
+    for (const tr of existing?.inbox ?? []) this.send(ws, tr) // transfers that came in while they were away
     this.broadcastPlayers()
   }
 
@@ -141,6 +144,7 @@ export class Room {
             : {}),
         }
         me.protect = msg.protect.slice(0, 200)
+        if (Array.isArray(msg.addrs)) me.addrs = msg.addrs.filter((a) => typeof a === 'string').slice(0, 12).map((a) => a.slice(0, 24))
         this.playersDirty = true
         return
       case 'candles':
@@ -153,6 +157,8 @@ export class Room {
       }
       case 'post':
         return this.post(me, msg)
+      case 'send':
+        return this.transfer(me, msg)
       case 'chat': {
         const text = msg.text.trim().slice(0, 200)
         if (text) this.broadcast({ t: 'chat', from: playerId, name: me.info.name, avatar: me.info.avatar, text, time: Date.now() })
@@ -200,6 +206,31 @@ export class Room {
     const addr = typeof msg.addr === 'string' ? msg.addr.slice(0, 24) : undefined
     const who = msg.main !== false || !addr ? { name: me.info.name, pid: me.info.id, addr } : { name: addr, addr }
     this.market = applyPlayerTrade(this.market, t.id, msg.side, msg.usd, newPrice, who)
+  }
+
+  /** Coins from one player to another (to their main wallet, or to a wallet by address). */
+  private transfer(me: Member, msg: Extract<ClientMsg, { t: 'send' }>) {
+    const fail = (error: string) => this.sendTo(me.info.id, { t: 'sendResult', ref: msg.ref, ok: false, error })
+    if (this.round.state !== 'running') return fail('Transfers work during a round')
+    if (!['sol', 'bsc', 'hood', 'usdc'].includes(msg.asset) || !(msg.amount > 0) || !Number.isFinite(msg.amount)) return fail('Bad amount')
+    let target: Member | undefined
+    let toAddr: string | undefined
+    if (msg.to) target = this.members.get(msg.to)
+    else if (msg.toAddr) {
+      toAddr = msg.toAddr.trim().slice(0, 24)
+      target = [...this.members.values()].find((m) => m.addrs?.includes(toAddr!))
+    }
+    if (!target) return fail(msg.toAddr ? 'No wallet in this room has that address' : 'That player isn’t in this room')
+    if (target === me) return fail('That’s your own wallet — move coins between your wallets in Wallets')
+    const fromAddr = String(msg.fromAddr ?? '').slice(0, 24)
+    const recv: TransferMsg = {
+      t: 'recv', asset: msg.asset, amount: msg.amount, usd: Math.max(0, +msg.usd || 0),
+      ...(msg.main ? { from: me.info.name, fromPid: me.info.id } : { from: fromAddr || 'unknown wallet' }),
+      ...(toAddr ? { toAddr } : {}),
+    }
+    this.sendTo(me.info.id, { t: 'sendResult', ref: msg.ref, ok: true, toName: toAddr ?? target.info.name })
+    if (target.ws) this.send(target.ws, recv)
+    else target.inbox = [...(target.inbox ?? []), recv].slice(-50)
   }
 
   private cook(me: Member, msg: Extract<ClientMsg, { t: 'cook' }>) {

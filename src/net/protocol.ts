@@ -62,10 +62,12 @@ export type ClientMsg =
   | { t: 'cook'; token: NetToken; candles?: Record<Timeframe, Candle[]>; event?: MarketEvent }
   | { t: 'patch'; tokenId: string; patch: Partial<Pick<Token, 'devPct' | 'bundlePct' | 'bundleWallets' | 'holders' | 'top10Pct' | 'hype' | 'bundleFlagged'>> }
   | { t: 'bot'; tokenId: string; bot: VolumeBot | null }
-  | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[] }
+  | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[]; addrs?: string[] }
   | { t: 'candles'; tokenId: string }
   | { t: 'chat'; text: string }
   | { t: 'event'; event: MarketEvent } // something you did to your own coin (dev sells, bundle dumps)
+  // Send coins to another player: to their main wallet (`to` = player id) or to any wallet address they gave you.
+  | { t: 'send'; ref: number; to?: string; toAddr?: string; asset: SendAsset; amount: number; usd: number; main: boolean; fromAddr: string }
   | { t: 'post'; text: string; tokenId?: string; followers: number; rep: number; repeats: number } // a post / call on the timeline
 
 // ─── Server → browser ────────────────────────────────────────────────────────
@@ -96,3 +98,18 @@ export type ServerMsg =
   | { t: 'candles'; tokenId: string; candles: Record<Timeframe, Candle[]> | null }
   | { t: 'chat'; from: string; name: string; avatar: string; text: string; time: number }
   | { t: 'error'; message: string }
+  | { t: 'sendResult'; ref: number; ok: boolean; error?: string; toName?: string }
+  | TransferMsg
+
+export type SendAsset = 'sol' | 'bsc' | 'hood' | 'usdc'
+
+/** Coins arriving from another player. `from` is their name for a main-wallet send, else just the sending address. */
+export interface TransferMsg {
+  t: 'recv'
+  from: string
+  fromPid?: string
+  asset: SendAsset
+  amount: number
+  usd: number
+  toAddr?: string // which of your wallets (none = main)
+}

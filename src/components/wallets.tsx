@@ -1,5 +1,6 @@
 import clsx from 'clsx'
-import { ArrowRight, Check, ChevronDown, Copy, Pencil, Plus, Settings2, Trash2, Wallet } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, Copy, Pencil, Plus, Send, Settings2, Trash2, Wallet } from 'lucide-react'
+import { SendFundsModal } from './SendFunds'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
 import { accountValue, MAX_WALLETS, WALLET_EMOJIS } from '../game/accounts'
@@ -153,6 +154,7 @@ function ManagerBody({ onClose }: { onClose: () => void }) {
   const swapAssets = useGame((s) => s.swapAssets)
   const online = useGame((s) => !!s.online)
   const notify = useGame((s) => s.notify)
+  const [sending, setSending] = useState(false)
   const [name, setName] = useState('')
   const [emoji, setEmoji] = useState(WALLET_EMOJIS[(all.length) % WALLET_EMOJIS.length])
   const [editing, setEditing] = useState<string | null>(null)
@@ -171,7 +173,13 @@ function ManagerBody({ onClose }: { onClose: () => void }) {
           <div><div className="text-[10px] text-dim">All wallets</div><div className="num text-[16px] font-bold">{fmtUsd(total)}</div></div>
           <div><div className="text-[10px] text-dim">USD bank (shared)</div><div className="num text-[16px] font-bold">{fmtUsd(cash)}</div></div>
           <p className="ml-auto max-w-[320px] text-[10px] leading-snug text-dim">Each wallet holds its own SOL / BNB / ETH and bags. USD is a shared bank: swap it into any wallet. Auto-swap tops up whichever wallet is buying.</p>
+          {online && (
+            <button onClick={() => setSending(true)} className="flex items-center gap-1 rounded-md border border-accent/50 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent hover:bg-accent/20">
+              <Send size={12} /> Send to a friend
+            </button>
+          )}
         </div>
+        {sending && <SendFundsModal onClose={() => setSending(false)} />}
 
         {/* Wallet list */}
         <div className="overflow-x-auto rounded-md border border-line">
