@@ -505,6 +505,7 @@ export interface MarketEvent {
   icon: string
   tone: 'up' | 'down' | 'warn' | 'info'
   by?: string // multiplayer: the player whose action this was (their own browser already showed it)
+  mcap?: number // the coin's market cap when it happened
 }
 
 export interface Position {

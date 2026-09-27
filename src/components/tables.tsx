@@ -154,28 +154,4 @@ export function HistoryTable({ limit }: { limit?: number }) {
   )
 }
 
-export function EventFeed({ limit = 60, compact }: { limit?: number; compact?: boolean }) {
-  const events = useGame((s) => s.events)
-  const now = useGame((s) => s.market.time)
-  const select = useGame((s) => s.select)
-  const map = useTokenMap()
-  if (!events.length) return <EmptyState icon="📡" title="Listening for market events…" />
-  return (
-    <ul className="divide-y divide-line/50">
-      {events.slice(0, limit).map((e) => {
-        const clickable = e.tokenId && map.has(e.tokenId)
-        return (
-          <li
-            key={e.id}
-            onClick={() => clickable && select(e.tokenId!)}
-            className={clsx('slide-in flex items-start gap-2 px-3', compact ? 'py-1.5' : 'py-2', clickable && 'cursor-pointer hover:bg-panel2')}
-          >
-            <span className="text-[13px] leading-none mt-px">{e.icon}</span>
-            <span className={clsx('flex-1 text-[11px] leading-snug', e.tone === 'up' ? 'text-ink' : e.tone === 'down' ? 'text-down' : e.tone === 'warn' ? 'text-warn' : 'text-muted')}>{e.text}</span>
-            <span className="num shrink-0 text-[9px] text-dim">{fmtAge(now - e.time)}</span>
-          </li>
-        )
-      })}
-    </ul>
-  )
-}
+export { EventFeed } from './EventFeed'

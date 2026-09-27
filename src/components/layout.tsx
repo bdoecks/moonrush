@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { BarChart3, ChefHat, ChevronDown, Copy, Crosshair, Eye, Flame, Gift, LineChart, Radar, ChevronUp, Compass, Radio, Target, Trophy, Wallet, X } from 'lucide-react'
+import { BarChart3, ChefHat, ChevronDown, Copy, Crosshair, Eye, Flame, Gift, LineChart, Maximize2, Minimize2, Radar, ChevronUp, Compass, Radio, Target, Trophy, Wallet, X } from 'lucide-react'
 import { SocialTracker } from './SocialTracker'
 import { TrackerFeed } from './tracker/TrackerFeed'
 import { GlobalSearch } from './GlobalSearch'
@@ -27,6 +27,8 @@ export function Dock() {
   const nTrades = useGame((s) => s.portfolio.trades.length)
   const nTracked = useGame((s) => s.trackedWallets.length)
   const [collapsed, setCollapsed] = useState(() => load<boolean>('dockCollapsed') ?? false)
+  const [tall, setTall] = useState(() => load<boolean>('dockTall') ?? false) // bigger panel (easier to read the Events feed)
+  useEffect(() => save('dockTall', tall), [tall])
   useEffect(() => save('dockCollapsed', collapsed), [collapsed])
   const firstTab = useRef(tab)
   useEffect(() => {
@@ -43,7 +45,7 @@ export function Dock() {
     { id: 'social', label: 'Social tracker' },
   ]
   return (
-    <div data-dock className={clsx('hidden shrink-0 flex-col border-t border-line bg-panel md:flex transition-[height] duration-200', collapsed ? 'h-8' : 'h-[clamp(130px,25vh,250px)]')}>
+    <div data-dock className={clsx('hidden shrink-0 flex-col border-t border-line bg-panel md:flex transition-[height] duration-200', collapsed ? 'h-8' : tall ? 'h-[clamp(220px,45vh,480px)]' : 'h-[clamp(130px,25vh,250px)]')}>
       <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-line px-1">
         {tabs.map((t) => (
           <button
@@ -57,6 +59,11 @@ export function Dock() {
           </button>
         ))}
         <PnlButton className="ml-auto" />
+        {!collapsed && (
+          <button onClick={() => setTall((v) => !v)} className="rounded p-1 text-muted hover:bg-raise hover:text-ink" aria-label={tall ? 'Make panel smaller' : 'Make panel taller'} title={tall ? 'Smaller panel' : 'Taller panel'}>
+            {tall ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
+        )}
         <button onClick={() => setCollapsed((c) => !c)} className="rounded p-1 text-muted hover:bg-raise hover:text-ink" aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}>
           {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
@@ -66,7 +73,7 @@ export function Dock() {
           {tab === 'positions' && <PositionsTable />}
           {tab === 'watchlist' && <WatchlistTable />}
           {tab === 'history' && <HistoryTable limit={100} />}
-          {tab === 'feed' && <EventFeed compact />}
+          {tab === 'feed' && <EventFeed />}
           {tab === 'tracker' && <TrackerFeed compact />}
           {tab === 'social' && <SocialTracker />}
         </div>
@@ -100,7 +107,7 @@ export function Sidebar() {
           <div className="flex items-center gap-1.5 px-3 pt-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted">
             <Radio size={12} className="text-accent" /> Live feed
           </div>
-          <EventFeed limit={25} compact />
+          <EventFeed limit={25} compact toolbar={false} />
         </div>
       </div>
     </aside>

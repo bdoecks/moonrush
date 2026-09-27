@@ -1036,7 +1036,8 @@ export const useGame = create<GameState>()((set, get) => {
           return t && p.peakMcap !== undefined && t.mcap > p.peakMcap ? { ...p, peakMcap: t.mcap } : p
         }),
         walletFeed: feedItems.length ? [...feedItems.reverse(), ...s.walletFeed].slice(0, 120) : s.walletFeed,
-        events: newEvents.length ? [...newEvents.reverse(), ...s.events].slice(0, 120) : s.events,
+        // Each event remembers the coin's MC when it happened (the Events tab shows the move since).
+        events: newEvents.length ? [...newEvents.reverse().map((e) => (e.tokenId && e.mcap === undefined ? { ...e, mcap: map.get(e.tokenId)?.mcap } : e)), ...s.events].slice(0, 200) : s.events,
         players,
         runTicks: running ? s.runTicks + 1 : s.runTicks,
       })
