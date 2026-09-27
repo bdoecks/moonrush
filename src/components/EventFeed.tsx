@@ -5,6 +5,7 @@ import { create } from 'zustand'
 import { CHAIN_IDS, CHAINS } from '../data/chains'
 import { useTokenMap } from '../hooks/useDerived'
 import { useGame } from '../game/store'
+import { EVENTS_DISABLED } from '../game/flags'
 import type { Chain, EventKind, MarketEvent } from '../types'
 import { fmtAge, fmtCompact } from '../utils/format'
 import { load, save } from '../utils/storage'
@@ -65,7 +66,12 @@ const useEventPrefs = create<{ p: EventPrefs; set: (patch: Partial<EventPrefs>) 
 }))
 
 /** The market events feed: filter by type, chain and coin; tap one to open the coin. */
-export function EventFeed({ limit = 80, compact, toolbar = true }: { limit?: number; compact?: boolean; toolbar?: boolean }) {
+export function EventFeed(props: { limit?: number; compact?: boolean; toolbar?: boolean }) {
+  if (EVENTS_DISABLED) return <EmptyState icon="🚧" title="Events are turned off for now" hint="The market events feed is being reworked. Rug warnings for coins you hold still pop up." />
+  return <EventFeedLive {...props} />
+}
+
+function EventFeedLive({ limit = 80, compact, toolbar = true }: { limit?: number; compact?: boolean; toolbar?: boolean }) {
   const events = useGame((s) => s.events)
   const now = useGame((s) => s.market.time)
   const held = useGame((s) => s.portfolio.positions)
