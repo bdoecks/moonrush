@@ -18,6 +18,15 @@ export interface RoomPlayer {
   wins: number
   finished?: boolean
   seasonPoints?: number // their real season points (sets the tier everyone sees for them)
+  holdings?: MainHolding[] // what their public main wallet holds (side wallets stay hidden)
+}
+
+/** A coin in a player's main wallet, as everyone in the room can see it on-chain. */
+export interface MainHolding {
+  tokenId: string
+  qty: number
+  cost: number // USD cost basis
+  openedAt: number // tick
 }
 
 export interface RoundInfo {
@@ -48,11 +57,12 @@ export interface BotRun {
 export type ClientMsg =
   | { t: 'hello'; name: string; avatar: string; level: number; playerId: string; room?: string; create?: boolean }
   | { t: 'start'; mode: GameMode; durationTicks: number | null; engine?: MarketEngine }
-  | { t: 'trade'; tokenId: string; side: 'buy' | 'sell'; usd: number; qty: number }
+  // `main`: traded from your public main wallet (shows your name); otherwise it shows only `addr` (stealth side wallet).
+  | { t: 'trade'; tokenId: string; side: 'buy' | 'sell'; usd: number; qty: number; addr?: string; main?: boolean }
   | { t: 'cook'; token: NetToken; candles?: Record<Timeframe, Candle[]>; event?: MarketEvent }
   | { t: 'patch'; tokenId: string; patch: Partial<Pick<Token, 'devPct' | 'bundlePct' | 'bundleWallets' | 'holders' | 'top10Pct' | 'hype' | 'bundleFlagged'>> }
   | { t: 'bot'; tokenId: string; bot: VolumeBot | null }
-  | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number }
+  | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[] }
   | { t: 'candles'; tokenId: string }
   | { t: 'chat'; text: string }
   | { t: 'event'; event: MarketEvent } // something you did to your own coin (dev sells, bundle dumps)

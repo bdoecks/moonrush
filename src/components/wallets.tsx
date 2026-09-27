@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ArrowRight, Check, ChevronDown, Pencil, Plus, Settings2, Trash2, Wallet } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, Copy, Pencil, Plus, Settings2, Trash2, Wallet } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
 import { accountValue, MAX_WALLETS, WALLET_EMOJIS } from '../game/accounts'
@@ -7,7 +7,8 @@ import { useGame } from '../game/store'
 import { nativePrice } from '../game/tradingEngine'
 import { useWallets } from '../hooks/useWallets'
 import type { Account, Chain } from '../types'
-import { fakeAddress } from '../utils/address'
+import { playerId } from '../net/client'
+import { fakeAddress, walletAddress } from '../utils/address'
 import { fmtUsd } from '../utils/format'
 import { Modal } from './ui'
 
@@ -135,6 +136,8 @@ function ManagerBody({ onClose }: { onClose: () => void }) {
   const setActive = useGame((s) => s.setActiveWallets)
   const transfer = useGame((s) => s.transferNative)
   const swapAssets = useGame((s) => s.swapAssets)
+  const online = useGame((s) => !!s.online)
+  const notify = useGame((s) => s.notify)
   const [name, setName] = useState('')
   const [emoji, setEmoji] = useState(WALLET_EMOJIS[(all.length) % WALLET_EMOJIS.length])
   const [editing, setEditing] = useState<string | null>(null)
@@ -202,7 +205,26 @@ function ManagerBody({ onClose }: { onClose: () => void }) {
                               {activeIds[0] === a.id && <span className="rounded bg-raise px-1 text-[8px] font-bold text-muted">PRIMARY</span>}
                               <button onClick={() => { setEditing(a.id); setDraftName(a.name) }} className="text-dim hover:text-ink" aria-label={`Rename ${a.name}`}><Pencil size={10} /></button>
                             </div>
-                            <div className="num text-[10px] text-dim">{fakeAddress(a.id)}</div>
+                            {online ? (
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <button
+                                  onClick={() => {
+                                    const addr = walletAddress(playerId(), a.id, 'sol')
+                                    navigator.clipboard?.writeText(addr).catch(() => {})
+                                    notify({ title: 'ADDRESS COPIED', body: `${a.name}: ${addr}${a.id === all[0]?.id ? '' : ' · give it only to people you want following this wallet'}`, tone: 'info', icon: '📋' }, 'click')
+                                  }}
+                                  className="num inline-flex items-center gap-0.5 text-dim hover:text-accent"
+                                  title="Copy address"
+                                >
+                                  {walletAddress(playerId(), a.id, 'sol')} <Copy size={9} />
+                                </button>
+                                {a.id === all[0]?.id
+                                  ? <span className="rounded bg-accent/10 px-1 text-[8px] font-bold text-accent" title="Your main wallet: everyone in the room sees its trades under your name and its bags on the leaderboard">PUBLIC</span>
+                                  : <span className="rounded bg-raise px-1 text-[8px] font-bold text-muted" title="Side wallet: trades show only this address, so nobody knows it's you unless you share it">🕶 STEALTH</span>}
+                              </div>
+                            ) : (
+                              <div className="num text-[10px] text-dim">{fakeAddress(a.id)}</div>
+                            )}
                           </div>
                         </div>
                       )}

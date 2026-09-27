@@ -10,7 +10,8 @@ import { movement, retOf } from '../game/rankWatch'
 import { fmtCountdown, isRanked, nextTier, placementPoints, rivalPoints, seasonEnds, seasonNumber, tierFor, TIERS, type Tier } from '../game/season'
 import { useGame } from '../game/store'
 import { rivalWalletId, walletStats } from '../game/walletEngine'
-import { SIM_SEC_PER_TICK } from '../game/marketEngine'
+import { SIM_SEC_PER_TICK, secPerTickOf } from '../game/marketEngine'
+import { addrKey, playerKey, useFriends } from '../net/friends'
 import { fmtAge, fmtCompact, fmtNum, fmtPct, fmtUsd, toneClass } from '../utils/format'
 
 type Key = 'rank' | 'name' | 'equity' | 'pnl' | 'winRate' | 'trades' | 'level'
@@ -27,6 +28,7 @@ interface Row {
   level: number
   tier: Tier
   isYou?: boolean
+  real?: boolean
   rank: number
 }
 
@@ -62,7 +64,7 @@ export function LeaderboardView() {
     }
     const all: Omit<Row, 'rank'>[] = [
       you,
-      ...players.map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, equity: p.equity, pnl: p.equity - p.startEquity, ret: retOf(p), winRate: p.trades ? p.wins / p.trades : 0, trades: p.trades, level: p.level, tier: tierFor(p.seasonPoints ?? rivalPoints(p)) })), // real players carry their actual points; simulated rivals get a made-up tier
+      ...players.map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, equity: p.equity, pnl: p.equity - p.startEquity, ret: retOf(p), winRate: p.trades ? p.wins / p.trades : 0, trades: p.trades, level: p.level, tier: tierFor(p.seasonPoints ?? rivalPoints(p)), real: p.real })), // real players carry their actual points; simulated rivals get a made-up tier
     ]
     return [...all].sort((a, b) => b.ret - a.ret).map((r, i) => ({ ...r, rank: i + 1 }))
   }, [players, v, xp, myTier])
@@ -120,6 +122,7 @@ export function LeaderboardView() {
 
         <Podium rows={ranked.slice(0, 3)} onOpen={open} />
         <Rivals ranked={ranked} me={me} startBalance={v.portfolio.startBalance} onOpen={open} />
+        {roomCode && <WatchedWallets />}
 
         <div className="overflow-x-auto rounded-md border border-line bg-panel">
           <table className="w-full min-w-[720px] text-[12px]">
@@ -169,8 +172,45 @@ export function LeaderboardView() {
   )
 }
 
-/** Quick-track a rival's wallet: their trades show in Track and alert you. */
+/** Quick-track a rival's wallet: their trades show in Track and alert you. Real players: only their main wallet. */
 function TrackButton({ id, label }: { id: string; label?: boolean }) {
+  const real = useGame((s) => s.players.some((p) => p.id === id && p.real))
+  return real ? <FriendTrackButton id={id} label={label} /> : <RivalTrackButton id={id} label={label} />
+}
+
+function FriendTrackButton({ id, label }: { id: string; label?: boolean }) {
+  const name = useGame((s) => s.players.find((p) => p.id === id)?.name ?? 'Player')
+  const notify = useGame((s) => s.notify)
+  const tracked = useFriends((s) => s.watch.some((w) => w.key === playerKey(id)))
+  const toggle = useFriends((s) => s.toggle)
+  const onClick = (e: MouseEvent) => {
+    e.stopPropagation()
+    const on = toggle({ key: playerKey(id), label: name })
+    notify({ title: on ? 'TRACKING' : 'UNTRACKED', body: on ? `${name}'s main wallet · you'll get an alert when it trades. Side wallets stay hidden.` : name, tone: 'info', icon: on ? '👁' : '🙈' }, 'click')
+  }
+  return <TrackPill tracked={tracked} label={label} onClick={onClick} title={tracked ? 'Stop tracking' : `Track ${name}'s main wallet (their side wallets stay hidden unless you know the address)`} />
+}
+
+function TrackPill({ tracked, label, onClick, title }: { tracked: boolean; label?: boolean; onClick: (e: MouseEvent) => void; title: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={tracked ? 'Stop tracking wallet' : 'Track wallet'}
+      aria-pressed={tracked}
+      className={clsx(
+        'inline-flex items-center gap-1 rounded-md border font-semibold transition-colors',
+        label ? 'px-2 py-0.5 text-[11px]' : 'p-1',
+        tracked ? 'border-accent/50 bg-accent/10 text-accent' : 'border-line2 text-dim hover:border-accent/40 hover:text-ink',
+      )}
+    >
+      {tracked ? <Bell size={12} /> : <BellOff size={12} />}
+      {label && (tracked ? 'Tracking' : 'Track')}
+    </button>
+  )
+}
+
+function RivalTrackButton({ id, label }: { id: string; label?: boolean }) {
   const wid = rivalWalletId(id)
   const tracked = useGame((s) => s.trackedWallets.includes(wid))
   const exists = useGame((s) => s.wallets.some((w) => w.id === wid))
@@ -208,7 +248,107 @@ const BUCKETS: { label: string; min: number; cls: string }[] = [
   { label: '< -50%', min: -Infinity, cls: 'bg-down' },
 ]
 
-function RivalProfile({ r, total, onClose }: { r: Row; total: number; onClose: () => void }) {
+function RivalProfile(props: { r: Row; total: number; onClose: () => void }) {
+  return props.r.real ? <FriendProfile {...props} /> : <SimRivalProfile {...props} />
+}
+
+/** A real player in your room: only what's public on-chain, their main wallet's bags and trades. */
+function FriendProfile({ r, total, onClose }: { r: Row; total: number; onClose: () => void }) {
+  const player = useGame((s) => s.players.find((p) => p.id === r.id))
+  const tick = useGame((s) => s.market.tick)
+  const now = useGame((s) => s.market.time)
+  const select = useGame((s) => s.select)
+  const allTrades = useFriends((s) => s.trades)
+  const map = useTokenMap()
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopImmediatePropagation()
+      onClose()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onClose])
+
+  const holdings = (player?.holdings ?? [])
+    .map((p) => {
+      const t = map.get(p.tokenId)
+      const value = t ? p.qty * t.price : 0
+      return { id: p.tokenId, t, p, value, pct: p.cost > 0 ? value / p.cost - 1 : 0 }
+    })
+    .sort((a, b) => b.value - a.value)
+  const holdValue = holdings.reduce((a, h) => a + h.value, 0)
+  const trades = allTrades.filter((x) => x.pid === r.id)
+  const wins = Math.round(r.winRate * r.trades)
+  const secPerTick = secPerTickOf(useGame.getState().market)
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/50 fade-in" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <aside role="dialog" aria-label={`${r.name} wallet`} className="sheet-up flex h-full w-full max-w-[480px] flex-col border-l border-line2 bg-panel shadow-2xl md:animate-none">
+        <div className="flex items-center gap-3 border-b border-line p-3" style={{ backgroundImage: `radial-gradient(circle at 0% 0%, ${r.tier.color}26, transparent 60%)` }}>
+          <div className="grid size-12 place-items-center rounded-full bg-raise text-[24px]" style={{ boxShadow: `0 0 0 2px ${r.tier.color}88` }}>{r.avatar}</div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate font-display text-[17px] font-bold">{r.name}</span>
+              <span className="num rounded bg-raise px-1.5 py-px text-[10px] text-muted">#{r.rank} of {total}</span>
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+              <TierChip tier={r.tier} />
+              <span className="num rounded bg-raise px-1.5 py-px text-[10px] text-muted">Lv {r.level}</span>
+              <span className="rounded border border-accent/40 px-1 text-[9px] font-semibold leading-[14px] text-accent">🧑 Real player · main wallet</span>
+            </div>
+          </div>
+          <TrackButton id={r.id} label />
+          <button onClick={onClose} className="rounded p-1 text-muted hover:bg-raise hover:text-ink" aria-label="Close"><X size={16} /></button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="grid grid-cols-3 gap-2 p-3">
+            <Box label="Round P&L"><span className={toneClass(r.pnl)}>{r.pnl >= 0 ? '+' : '-'}{fmtCompact(Math.abs(r.pnl))}</span></Box>
+            <Box label="Return"><span className={toneClass(r.ret)}>{fmtPct(r.ret, 2)}</span></Box>
+            <Box label="Portfolio">{fmtCompact(r.equity)}</Box>
+            <Box label="Win rate"><span className={r.winRate >= 0.5 ? 'text-up' : r.trades ? 'text-down' : ''}>{r.trades ? `${(r.winRate * 100).toFixed(1)}%` : '—'}</span></Box>
+            <Box label="Trades"><span className="text-up">{wins}</span><span className="text-dim"> W / </span><span className="text-down">{r.trades - wins}</span><span className="text-dim"> L</span></Box>
+            <Box label="Main wallet bags">{holdings.length ? fmtCompact(holdValue) : '—'}</Box>
+          </div>
+
+          <Section title={`Coins they're in (${holdings.length})`}>
+            {holdings.length === 0 ? <EmptyState icon="💤" title="Main wallet holds nothing right now" /> : holdings.map((h) => (
+              <button key={h.id} disabled={!h.t} onClick={() => h.t && select(h.t.id)} title={h.t ? `Open ${h.t.ticker}` : undefined} className="flex w-full items-center gap-2 border-b border-line/50 px-3 py-1.5 text-left hover:bg-panel2">
+                {h.t && <TokenIcon token={h.t} size={24} />}
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1 text-[12px] font-bold">{h.t?.ticker ?? '?'}{h.t && <ChainBadge chain={h.t.chain} />}{h.t?.status === 'rugged' && <span className="text-[9px] text-down">RUGGED</span>}</span>
+                  <span className="num block text-[10px] text-dim">{h.t ? `${fmtCompact(h.t.mcap)} MC · ` : ''}held {fmtAge(Math.max(0, tick - h.p.openedAt) * secPerTick)}</span>
+                </span>
+                <span className="ml-auto text-right">
+                  <span className="num block text-[12px] font-semibold">{fmtUsd(h.value, h.value < 10 ? 2 : 0)}</span>
+                  <span className="num block text-[10px] text-dim">cost {fmtCompact(h.p.cost)}</span>
+                </span>
+                <span className={clsx('num w-16 text-right text-[11px] font-semibold', toneClass(h.pct))}>{fmtPct(h.pct)}</span>
+              </button>
+            ))}
+          </Section>
+
+          <Section title={`Recent trades${trades.length ? ` · ${trades.length}` : ''}`}>
+            {trades.length === 0 ? <EmptyState icon="📭" title="No main-wallet trades seen yet" /> : trades.slice(0, 40).map((tr) => (
+              <button key={tr.key} onClick={() => map.get(tr.tokenId) && select(tr.tokenId)} className="flex w-full items-center gap-2 border-b border-line/50 px-3 py-1.5 text-left text-[11px] hover:bg-panel2">
+                <span className="num w-9 text-dim">{fmtAge(Math.max(0, now - tr.time))}</span>
+                <span className={clsx('w-8 font-semibold', tr.side === 'buy' ? 'text-up' : 'text-down')}>{tr.side === 'buy' ? 'Buy' : 'Sell'}</span>
+                <TokenIcon token={{ emoji: tr.emoji, hue: tr.hue, image: tr.image, status: 'graduated' }} size={18} />
+                <span className="font-semibold">{tr.ticker}</span>
+                <span className="num text-[10px] text-dim">@ {fmtCompact(tr.mcap)}</span>
+                <span className="ml-auto num">{fmtUsd(tr.usd, tr.usd < 10 ? 2 : 0)}</span>
+              </button>
+            ))}
+          </Section>
+          <p className="px-3 py-2 text-[10px] text-dim">Like on-chain: you see {r.name}'s main wallet. Side wallets trade under a bare address; to follow one you need its address (they share it, or you spot it on a coin's trades tab and hit 👁).</p>
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+function SimRivalProfile({ r, total, onClose }: { r: Row; total: number; onClose: () => void }) {
   const w = useGame((s) => s.wallets.find((x) => x.id === rivalWalletId(r.id)))
   const tick = useGame((s) => s.market.tick)
   const now = useGame((s) => s.market.time)
@@ -364,6 +504,66 @@ function Move({ id, big }: { id: string; big?: boolean }) {
     <span className={clsx('num inline-flex items-center font-bold', n > 0 ? 'text-up' : 'text-down', big ? 'text-[12px]' : 'text-[10px]')} title="Places moved in the last minute">
       {n > 0 ? '▲' : '▼'}{Math.abs(n)}{big && <span className="ml-1 font-normal text-dim">last min</span>}
     </span>
+  )
+}
+
+/** Wallets you follow in this room, plus a box to add a side wallet by address (if a friend gave it to you). */
+function WatchedWallets() {
+  const watch = useFriends((s) => s.watch)
+  const trades = useFriends((s) => s.trades)
+  const toggle = useFriends((s) => s.toggle)
+  const rename = useFriends((s) => s.rename)
+  const notify = useGame((s) => s.notify)
+  const now = useGame((s) => s.market.time)
+  const select = useGame((s) => s.select)
+  const [addr, setAddr] = useState('')
+  const [label, setLabel] = useState('')
+  const add = () => {
+    const a = addr.trim()
+    if (a.length < 6) return notify({ title: 'ADDRESS', body: 'Paste a wallet address like 9fQx…b7nK', tone: 'warn', icon: '⚠️' })
+    if (!watch.some((w) => w.key === addrKey(a))) toggle({ key: addrKey(a), label: label.trim() || a })
+    notify({ title: 'TRACKING', body: `${label.trim() || a} · you'll get an alert when it trades`, tone: 'info', icon: '👁' }, 'click')
+    setAddr('')
+    setLabel('')
+  }
+  const recent = trades.filter((t) => watch.some((w) => (t.pid && w.key === playerKey(t.pid)) || (t.addr && w.key === addrKey(t.addr)))).slice(0, 8)
+  const labelOf = (t: (typeof trades)[number]) => watch.find((w) => (t.pid && w.key === playerKey(t.pid)) || (t.addr && w.key === addrKey(t.addr)))?.label ?? t.name
+  return (
+    <div className="rounded-md border border-line bg-panel p-3">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-[12px] font-bold">👁 Wallets you track</span>
+        <span className="text-[10px] text-dim">Main wallets are public. Side wallets only show an address: track one if a friend shares it or you spot it on a coin's trades.</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {watch.length === 0 && <span className="text-[11px] text-dim">Nobody yet. Hit the 🔔 next to a player, or add an address below.</span>}
+        {watch.map((w) => (
+          <span key={w.key} className="inline-flex items-center gap-1 rounded-md border border-line2 bg-bg px-2 py-0.5 text-[11px]">
+            <span>{w.key.startsWith('p:') ? '🧑' : '🕶'}</span>
+            <input defaultValue={w.label} onBlur={(e) => e.target.value.trim() && rename(w.key, e.target.value.trim())} className="num w-28 bg-transparent font-semibold outline-none" title="Rename" />
+            <button onClick={() => toggle(w)} className="text-dim hover:text-down" aria-label="Stop tracking"><X size={11} /></button>
+          </span>
+        ))}
+      </div>
+      <form className="mt-2 flex flex-wrap gap-1.5" onSubmit={(e) => (e.preventDefault(), add())}>
+        <input value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="Wallet address (e.g. 9fQx…b7nK)" className="num min-w-0 flex-1 rounded-md border border-line2 bg-bg px-2 py-1 text-[11px] outline-none focus:border-accent/60" />
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (optional)" className="w-32 rounded-md border border-line2 bg-bg px-2 py-1 text-[11px] outline-none focus:border-accent/60" />
+        <button type="submit" className="rounded-md border border-accent/50 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent hover:bg-accent/20">Track address</button>
+      </form>
+      {recent.length > 0 && (
+        <div className="mt-2 border-t border-line pt-1.5">
+          {recent.map((t) => (
+            <button key={t.key} onClick={() => select(t.tokenId)} className="flex w-full items-center gap-2 py-0.5 text-left text-[11px] hover:text-accent">
+              <span className="num w-9 text-dim">{fmtAge(Math.max(0, now - t.time))}</span>
+              <span className="w-24 truncate font-semibold">{labelOf(t)}</span>
+              <span className={t.side === 'buy' ? 'text-up' : 'text-down'}>{t.side === 'buy' ? 'bought' : 'sold'}</span>
+              <span className="num">{fmtUsd(t.usd, t.usd < 10 ? 2 : 0)}</span>
+              <span className="font-semibold">${t.ticker}</span>
+              <span className="num text-dim">@ {fmtCompact(t.mcap)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

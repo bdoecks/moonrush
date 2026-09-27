@@ -6,9 +6,12 @@ import { levelFromXp } from '../game/progression'
 import { seasonNumber } from '../game/season'
 import { nativePrice } from '../game/tradingEngine'
 import { netHooks, roomRivals, useGame, type BotTickRun, type ChatLine, type MpSave, type OnlineState } from '../game/store'
-import type { Chain, MarketEngine, MarketState, SimWallet, Token, Trade } from '../types'
+import type { Chain, MarketEngine, MarketState, SimWallet, TapeTrade, Token, Trade } from '../types'
+import { walletAddress } from '../utils/address'
+import { fmtCompact, fmtUsd } from '../utils/format'
 import { load, remove, save } from '../utils/storage'
-import { MP_PATH, type ClientMsg, type NetMarket, type NetToken, type RoundInfo, type ServerMsg, type TickMsg } from './protocol'
+import { myAddresses, recordPlayerTrades, useFriends } from './friends'
+import { MP_PATH, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type ServerMsg, type TickMsg } from './protocol'
 
 const STATUS_MS = 2000
 const TAPE_LEN = 40
@@ -225,6 +228,7 @@ function onWelcome(msg: Extract<ServerMsg, { t: 'welcome' }>) {
     s.patchState({ runStatus: 'select', modal: 'lobby' })
   }
   muted = false
+  seedPlayerTrades(market, msg.you)
   if (useGame.getState().selectedId) send({ t: 'candles', tokenId: useGame.getState().selectedId! })
   startLoops()
   if (pending) {
@@ -243,6 +247,7 @@ function onRound(round: RoundInfo, net?: NetMarket, wallets?: SimWallet[]) {
     createMarket(round.seed, round.startTime, round.engine ?? 'classic') // also sets the room's clock
     const market = localMarket(net, s.online.you)
     remove(mpSaveKey())
+    useFriends.getState().clearTrades()
     muted = true
     s.patchState({ online, market, wallets: wallets ?? s.wallets, events: [], socialFeed: [], walletFeed: [], selectedId: pickDefault(market), players: roomRivals(online) })
     useGame.getState().startRun(round.mode, { durationTicks: round.durationTicks })
@@ -258,15 +263,24 @@ function onTick(msg: TickMsg) {
   if (!s.online) return
   const me = s.online.you
   const prevTokens = new Map(s.market.tokens.map((t) => [t.id, t]))
+  const myAddrs = ownAddrs()
   // Coins arrive as diffs: merge each onto what we had. A coin we've never seen comes in full (new, or a keyframe);
   // a stray partial one for an unknown coin waits for the next keyframe.
   const tokens: Token[] = []
+  const others: { t: Token; e: TapeTrade }[] = []
   for (const d of msg.market.tokens) {
     const prev = prevTokens.get(d.id)
     if (!prev && !d.sim) continue
-    tokens.push(localToken(d, prev, me))
+    const t = localToken(d, prev, me, myAddrs)
+    tokens.push(t)
+    const seen = new Set(prev?.tape.map((e) => e.id))
+    for (const e of d.tape ?? []) if (!seen.has(e.id) && e.tag !== 'you' && (e.pid || e.addr) && e.pid !== me && !(e.addr && myAddrs.has(e.addr))) others.push({ t, e })
   }
   const market: MarketState = { ...msg.market, tokens }
+  // Other players' trades: logged for their leaderboard profile; ones you follow alert you.
+  for (const { trade, watch } of recordPlayerTrades(others).slice(0, 3)) {
+    s.notify({ title: watch.label, body: `${trade.side === 'buy' ? 'Bought' : 'Sold'} ${fmtUsd(trade.usd, trade.usd < 10 ? 2 : 0)} of $${trade.ticker} @ ${fmtCompact(trade.mcap)} MC`, tone: trade.side === 'buy' ? 'up' : 'down', icon: '👁', tokenId: trade.tokenId })
+  }
 
   // Charts: whole histories for new coins, recorded points for the rest.
   for (const [id, c] of Object.entries(msg.newCandles)) candleStore.set(id, c)
@@ -336,16 +350,48 @@ function onTick(msg: TickMsg) {
  * A coin from the server (full, or a diff merged onto what we had). Your own coins keep `creator: 'you'`; your trades
  * on the tape show as YOU.
  */
-function localToken(d: Partial<NetToken> & { id: string }, prev: Token | undefined, me: string): Token {
-  const fresh = (d.tape ?? []).map((e) => (e.pid === me ? { ...e, wallet: 'YOU', tag: 'you' as const } : e))
+function localToken(d: Partial<NetToken> & { id: string }, prev: Token | undefined, me: string, mine: Set<string>): Token {
+  const fresh = (d.tape ?? []).map((e) => (e.pid === me || (e.addr && mine.has(e.addr)) ? { ...e, wallet: 'YOU', tag: 'you' as const } : e))
   // New trades go on top of what we had, dropping local-only copies of our own trades (the server echo replaces them).
-  const tape = prev ? [...fresh, ...prev.tape.filter((e) => !(e.tag === 'you' && !e.pid))].slice(0, TAPE_LEN) : fresh
+  const tape = prev ? [...fresh, ...prev.tape.filter((e) => !(e.tag === 'you' && !e.pid && !e.addr))].slice(0, TAPE_LEN) : fresh
   const t = { ...(prev ?? {}), ...d, tape } as Token
   return { ...t, creator: t.creatorId === me ? 'you' : undefined }
 }
 
 function localMarket(m: NetMarket, me: string): MarketState {
-  return { ...m, tokens: m.tokens.map((t) => localToken(t, undefined, me)) }
+  const mine = ownAddrs()
+  return { ...m, tokens: m.tokens.map((t) => localToken(t, undefined, me, mine)) }
+}
+
+/** Your wallets' addresses on every chain (your side-wallet trades come back under these). */
+function ownAddrs() {
+  const s = useGame.getState()
+  const ids = s.portfolio.accounts?.map((a) => a.id) ?? []
+  return myAddresses(playerId(), ids.length ? ids : ['main'], ['sol'])
+}
+
+function mainHoldings(): MainHolding[] {
+  const p = useGame.getState().portfolio
+  const pos = p.accounts?.[0]?.positions ?? p.positions
+  return Object.values(pos)
+    .filter((x) => x.qty > 0)
+    .sort((a, b) => b.costBasis - a.costBasis)
+    .slice(0, 30)
+    .map((x) => ({ tokenId: x.tokenId, qty: x.qty, cost: x.costBasis, openedAt: x.openedAt }))
+}
+
+/** The public main wallet (the first one); every other wallet is a stealth side wallet. */
+function mainWalletId() {
+  return useGame.getState().portfolio.accounts?.[0]?.id
+}
+
+/** Seed the player-trade log from what's already on the tapes when you join. */
+function seedPlayerTrades(market: MarketState, me: string) {
+  const mine = ownAddrs()
+  const found: { t: Token; e: TapeTrade }[] = []
+  for (const t of market.tokens) for (const e of t.tape) if (e.tag !== 'you' && (e.pid || e.addr) && e.pid !== me && !(e.addr && mine.has(e.addr))) found.push({ t, e })
+  found.sort((a, b) => a.e.time - b.e.time)
+  recordPlayerTrades(found)
 }
 
 function pickDefault(m: MarketState) {
@@ -362,7 +408,12 @@ function startLoops() {
     const seen = new Set(prev.portfolio.trades.map(key))
     const fresh = s.portfolio.trades.filter((tr) => !seen.has(key(tr)) && tr.status === 'FILLED')
     if (fresh.length > 8 && fresh.length === s.portfolio.trades.length) return // a whole list swapped in, not new fills
-    for (const tr of fresh.reverse()) send({ t: 'trade', tokenId: tr.tokenId, side: tr.side, usd: tr.value, qty: tr.qty })
+    const main = mainWalletId()
+    for (const tr of fresh.reverse()) {
+      const wid = tr.walletId ?? main ?? 'main'
+      // One address per wallet (its Solana-style id) so it can be followed on every chain.
+      send({ t: 'trade', tokenId: tr.tokenId, side: tr.side, usd: tr.value, qty: tr.qty, addr: walletAddress(playerId(), main ? wid : 'main', 'sol'), main: !main || wid === main })
+    }
   })
   const report = () => {
     const s = useGame.getState()
@@ -378,6 +429,8 @@ function startLoops() {
       level: levelFromXp(s.profile.xp).level, finished: s.runStatus === 'finished',
       // Your real season points, so everyone in the room sees your actual tier.
       seasonPoints: s.profile.season?.id === seasonNumber() ? s.profile.season.points : 0,
+      // Your main wallet's bags are public on-chain; side wallets are never included.
+      holdings: running ? mainHoldings() : [],
       protect: [...Object.keys(s.portfolio.positions), ...s.watchlist, ...(s.selectedId ? [s.selectedId] : [])],
     })
   }

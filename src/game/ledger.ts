@@ -57,7 +57,7 @@ const hash = (s: string) => {
 const logUniform = (rng: Rng, lo: number, hi: number) => Math.exp(rng.range(Math.log(lo), Math.log(Math.max(lo * 1.0001, hi))))
 
 /** Address as the chain shows it: base58 on Solana, 0x… on EVM chains. */
-export const displayAddress = (wallet: string, chain: Chain) => (wallet === 'YOU' ? 'You' : chain === 'sol' ? wallet : fakeAddress(wallet, chain))
+export const displayAddress = (wallet: string, chain: Chain) => (wallet === 'YOU' ? 'You' : chain === 'sol' || wallet.startsWith('0x') ? wallet : fakeAddress(wallet, chain))
 
 function holder(book: Book, wallet: string, time: number): Holder {
   let h = book.holders.get(wallet)

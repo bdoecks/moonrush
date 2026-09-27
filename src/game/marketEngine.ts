@@ -971,7 +971,7 @@ export function quoteSell(t: Token, qty: number) {
 }
 
 /** Apply a player trade's price impact to the token and add it to the tape. */
-export function applyPlayerTrade(m: MarketState, tokenId: string, side: 'buy' | 'sell', usd: number, newPrice: number, who?: { name: string; pid: string }): MarketState {
+export function applyPlayerTrade(m: MarketState, tokenId: string, side: 'buy' | 'sell', usd: number, newPrice: number, who?: { name: string; pid?: string; addr?: string }): MarketState {
   const tokens = m.tokens.map((old) => {
     if (old.id !== tokenId) return old
     const t: Token = { ...old, sim: { ...old.sim }, change: { ...old.change } }
@@ -988,7 +988,7 @@ export function applyPlayerTrade(m: MarketState, tokenId: string, side: 'buy' | 
     // Sells move the curve too: without this, the next wallet selling in the same tick is paid off the pre-sell reserves.
     if (t.status === 'bonding') syncCurve(t, nativeUsdOf(m.native, t.chain))
     // Multiplayer: the server tags another player's trade with their name and id (each browser shows its own as YOU).
-    const entry: TapeTrade = who ? { id: m.nextTradeId, time: m.time, side, usd, price: newPrice, wallet: who.name, pid: who.pid } : { id: m.nextTradeId, time: m.time, side, usd, price: newPrice, wallet: 'YOU', tag: 'you' }
+    const entry: TapeTrade = who ? { id: m.nextTradeId, time: m.time, side, usd, price: newPrice, wallet: who.name, ...(who.pid ? { pid: who.pid } : {}), ...(who.addr ? { addr: who.addr } : {}) } : { id: m.nextTradeId, time: m.time, side, usd, price: newPrice, wallet: 'YOU', tag: 'you' }
     t.tape = [entry, ...t.tape].slice(0, TAPE_LEN)
     pushCandles(t, m.time, prevPrice, usd)
     refreshChanges(t, m.time)

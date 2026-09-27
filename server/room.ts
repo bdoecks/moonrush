@@ -136,6 +136,9 @@ export class Room {
         me.info = {
           ...me.info, equity: msg.equity, startEquity: msg.startEquity, trades: msg.trades, wins: msg.wins, level: msg.level, finished: msg.finished,
           ...(Number.isFinite(msg.seasonPoints) ? { seasonPoints: Math.max(0, Math.round(msg.seasonPoints!)) } : {}),
+          ...(Array.isArray(msg.holdings)
+            ? { holdings: msg.holdings.slice(0, 30).filter((h) => h && typeof h.tokenId === 'string' && h.qty > 0).map((h) => ({ tokenId: h.tokenId, qty: +h.qty || 0, cost: +h.cost || 0, openedAt: +h.openedAt || 0 })) }
+            : {}),
         }
         me.protect = msg.protect.slice(0, 200)
         this.playersDirty = true
@@ -193,7 +196,10 @@ export class Room {
     setClock(secPerTickOf(this.market))
     setCandleLog(this.pending)
     const newPrice = msg.side === 'buy' ? quoteBuy(t, msg.usd).newPrice : Math.max(1e-13, quoteSell(t, Math.max(0, msg.qty)).newPrice)
-    this.market = applyPlayerTrade(this.market, t.id, msg.side, msg.usd, newPrice, { name: me.info.name, pid: me.info.id })
+    // Main wallet: public, shows the player's name. Side wallets: only the address, so nobody knows it's them.
+    const addr = typeof msg.addr === 'string' ? msg.addr.slice(0, 24) : undefined
+    const who = msg.main !== false || !addr ? { name: me.info.name, pid: me.info.id, addr } : { name: addr, addr }
+    this.market = applyPlayerTrade(this.market, t.id, msg.side, msg.usd, newPrice, who)
   }
 
   private cook(me: Member, msg: Extract<ClientMsg, { t: 'cook' }>) {

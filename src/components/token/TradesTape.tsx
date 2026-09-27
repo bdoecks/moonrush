@@ -1,5 +1,6 @@
 import clsx from 'clsx'
-import { ArrowDownUp, Filter, X, Zap } from 'lucide-react'
+import { ArrowDownUp, Bell, Eye, Filter, X, Zap } from 'lucide-react'
+import { addrKey, playerKey, useFriends } from '../../net/friends'
 import { useMemo, useState, type ReactNode } from 'react'
 import { CHAINS, fmtNative } from '../../data/chains'
 import { LAUNCHPADS } from '../../data/launchpads'
@@ -118,7 +119,28 @@ function Stack({ top, bottom, align = 'right', topCls }: { top: ReactNode; botto
   )
 }
 
-function WalletCell({ h, chain, onFilter, walletCount }: { h: Pick<Holder, 'wallet' | 'tags' | 'walletId'>; chain: Token['chain']; onFilter?: (w: string) => void; walletCount?: number }) {
+/** Follow a room player's wallet straight from the tape (main wallets by player, side wallets by address). */
+function WatchButton({ pid, addr, name }: { pid?: string; addr?: string; name: string }) {
+  const key = pid ? playerKey(pid) : addrKey(addr!)
+  const on = useFriends((s) => s.watch.some((w) => w.key === key))
+  const toggle = useFriends((s) => s.toggle)
+  const notify = useGame((s) => s.notify)
+  const label = pid ? name : addr!
+  return (
+    <button
+      onClick={() => {
+        const now = toggle({ key, label })
+        notify({ title: now ? 'TRACKING' : 'UNTRACKED', body: now ? `${label} · you'll get an alert when this wallet trades` : label, tone: 'info', icon: now ? '👁' : '🙈' }, 'click')
+      }}
+      className={clsx('transition-opacity hover:text-accent', on ? 'text-accent' : 'text-dim opacity-0 group-hover:opacity-100')}
+      title={on ? 'Stop tracking this wallet' : pid ? `Track ${name}'s main wallet` : 'Track this wallet address'}
+    >
+      {on ? <Bell size={11} /> : <Eye size={11} />}
+    </button>
+  )
+}
+
+function WalletCell({ h, chain, onFilter, walletCount, player }: { h: Pick<Holder, 'wallet' | 'tags' | 'walletId'>; chain: Token['chain']; onFilter?: (w: string) => void; walletCount?: number; player?: { pid?: string; addr?: string } }) {
   const openWallet = useGame((s) => s.openWallet)
   const tags = h.tags.filter((t) => TAG[t])
   const main = tags[0] ? TAG[tags[0]] : undefined
@@ -131,6 +153,7 @@ function WalletCell({ h, chain, onFilter, walletCount }: { h: Pick<Holder, 'wall
       ) : (
         <span className={clsx('num', main?.cls ?? (h.wallet === 'YOU' ? 'text-accent font-semibold' : 'text-muted'))}>{name}</span>
       )}
+      {player && (player.pid || player.addr) && h.wallet !== 'YOU' && <WatchButton pid={player.pid} addr={player.addr} name={h.wallet} />}
       {walletCount !== undefined && walletCount > 1 && <span className="rounded bg-panel2 px-1 text-[9px] font-semibold text-dim" title="This wallet's trades on this coin">{walletCount}</span>}
       {onFilter && (
         <button onClick={() => onFilter(h.wallet)} className="text-dim opacity-0 transition-opacity hover:text-accent group-hover:opacity-100" title="Show only this wallet's trades">
@@ -230,7 +253,7 @@ function TradesTab({ token, walletFilter, setWalletFilter }: { token: Token; wal
                   </td>
                   <td className={clsx(td, 'num text-right text-dim')}>{fmtUsd(gasUsd(tr, token.chain), 3)}</td>
                   <td className={clsx(td, 'pl-5')}>
-                    <WalletCell h={h ?? { wallet: tr.wallet, tags: tr.tag ? [tr.tag] : [], walletId: tr.walletId }} chain={token.chain} walletCount={h ? h.buys + h.sells : undefined} onFilter={walletFilter ? undefined : setWalletFilter} />
+                    <WalletCell h={h ?? { wallet: tr.wallet, tags: tr.tag ? [tr.tag] : [], walletId: tr.walletId }} chain={token.chain} walletCount={h ? h.buys + h.sells : undefined} onFilter={walletFilter ? undefined : setWalletFilter} player={tr.pid || tr.addr ? { pid: tr.pid, addr: tr.addr } : undefined} />
                   </td>
                 </tr>
               )

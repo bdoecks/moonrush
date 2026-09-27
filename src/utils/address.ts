@@ -17,3 +17,18 @@ export function fakeAddress(id: string, chain: Chain = 'sol') {
   for (let i = 0; i < 4; i++) s += chars[next() % chars.length]
   return `${s}…moon`
 }
+
+/** A player's wallet address ("9fQx…b7nK" on Solana, "0x…" on EVM): what shows on the tape when it trades anonymously. */
+export function walletAddress(pid: string, walletId: string, chain: Chain = 'sol') {
+  const id = `wallet:${pid}:${walletId}`
+  if (chain !== 'sol') return fakeAddress(id, chain)
+  let h = 2166136261
+  for (const c of id) h = Math.imul(h ^ c.charCodeAt(0), 16777619)
+  const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+  let s = ''
+  for (let i = 0; i < 8; i++) {
+    h = Math.imul(h ^ (h >>> 13), 2654435761)
+    s += chars[(h >>> 0) % chars.length]
+  }
+  return `${s.slice(0, 4)}…${s.slice(4)}`
+}

@@ -58,7 +58,8 @@ export interface TapeTrade {
   wallet: string
   tag?: 'whale' | 'smart' | 'sniper' | 'dev' | 'you' | 'kol' | 'agent'
   walletId?: string // set when the trade came from a simulated trader wallet
-  pid?: string // multiplayer: the player who made this trade
+  pid?: string // multiplayer: the player who made this trade (only for their public main wallet)
+  addr?: string // multiplayer: the player wallet's address (side wallets trade under this alone)
 }
 
 // ─── Copy trading ────────────────────────────────────────────────────────────
@@ -605,6 +606,8 @@ export interface Player {
   skill: number
   isYou?: boolean
   seasonPoints?: number // real players (multiplayer): their actual season points; simulated rivals don't have any
+  real?: boolean // a real player in your room (not a simulated rival)
+  holdings?: { tokenId: string; qty: number; cost: number; openedAt: number }[] // real players: what their public main wallet holds
 }
 
 export type ChartStyle = 'candles' | 'line'
