@@ -2,7 +2,7 @@
 import { publicBundlePct } from '../../game/devTools'
 import { devPctOf, top10Of } from '../../game/ledger'
 import { winBuys, winSells, winTxns, winVolume } from '../../game/windows'
-import type { PadId, Token, Win } from '../../types'
+import type { Chain, PadId, Token, Win } from '../../types'
 
 export type RangeKey =
   | 'progress' | 'migrated' | 'mcap' | 'liquidity' | 'volume' | 'txns' | 'buys' | 'sells' | 'change' | 'holders' | 'age'
@@ -103,11 +103,12 @@ export interface FilterPreset {
   icon: string
   filter: TrenchFilter
   builtin?: boolean
+  chain?: 'all' | Chain // the chain view it belongs to (built-ins without one show everywhere)
 }
 
 const F = (p: Partial<TrenchFilter>): TrenchFilter => ({ ...EMPTY_FILTER, ...p })
 export const BUILTIN_PRESETS: FilterPreset[] = [
-  { id: 'b-pump', name: 'pump.fun only', icon: '💊', builtin: true, filter: F({ pads: ['pump'] }) },
+  { id: 'b-pump', name: 'pump.fun only', icon: '💊', builtin: true, chain: 'sol', filter: F({ pads: ['pump'] }) },
   { id: 'b-clean', name: 'Clean', icon: '🧼', builtin: true, filter: F({ checks: { hideDead: true, noMint: true, unflagged: true }, ranges: { top10: [null, 30], dev: [null, 5], insiders: [null, 10], bundler: [null, 10], snipers: [null, 8] } }) },
   { id: 'b-fresh', name: 'Fresh 5m', icon: '🌱', builtin: true, filter: F({ checks: { hideDead: true }, ranges: { age: [null, 5] } }) },
   { id: 'b-almost', name: 'Almost bonded', icon: '🎯', builtin: true, filter: F({ checks: { hideDead: true }, ranges: { progress: [80, null] } }) },

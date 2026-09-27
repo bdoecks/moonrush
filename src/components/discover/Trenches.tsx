@@ -51,10 +51,13 @@ export function Trenches({ tokens }: { tokens: Token[] }) {
 function Column({ col, list, now, visible }: { col: (typeof COLS)[number]; list: Token[]; now: number; visible: boolean }) {
   const [q, setQ] = useState('')
   const chain = useGame((s) => s.chainFilter)
-  const [filter, setFilterState] = useState<TrenchFilter>(() => withDefaults(load<TrenchFilter>(`trenchFilter:${col.id}`)))
+  // Each chain view (ALL, SOL, BNB, ETH) keeps its own filters per column.
+  const key = `trenchFilter2:${chain}:${col.id}`
+  const [saved, setSaved] = useState<Record<string, TrenchFilter>>({})
+  const filter = saved[key] ?? withDefaults(load<TrenchFilter>(key))
   const setFilter = (f: TrenchFilter) => {
-    setFilterState(f)
-    save(`trenchFilter:${col.id}`, f)
+    setSaved((s) => ({ ...s, [key]: f }))
+    save(key, f)
   }
   // Pads from other chains stay saved but don't apply while the chain switcher hides them.
   const f = chain === 'all' ? filter : { ...filter, pads: filter.pads.filter((p) => LAUNCHPADS[p].chain === chain) }
@@ -67,7 +70,7 @@ function Column({ col, list, now, visible }: { col: (typeof COLS)[number]; list:
   const filtered = countActive(f) ? list.filter((t) => matchesFilter(t, f, now)) : list
   const shown = needle ? filtered.filter((t) => t.ticker.toLowerCase().includes(needle) || t.name.toLowerCase().includes(needle)) : filtered
   const hidden = list.length - filtered.length
-  const presets = useFilterPresets()
+  const presets = useFilterPresets(chain)
   const activePreset = presetFor(filter, presets)
   return (
     <section className={clsx('relative min-h-0 flex-col border-line md:flex md:border-r last:border-r-0', visible ? 'flex' : 'hidden')}>

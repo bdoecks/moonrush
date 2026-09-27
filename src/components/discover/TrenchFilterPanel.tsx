@@ -106,7 +106,7 @@ function Panel({ title, value, onApply, chain, counts, scope, lockedWindow, clas
   // Range inputs stay as text while typing (so "0." survives) and are parsed on Apply.
   const toText = (ranges: TrenchFilter['ranges']) => Object.fromEntries(Object.entries(ranges).map(([k, r]) => [k, [r?.[0] ?? '', r?.[1] ?? ''].map(String)])) as Partial<Record<RangeKey, [string, string]>>
   const [rs, setRs] = useState<Partial<Record<RangeKey, [string, string]>>>(() => toText(value.ranges))
-  const presets = useFilterPresets()
+  const presets = useFilterPresets(chain)
   const [naming, setNaming] = useState<string | null>(null)
   const [icon, setIcon] = useState(PRESET_ICONS[0])
   const loadPreset = (f: TrenchFilter) => {
@@ -174,7 +174,7 @@ function Panel({ title, value, onApply, chain, counts, scope, lockedWindow, clas
               className="mb-2 space-y-1.5 rounded-md border border-accent/40 bg-accent/5 p-2"
               onSubmit={(e) => {
                 e.preventDefault()
-                addPreset(naming, icon, built())
+                addPreset(naming, icon, built(), chain)
                 setNaming(null)
               }}
             >
