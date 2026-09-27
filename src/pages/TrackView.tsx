@@ -5,12 +5,14 @@ import { EmptyState, Pct, TokenIcon } from '../components/ui'
 import { QuickBuyButton, QuickSlotPicker } from '../components/chain'
 import { TrackerFeed } from '../components/tracker/TrackerFeed'
 import { CalloutTracker } from '../components/tracker/CalloutTracker'
+import { WatchedWallets } from '../components/tracker/WatchedWallets'
 import { TrackerSettingsModal } from '../components/tracker/TrackerSettingsModal'
 import { STYLE_META } from '../data/wallets'
 import { useTokenMap } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { ACCOUNTS } from '../game/socialEngine'
 import { alertText, useGame } from '../game/store'
+import { useFriends } from '../net/friends'
 import { walletStats } from '../game/walletEngine'
 import type { AlertType, SocialPost, Token } from '../types'
 import { fakeAddress } from '../utils/address'
@@ -23,12 +25,14 @@ export function TrackView() {
   const [sub, setSub] = useState<Sub>('track')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const tracked = useGame((s) => s.trackedWallets)
+  const online = useGame((s) => !!s.online)
+  const nFriends = useFriends((s) => s.watch.length)
   const alerts = useGame((s) => s.alerts)
   const sound = useGame((s) => s.settings.sound)
   const updateSettings = useGame((s) => s.updateSettings)
   const activeAlerts = alerts.filter((a) => a.triggeredTick === undefined).length
   const subs: { id: Sub; label: string; mobileOnly?: boolean }[] = [
-    { id: 'wallet', label: `Wallet${tracked.length ? ` ${tracked.length}` : ''}` },
+    { id: 'wallet', label: `Wallet${tracked.length + nFriends ? ` ${tracked.length + nFriends}` : ''}` },
     { id: 'track', label: 'Track' },
     { id: 'callout', label: 'Callout' },
     { id: 'alerts', label: `Alerts${activeAlerts ? ` ${activeAlerts}` : ''}` },
@@ -52,7 +56,7 @@ export function TrackView() {
         </div>
         {settingsOpen && <TrackerSettingsModal onClose={() => setSettingsOpen(false)} />}
         <div className="min-h-0 flex-1 overflow-auto">
-          {sub === 'wallet' && <WalletManager />}
+          {sub === 'wallet' && <>{online && <div className="p-3 pb-0"><WatchedWallets /></div>}<WalletManager /></>}
           {sub === 'track' && <TrackerFeed onManage={() => setSub('wallet')} />}
           {sub === 'callout' && <CalloutTracker />}
           {sub === 'alerts' && <Alerts />}

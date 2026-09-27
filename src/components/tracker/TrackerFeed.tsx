@@ -6,11 +6,12 @@ import { useTokenMap } from '../../hooks/useDerived'
 import { SIM_SEC_PER_TICK } from '../../game/marketEngine'
 import { useGame } from '../../game/store'
 import { activeFilterCount, passesFeed, trackedHolders } from '../../game/tracker'
-import type { SimWallet, WalletActionKind, WalletTrade } from '../../types'
+import type { WalletActionKind } from '../../types'
 import { fmtAge, fmtCompact, fmtNum, fmtUsd, toneClass } from '../../utils/format'
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
 import { TrackerSettingsModal } from './TrackerSettingsModal'
+import { useFriendRows, type TrackerRow } from './friendRows'
 
 const ACTION: Record<WalletActionKind, { label: string; short: string; cls: string }> = {
   first: { label: 'First Buy', short: 'Buy', cls: 'text-up' },
@@ -23,10 +24,7 @@ const th = 'px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-di
 const td = 'px-3 py-1.5 whitespace-nowrap'
 const chip = (on: boolean) => clsx('rounded-md border px-2 py-0.5 text-[11px] font-semibold transition-colors', on ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')
 
-interface Row {
-  w: SimWallet
-  tr: WalletTrade
-}
+type Row = TrackerRow
 
 /** Live trades by the wallets you track, filtered per your tracker settings. `compact` is the bottom-dock version. */
 export function TrackerFeed({ compact = false, onManage }: { compact?: boolean; onManage?: () => void }) {
@@ -43,6 +41,7 @@ export function TrackerFeed({ compact = false, onManage }: { compact?: boolean; 
   const map = useTokenMap()
   const [settings, setSettings] = useState<null | 'alerts' | 'filters' | 'groups'>(null)
   const [frozen, setFrozen] = useState<Row[] | null>(null) // rows held on screen while the feed is paused
+  const friends = useFriendRows() // friends you track in a room (main wallets / known side-wallet addresses)
 
   const holders = useMemo(() => trackedHolders(wallets, tracked), [wallets, tracked])
   const live = useMemo(() => {
@@ -53,22 +52,23 @@ export function TrackerFeed({ compact = false, onManage }: { compact?: boolean; 
         if (passesFeed(f, { walletId: w.id, side: tr.side, usd: tr.usd, kind: tr.action, mcap: tr.mcap }, map.get(tr.tokenId), now, labels)) out.push({ w, tr })
       }
     }
+    for (const r of friends.rows) if (passesFeed(f, { walletId: r.w.id, side: r.tr.side, usd: r.tr.usd, kind: r.tr.action, mcap: r.tr.mcap }, map.get(r.tr.tokenId), now, labels)) out.push(r)
     return out.sort((a, b) => b.tr.tick - a.tr.tick || b.tr.id - a.tr.id).slice(0, compact ? 60 : 150)
-  }, [wallets, tracked, f, map, now, labels, compact])
+  }, [wallets, tracked, friends.rows, f, map, now, labels, compact])
   const paused = frozen !== null
   const rows = frozen ?? live
   const nFilters = activeFilterCount(f)
   const groupsInUse = f.groups.filter((g) => tracked.some((id) => labels[id]?.group === g))
   const manage = onManage ?? (() => setView('track'))
 
-  if (!tracked.length) {
+  if (!tracked.length && !friends.count) {
     return <EmptyState icon={<UserPlus />} title="You're not tracking any wallets yet" hint={<button onClick={manage} className="text-accent underline">Add wallets to track →</button>} />
   }
 
   return (
     <div>
       <div className={clsx('flex flex-wrap items-center gap-1.5 border-b border-line px-3', compact ? 'py-1.5' : 'py-2')}>
-        <button onClick={() => update({ group: 'all' })} className={chip(f.group === 'all')}>All {tracked.length}</button>
+        <button onClick={() => update({ group: 'all' })} className={chip(f.group === 'all')}>All {tracked.length + friends.count}</button>
         {groupsInUse.map((g) => (
           <button key={g} onClick={() => update({ group: f.group === g ? 'all' : g })} className={chip(f.group === g)}>{g}</button>
         ))}
@@ -118,7 +118,7 @@ export function TrackerFeed({ compact = false, onManage }: { compact?: boolean; 
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ w, tr }) => {
+              {rows.map(({ w, tr, friend }) => {
                 const t = map.get(tr.tokenId)
                 const a = ACTION[tr.action ?? (tr.side === 'buy' ? 'first' : 'all')]
                 const since = t && tr.mcap ? t.mcap / tr.mcap - 1 : 0
@@ -129,9 +129,10 @@ export function TrackerFeed({ compact = false, onManage }: { compact?: boolean; 
                   <tr key={`${w.id}-${tr.id}`} className={clsx('slide-in border-b border-line/40 hover:bg-panel2', hot && tr.side === 'buy' && 'bg-accent/[0.04]')}>
                     <td className={clsx(td, 'num text-dim')}>{fmtAge((tick - tr.tick) * SIM_SEC_PER_TICK)}</td>
                     <td className={td}>
-                      <button onClick={() => openWallet(w.id)} className="flex items-center gap-1.5 hover:text-accent">
+                      <button onClick={() => (friend ? setView('leaderboard') : openWallet(w.id))} className="flex items-center gap-1.5 hover:text-accent" title={friend ? 'A player in your room: open the leaderboard' : undefined}>
                         <span>{w.avatar}</span>
                         <span className="font-semibold">{lb?.label || w.name}</span>
+                        {friend && <span className="rounded bg-[#b36bff]/15 px-1 text-[9px] font-bold text-[#b36bff]">FRIEND</span>}
                         {lb?.group && !compact && <span className="rounded bg-raise px-1 text-[9px] text-muted">{lb.group}</span>}
                       </button>
                     </td>

@@ -10,6 +10,7 @@ import { fmtAge, fmtCompact, fmtUsd } from '../../utils/format'
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
 import { Composer, Engagement, postAccount } from '../SocialTracker'
+import { useFriendRows, type TrackerRow } from './friendRows'
 
 export const DOCK_DEFAULTS: TrackerDockPrefs = { open: true, side: 'left', width: 320, split: 0.5, wallet: true, social: true }
 const MIN_W = 260
@@ -149,20 +150,22 @@ function WalletSection() {
   const wallets = useGame((s) => s.wallets)
   const tracked = useGame((s) => s.trackedWallets)
   const setView = useGame((s) => s.setView)
-  const [scope, setScope] = useState<WalletScope>(tracked.length ? 'tracked' : 'smart')
+  const friends = useFriendRows() // friends you track in a room
+  const nTracked = tracked.length + friends.count
+  const [scope, setScope] = useState<WalletScope>(nTracked ? 'tracked' : 'smart')
   const rows = useMemo(() => {
-    const out: { w: SimWallet; tr: WalletTrade }[] = []
+    const out: TrackerRow[] = scope === 'tracked' ? [...friends.rows] : []
     const styles = SCOPE_STYLES[scope]
     for (const w of wallets) {
       if (scope === 'tracked' ? !tracked.includes(w.id) : styles && !styles.includes(w.style)) continue
       for (const tr of w.trades.slice(0, 20)) out.push({ w, tr })
     }
     return out.sort((a, b) => b.tr.tick - a.tr.tick || b.tr.id - a.tr.id).slice(0, 60)
-  }, [wallets, tracked, scope])
+  }, [wallets, tracked, scope, friends.rows])
   return (
     <>
       <Tabs value={scope} onChange={setScope} options={[
-        { value: 'tracked', label: <>Tracked <span className="text-dim">{tracked.length}</span></> },
+        { value: 'tracked', label: <>Tracked <span className="text-dim">{nTracked}</span></> },
         { value: 'smart', label: '🧠 Smart' },
         { value: 'kol', label: '📣 KOL' },
         { value: 'all', label: 'All' },
@@ -172,13 +175,14 @@ function WalletSection() {
           scope === 'tracked'
             ? <EmptyState icon={<UserPlus />} title="No tracked wallets yet" hint={<button onClick={() => setView('track')} className="text-accent underline">Track wallets →</button>} />
             : <EmptyState icon="👛" title="No trades yet" />
-        ) : rows.map(({ w, tr }) => <WalletRow key={`${w.id}-${tr.id}`} w={w} tr={tr} />)}
+        ) : rows.map(({ w, tr, friend }) => <WalletRow key={`${w.id}-${tr.id}`} w={w} tr={tr} friend={friend} />)}
       </div>
     </>
   )
 }
 
-function WalletRow({ w, tr }: { w: SimWallet; tr: WalletTrade }) {
+function WalletRow({ w, tr, friend }: { w: SimWallet; tr: WalletTrade; friend?: boolean }) {
+  const setView = useGame((s) => s.setView)
   const tick = useGame((s) => s.market.tick)
   const select = useGame((s) => s.select)
   const openWallet = useGame((s) => s.openWallet)
@@ -188,8 +192,9 @@ function WalletRow({ w, tr }: { w: SimWallet; tr: WalletTrade }) {
   return (
     <div className="slide-in border-b border-line/40 px-2 py-1.5 hover:bg-panel2/70">
       <div className="flex items-center gap-1.5 text-[11px]">
-        <button onClick={() => openWallet(w.id)} className="flex min-w-0 items-center gap-1 font-semibold hover:text-accent" title="Open wallet profile">
+        <button onClick={() => (friend ? setView('leaderboard') : openWallet(w.id))} className="flex min-w-0 items-center gap-1 font-semibold hover:text-accent" title={friend ? 'A player in your room: open the leaderboard' : 'Open wallet profile'}>
           <span>{w.avatar}</span><span className="truncate">{w.name}</span>
+          {friend && <span className="rounded bg-[#b36bff]/15 px-1 text-[9px] font-bold text-[#b36bff]">FRIEND</span>}
         </button>
         <span className={clsx('shrink-0 font-bold', a.cls)}>{a.label}</span>
         <span className={clsx('num shrink-0', tr.side === 'buy' ? 'text-up' : 'text-down')}>{fmtUsd(tr.usd, 0)}</span>
