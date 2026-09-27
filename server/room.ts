@@ -131,7 +131,10 @@ export class Room {
         return
       }
       case 'status':
-        me.info = { ...me.info, equity: msg.equity, startEquity: msg.startEquity, trades: msg.trades, wins: msg.wins, level: msg.level, finished: msg.finished }
+        me.info = {
+          ...me.info, equity: msg.equity, startEquity: msg.startEquity, trades: msg.trades, wins: msg.wins, level: msg.level, finished: msg.finished,
+          ...(Number.isFinite(msg.seasonPoints) ? { seasonPoints: Math.max(0, Math.round(msg.seasonPoints!)) } : {}),
+        }
         me.protect = msg.protect.slice(0, 200)
         this.playersDirty = true
         return

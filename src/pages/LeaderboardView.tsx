@@ -62,7 +62,7 @@ export function LeaderboardView() {
     }
     const all: Omit<Row, 'rank'>[] = [
       you,
-      ...players.map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, equity: p.equity, pnl: p.equity - p.startEquity, ret: retOf(p), winRate: p.trades ? p.wins / p.trades : 0, trades: p.trades, level: p.level, tier: tierFor(rivalPoints(p)) })),
+      ...players.map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, equity: p.equity, pnl: p.equity - p.startEquity, ret: retOf(p), winRate: p.trades ? p.wins / p.trades : 0, trades: p.trades, level: p.level, tier: tierFor(p.seasonPoints ?? rivalPoints(p)) })), // real players carry their actual points; simulated rivals get a made-up tier
     ]
     return [...all].sort((a, b) => b.ret - a.ret).map((r, i) => ({ ...r, rank: i + 1 }))
   }, [players, v, xp, myTier])

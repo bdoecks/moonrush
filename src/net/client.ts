@@ -3,6 +3,7 @@
 import { applyCandlePoints, candleStore, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock } from '../game/marketEngine'
 import { portfolioStats, valuePortfolio } from '../game/portfolioEngine'
 import { levelFromXp } from '../game/progression'
+import { seasonNumber } from '../game/season'
 import { nativePrice } from '../game/tradingEngine'
 import { netHooks, roomRivals, useGame, type BotTickRun, type ChatLine, type MpSave, type OnlineState } from '../game/store'
 import type { Chain, MarketEngine, MarketState, SimWallet, Token, Trade } from '../types'
@@ -360,6 +361,8 @@ function startLoops() {
     send({
       t: 'status', equity, startEquity: running ? s.portfolio.startBalance : 0, trades: st.tradeCount, wins: Math.round(st.winRate * st.tradeCount),
       level: levelFromXp(s.profile.xp).level, finished: s.runStatus === 'finished',
+      // Your real season points, so everyone in the room sees your actual tier.
+      seasonPoints: s.profile.season?.id === seasonNumber() ? s.profile.season.points : 0,
       protect: [...Object.keys(s.portfolio.positions), ...s.watchlist, ...(s.selectedId ? [s.selectedId] : [])],
     })
   }

@@ -575,6 +575,7 @@ export interface Player {
   wins: number
   skill: number
   isYou?: boolean
+  seasonPoints?: number // real players (multiplayer): their actual season points; simulated rivals don't have any
 }
 
 export type ChartStyle = 'candles' | 'line'

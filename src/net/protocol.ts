@@ -17,6 +17,7 @@ export interface RoomPlayer {
   trades: number
   wins: number
   finished?: boolean
+  seasonPoints?: number // their real season points (sets the tier everyone sees for them)
 }
 
 export interface RoundInfo {
@@ -51,7 +52,7 @@ export type ClientMsg =
   | { t: 'cook'; token: NetToken; candles?: Record<Timeframe, Candle[]>; event?: MarketEvent }
   | { t: 'patch'; tokenId: string; patch: Partial<Pick<Token, 'devPct' | 'bundlePct' | 'bundleWallets' | 'holders' | 'top10Pct' | 'hype' | 'bundleFlagged'>> }
   | { t: 'bot'; tokenId: string; bot: VolumeBot | null }
-  | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[] }
+  | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number }
   | { t: 'candles'; tokenId: string }
   | { t: 'chat'; text: string }
   | { t: 'event'; event: MarketEvent } // something you did to your own coin (dev sells, bundle dumps)
