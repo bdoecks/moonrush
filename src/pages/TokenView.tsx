@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { fakeAddress } from '../utils/address'
 import { CHAINS, fmtNative } from '../data/chains'
-import { creatorRate, tradeFee } from '../game/tradingEngine'
+import { creatorRate, nativePrice, tradeFee } from '../game/tradingEngine'
 import { ChainBadge } from '../components/chain'
 import { PadBadge, PadTag } from '../components/pad'
 import { LAUNCHPADS } from '../data/launchpads'
@@ -227,6 +227,7 @@ function Header({ t }: { t: Token }) {
   const setView = useGame((s) => s.setView)
   const select = useGame((s) => s.select)
   const rec = useGame((s) => (t.creator === 'you' ? s.launches.find((r) => r.tokenId === t.id) : undefined))
+  const nativeUsd = useGame((s) => nativePrice(s.market, t.chain))
   const claim = useGame((s) => s.claimCreatorFees)
   const toggleWatch = useGame((s) => s.toggleWatch)
   const notify = useGame((s) => s.notify)
@@ -294,7 +295,9 @@ function Header({ t }: { t: Token }) {
         <HeaderStat label="Price"><FlashNum value={t.price}>{fmtPrice(t.price)}</FlashNum></HeaderStat>
         <HeaderStat label="Liq">{fmtCompact(t.liquidity)}</HeaderStat>
         <HeaderStat label="1h Vol">{fmtCompact(t.volume)}</HeaderStat>
-        <HeaderStat label="Fees 1h">{fmtCompact(t.volume * tradeFee(t, 'buy'))}</HeaderStat>
+        <HeaderStat label="Global fees paid">
+          <span title={`All trading fees paid on this coin so far (protocol, creator and LP): ${fmtCompact(t.feesPaid ?? 0)} · last hour ${fmtCompact(t.volume * tradeFee(t, 'buy'))}`}>{fmtNative((t.feesPaid ?? 0) / nativeUsd, t.chain)}</span>
+        </HeaderStat>
         <HeaderStat label={`Creator rewards · ${(creatorRate(t) * 100).toFixed(2).replace(/\.?0+$/, '')}%`}>
           <span className="text-up" title="Creator fees this coin has paid its creator so far (the creator's cut of every trade, like pump.fun's creator rewards)">{fmtCompact(t.creatorFees ?? 0)}</span>
           {rec && (

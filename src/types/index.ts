@@ -383,6 +383,7 @@ export interface Token {
   creatorName?: string
   vampOf?: { id: string; ticker: string } // a copycat launch of this coin
   creatorFees?: number // USD of creator fees this coin has generated (all trading, at its launchpad's creator rate)
+  feesPaid?: number // USD of all trading fees paid on this coin so far (protocol + creator + LP): pump.fun / Axiom's "Global Fees Paid"
   volMark?: number // volume at the end of the last tick (to catch trades that happen between ticks)
   image?: string // custom icon: small data URL or an https image link
   narrative?: Narrative

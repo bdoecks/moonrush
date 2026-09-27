@@ -6,7 +6,7 @@ import { TF_SECONDS, TIMEFRAMES } from '../types'
 import { clamp, Rng } from '../utils/rng'
 import { LAUNCHPADS, padFromId, padsFor } from '../data/launchpads'
 import { addWin, getWin, stepWin } from './windows'
-import { creatorRate } from './tradingEngine'
+import { creatorRate, tradeFee } from './tradingEngine'
 import { curveAt, curveK, curveLiquidityUsd, gradMcapUsd, gradPriceNative, launchMcapUsd, migratedLiquidityUsd, migrationPriceNative, startPriceNative } from './curve'
 
 // ─── Clock ───────────────────────────────────────────────────────────────────
@@ -319,6 +319,8 @@ function makeToken(rng: Rng, seed: { ticker: string; name: string; emoji: string
     sim,
     volMark: volume, // creator fees count trades from here on (the made-up opening volume doesn't earn anything)
   }
+  // Coins that were already trading before you saw them have paid fees on their earlier volume too.
+  t.feesPaid = t.volume * tradeFee(t, 'buy')
   // Most devs buy in the launch block; that's the first DEV marker on the chart.
   if (bonding && t.devPct > 0.3) logDev(t, { time: t.createdAt, side: 'buy', usd: (t.devPct / 100) * launchMc * 1.15 })
   setRegime(t, launch ? rng.weighted<Regime>({ pump: 3, accumulation: 3, sideways: 2, distribution: 2 }) : rng.weighted(p.regimes), rng)
@@ -714,7 +716,10 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
     const volBetween = Math.max(0, old.volume - (old.volMark ?? old.volume))
     const accrue = () => {
       const tickVol = Math.max(0, t.volume - old.volume * DECAY_1H) + volBetween
-      if (tickVol > 0) t.creatorFees = (t.creatorFees ?? 0) + tickVol * creatorRate(t)
+      if (tickVol > 0) {
+        t.creatorFees = (t.creatorFees ?? 0) + tickVol * creatorRate(t)
+        t.feesPaid = (t.feesPaid ?? 0) + tickVol * tradeFee(t, 'buy')
+      }
       t.volMark = t.volume
     }
 
