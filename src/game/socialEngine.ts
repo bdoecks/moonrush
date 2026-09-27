@@ -1,6 +1,7 @@
 import { CHAINS } from '../data/chains'
 import { WALLET_SEEDS } from '../data/wallets'
-import type { MarketEvent, MarketState, SocialAccount, SocialPost, Token, WalletAction } from '../types'
+import type { MarketEvent, MarketState, SocialAccount, SocialPost, SocialProfile, Token, WalletAction } from '../types'
+import { walletName } from './marketEngine'
 import { fakeAddress } from '../utils/address'
 import { fmtCompact } from '../utils/format'
 import { type Rng } from '../utils/rng'
@@ -41,6 +42,75 @@ const CHATTER = [
   'gm trenches', 'who else is down bad today', 'the real alpha is touching grass', 'every chart is either a rocket or a rug, no in between',
   'dev please do something', 'i was early. again. and still lost money', 'green candles cure everything', 'new meta just dropped and i missed it',
 ]
+
+// ─── Player posts: shill a coin and see if the timeline bites ────────────────
+export const POST_COOLDOWN_TICKS = 20
+export const CALL_SETTLE_TICKS = 300 // a call is judged ~5 real minutes after it's posted
+export const KOL_FOLLOWERS = 10_000
+export const freshSocial = (): SocialProfile => ({ followers: 50, rep: 30, posts: 0, lastPostTick: -999, calls: [] })
+
+const GOOD_REPLIES = ['aped 🦍', 'LFG 🚀', 'bought a bag', 'sending this', 'early for once', 'chart looks clean ngl', 'in. nfa', 'this is the one']
+const BAD_REPLIES = ['rug?', 'ser this looks like a honeypot', 'dev already sold', 'ngmi', 'chart is cooked', 'exit liquidity detected', 'who is this guy', 'bag holder spotted']
+const MEH_REPLIES = ['👀', 'watching', 'hmm', 'dyor', 'what mc', 'ca?']
+const CHAT_REPLIES = ['gm', 'real', 'this', 'lmao', 'facts', 'touch grass ser']
+
+/** How tempting a coin is to a reader of a call: hype, momentum, and not looking like a rug. 0..1. */
+export function callAppeal(t: Token | undefined) {
+  if (!t || (t.status !== 'bonding' && t.status !== 'graduated')) return 0
+  const risk = t.riskLevel === 'LOW' ? 0.25 : t.riskLevel === 'MEDIUM' ? 0.16 : t.riskLevel === 'HIGH' ? 0.07 : 0
+  return Math.max(0, Math.min(1, (t.hype / 100) * 0.35 + (t.momentumScore / 100) * 0.3 + risk + (t.liquidity > 5_000 ? 0.1 : 0)))
+}
+
+export interface ShillResult {
+  likes: number
+  rts: number
+  replies: string[]
+  buyers: number
+  queue: NonNullable<MarketState['shillQueue']>
+}
+
+/**
+ * The timeline's reaction to a player's post. Reach comes from followers, conviction from reputation and how good
+ * the coin looks; posting the same coin again and again wears thin (`repeats` = your recent calls on it). Nudges the
+ * coin's hype and attention now; the buyers' orders land over the next half-minute via `queue`.
+ */
+export function shill(m: MarketState, rng: Rng, t: Token | undefined, author: { followers: number; rep: number }, text: string, repeats = 0): ShillResult {
+  const trust = Math.max(0, Math.min(1, author.rep / 100))
+  const reach = author.followers * rng.range(0.05, 0.12) + 6 // plus a few randoms scrolling the timeline
+  const fatigue = 0.45 ** repeats
+  const spammy = text.length > 12 && text.replace(/[^A-Z]/g, '').length / text.replace(/[^A-Za-z]/g, '').length > 0.7 ? 0.6 : 1
+  if (!t) {
+    const likes = Math.round(reach * rng.range(0.05, 0.2))
+    return { likes, rts: Math.round(likes * 0.1), replies: rng.chance(0.5) ? [rng.pick(CHAT_REPLIES)] : [], buyers: 0, queue: [] }
+  }
+  const appeal = callAppeal(t) * fatigue * spammy
+  // A nobody with a good call still gets a few degens (~2); a trusted 10k-follower caller gets dozens.
+  const buyers = Math.min(60, rng.poisson(reach * 0.05 * appeal * (0.35 + trust) + appeal * 2.5))
+  const queue = Array.from({ length: buyers }, () => ({
+    tokenId: t.id,
+    atTick: m.tick + 1 + Math.floor(rng.range(0, 30) ** 1.2 / 3), // most land within seconds, stragglers later
+    usd: Math.min(3000, 25 * Math.exp(0.9 * rng.gauss()) * (1 + trust)),
+    wallet: walletName(rng),
+  }))
+  const likes = Math.round(reach * (0.04 + appeal * 0.2) + buyers * 1.5 + rng.range(0, 3))
+  const good = appeal > 0.45 ? 0.75 : appeal > 0.25 ? 0.45 : 0.15
+  const replies = Array.from({ length: Math.min(3, rng.int(0, 1 + Math.floor(likes / 15))) }, () => (rng.chance(good) ? rng.pick(GOOD_REPLIES) : rng.chance(0.5) ? rng.pick(BAD_REPLIES) : rng.pick(MEH_REPLIES)))
+  // The buzz itself: a little hype and attention, bigger for trusted callers on coins people like.
+  t.hype = Math.min(100, t.hype + appeal * (4 + trust * 10))
+  if (t.sim.flow) t.sim.flow.att += buyers * 0.06 + appeal * trust * 0.5
+  else t.sim.pressure += 0.0008 * buyers * (0.5 + trust)
+  return { likes, rts: Math.round(likes * rng.range(0.08, 0.2)), replies, buyers, queue }
+}
+
+/**
+ * After a call settles: did the coin run? Rep moves with the result; followers with engagement and wins.
+ * `x` = best price since the call ÷ price at the call.
+ */
+export function settleCall(s: SocialProfile, x: number, likes: number): SocialProfile {
+  const repDelta = x >= 1.5 ? Math.min(12, (x - 1) * 6) : x >= 1.1 ? 2 : x < 0.6 ? -8 : -3
+  const followerGain = Math.round(likes * 0.3 + (x > 1.2 ? s.followers * Math.min(0.5, (x - 1) * 0.15) : x < 0.7 ? -s.followers * 0.04 : 0))
+  return { ...s, rep: Math.max(0, Math.min(100, s.rep + repDelta)), followers: Math.max(10, s.followers + followerGain) }
+}
 
 /** Generate this tick's posts from wallet actions, market events and ambient chatter. May nudge called tokens. */
 export function tickSocial(m: MarketState, rng: Rng, actions: WalletAction[], events: MarketEvent[]): SocialPost[] {

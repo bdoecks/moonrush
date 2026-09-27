@@ -4,12 +4,12 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { useTokenMap } from '../../hooks/useDerived'
 import { useLiveFeed } from '../../game/liveSocial'
 import { SIM_SEC_PER_TICK } from '../../game/marketEngine'
-import { ACCOUNTS } from '../../game/socialEngine'
 import { useGame } from '../../game/store'
 import type { SimWallet, SocialPost, TrackerDockPrefs, WalletStyle, WalletTrade } from '../../types'
 import { fmtAge, fmtCompact, fmtUsd } from '../../utils/format'
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
+import { Composer, Engagement, postAccount } from '../SocialTracker'
 
 export const DOCK_DEFAULTS: TrackerDockPrefs = { open: true, side: 'left', width: 320, split: 0.5, wallet: true, social: true }
 const MIN_W = 260
@@ -210,7 +210,6 @@ function WalletRow({ w, tr }: { w: SimWallet; tr: WalletTrade }) {
 
 // ─── Social tracker ──────────────────────────────────────────────────────────
 
-const accById = new Map(ACCOUNTS.map((a) => [a.id, a]))
 type SocialScope = 'x' | 'tg' | 'following' | 'live'
 
 function SocialSection() {
@@ -220,9 +219,9 @@ function SocialSection() {
   const [onlyCA, setOnlyCA] = useState(false)
   const liveFeed = useLiveFeed()
   const posts = scope === 'live' ? [] : feed.filter((p) => {
-    const acc = accById.get(p.accountId)
+    const acc = postAccount(p)
     if (!acc) return false
-    if (scope === 'following' ? !followed.includes(acc.id) : acc.platform !== scope) return false
+    if (scope === 'following' ? !followed.includes(acc.id) && !acc.player : acc.platform !== scope) return false
     return !onlyCA || !!p.tokenId
   })
   return (
@@ -238,6 +237,7 @@ function SocialSection() {
           <input type="checkbox" checked={onlyCA} onChange={(e) => setOnlyCA(e.target.checked)} className="accent-[var(--accent)]" /> Only posts with a coin
         </label>
       )}
+      {scope !== 'live' && scope !== 'tg' && <Composer />}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {scope === 'live' ? <LiveXFeed /> : !posts.length ? (
           <EmptyState icon="📣" title={scope === 'following' ? 'No posts from accounts you follow' : 'No posts yet'} hint={scope === 'following' ? 'Hit Follow on any post' : 'Posts appear as the market moves'} />
@@ -248,7 +248,8 @@ function SocialSection() {
 }
 
 function PostRow({ p }: { p: SocialPost }) {
-  const acc = accById.get(p.accountId)!
+  const acc = postAccount(p)!
+  const you = useGame((s) => (s.online ? p.author?.pid === s.online.you : p.accountId === 'player'))
   const tick = useGame((s) => s.market.tick)
   const followed = useGame((s) => s.followedAccounts.includes(acc.id))
   const toggleFollow = useGame((s) => s.toggleFollowAccount)
@@ -256,14 +257,19 @@ function PostRow({ p }: { p: SocialPost }) {
   const t = useGame((s) => (p.tokenId ? s.market.tokens.find((x) => x.id === p.tokenId) : undefined))
   const since = t && p.mcapAtPost ? t.mcap / p.mcapAtPost - 1 : 0
   return (
-    <div className="slide-in border-b border-line/40 px-2 py-2 hover:bg-panel2/70">
+    <div className={clsx('slide-in border-b border-line/40 px-2 py-2 hover:bg-panel2/70', acc.player && 'bg-info/[0.04]')}>
       <div className="flex items-center gap-1.5">
         <span className="grid size-6 shrink-0 place-items-center rounded-full bg-raise text-[13px]">{acc.avatar}</span>
         <div className="min-w-0 flex-1 leading-tight">
-          <div className="truncate text-[11px] font-bold">{acc.name}</div>
+          <div className="flex items-center gap-1 truncate text-[11px] font-bold">
+            {acc.name}
+            {you && <span className="rounded bg-accent/15 px-1 text-[9px] text-accent">YOU</span>}
+            {acc.player && !you && <span className="rounded bg-info/15 px-1 text-[9px] text-info">PLAYER</span>}
+            {acc.player && acc.kol && <span className="rounded bg-warn/15 px-1 text-[9px] text-warn">KOL</span>}
+          </div>
           <div className="num truncate text-[10px] text-dim">@{acc.handle} · {fmtCompact(acc.followers, '')} · {fmtAge((tick - p.tick) * SIM_SEC_PER_TICK)}</div>
         </div>
-        <button onClick={() => toggleFollow(acc.id)} className={clsx('shrink-0 rounded-full px-2 py-px text-[9px] font-bold', followed ? 'border border-line2 text-muted' : 'bg-ink text-bg')}>{followed ? 'Following' : 'Follow'}</button>
+        {!acc.player && <button onClick={() => toggleFollow(acc.id)} className={clsx('shrink-0 rounded-full px-2 py-px text-[9px] font-bold', followed ? 'border border-line2 text-muted' : 'bg-ink text-bg')}>{followed ? 'Following' : 'Follow'}</button>}
       </div>
       <p className="mt-1 line-clamp-3 whitespace-pre-line text-[11px] leading-snug text-ink/90">
         {p.text.split(/(\$[A-Z0-9]+)/g).map((part, i) => (/^\$[A-Z0-9]+$/.test(part) ? <span key={i} className="font-semibold text-info">{part}</span> : <span key={i}>{part}</span>))}
@@ -279,6 +285,7 @@ function PostRow({ p }: { p: SocialPost }) {
           {t && <span className="ml-auto"><QuickBuyButton t={t} className="h-5 px-1.5 text-[10px]" /></span>}
         </div>
       )}
+      <Engagement p={p} />
     </div>
   )
 }

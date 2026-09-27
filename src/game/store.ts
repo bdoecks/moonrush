@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CashbackState, SniperTask, Trade, VolumeBot, Chain, Challenge, CookSpec, CopyConfig, GameMode, LaunchRecord, MarketEvent, MarketState, Player, Portfolio, Profile, RunStatus, Settings, PriceAlert, RewardClaim, RewardsState, SimWallet, SocialPost, Toast, Token, TrackerSettings, WalletAction, WalletActionKind, WalletLabel } from '../types'
+import type { SocialProfile, CashbackState, SniperTask, Trade, VolumeBot, Chain, Challenge, CookSpec, CopyConfig, GameMode, LaunchRecord, MarketEvent, MarketState, Player, Portfolio, Profile, RunStatus, Settings, PriceAlert, RewardClaim, RewardsState, SimWallet, SocialPost, Toast, Token, TrackerSettings, WalletAction, WalletActionKind, WalletLabel } from '../types'
 import { Rng } from '../utils/rng'
 import { fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { fakeAddress } from '../utils/address'
@@ -18,7 +18,7 @@ import { creatorRate, emptyBalances, executeBuy, executeSell, nativePrice, swap,
 import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
 import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
-import { ACCOUNTS, tickSocial } from './socialEngine'
+import { ACCOUNTS, CALL_SETTLE_TICKS, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import type { ClientMsg, RoomPlayer, RoundInfo } from '../net/protocol'
 import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
@@ -77,6 +77,12 @@ interface SavedRun {
   alerts?: PriceAlert[]
   snipers?: SniperTask[]
   runDuration?: number | null
+}
+
+/** You as a poster on the timeline (the name/avatar you use in rooms, or "You"). */
+export function playerAuthor() {
+  const name = load<string>('mpName') || 'You'
+  return { name, handle: name.toLowerCase().replace(/[^a-z0-9_]/g, '') || 'you', avatar: load<string>('mpAvatar') || '🫵' }
 }
 
 /** The speed the market actually runs at: Realistic markets and online rooms are always real time (1×). */
@@ -290,6 +296,8 @@ export interface GameState {
   buyNative: (amount: number, tokenId?: string, slot?: number) => boolean
   /** Start, retune or stop the volume bot on one of your launches. */
   setBot: (tokenId: string, patch: Partial<VolumeBot>) => void
+  /** Post on the (simulated) X timeline; attach a coin to make it a call that bots may ape. */
+  postSocial: (text: string, tokenId?: string) => boolean
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -1107,6 +1115,38 @@ export const useGame = create<GameState>()((set, get) => {
         }
       }
 
+      // Your calls on the timeline: track each coin's best price since the call and judge it after ~5 minutes.
+      const soc0 = get().profile.social
+      if (soc0?.calls.some((c) => !c.settled)) {
+        const judged: { ticker: string; x: number; likes: number; tokenId: string }[] = []
+        let changed = false
+        const calls = soc0.calls.map((c) => {
+          if (c.settled) return c
+          const t = map.get(c.tokenId)
+          const peak = t ? Math.max(c.peak, t.mcap) : c.peak
+          if (market.tick - c.tick >= CALL_SETTLE_TICKS) {
+            const x = t && t.status !== 'rugged' && t.status !== 'dead' ? peak / c.mcapAtPost : Math.min(0.5, peak / c.mcapAtPost)
+            judged.push({ ticker: c.ticker, x, likes: c.likes, tokenId: c.tokenId })
+            changed = true
+            return { ...c, peak, settled: true, x }
+          }
+          if (peak !== c.peak) changed = true
+          return peak !== c.peak ? { ...c, peak } : c
+        })
+        if (changed) {
+          let soc: SocialProfile = { ...soc0, calls }
+          for (const j of judged) {
+            const before = soc
+            soc = settleCall(soc, j.x, j.likes)
+            const dRep = Math.round(soc.rep - before.rep)
+            const dF = soc.followers - before.followers
+            s.notify({ title: j.x >= 1.5 ? 'CALL HIT 🎯' : j.x >= 1.1 ? 'CALL OK' : 'CALL MISSED', body: `$${j.ticker} ran ${j.x.toFixed(1)}x after your call · rep ${dRep >= 0 ? '+' : ''}${dRep} · ${dF >= 0 ? '+' : ''}${Math.abs(dF) < 1000 ? dF : fmtCompact(dF, '')} followers`, tone: j.x >= 1.1 ? 'up' : 'down', icon: j.x >= 1.5 ? '🎯' : '📉', tokenId: j.tokenId })
+            if (before.followers < KOL_FOLLOWERS && soc.followers >= KOL_FOLLOWERS) s.notify({ title: 'YOU ARE A KOL NOW 👑', body: `${fmtCompact(soc.followers, '')} followers. Your calls move real money now.`, tone: 'xp', icon: '👑' }, 'achievement')
+          }
+          set({ profile: { ...get().profile, social: soc } })
+        }
+      }
+
       for (const msg of botStops) s.notify({ title: 'VOLUME BOT STOPPED', body: `$${msg}`, tone: 'warn', icon: '🤖' }, 'alert')
       for (const tk of graduatedNow) {
         s.notify({ title: 'YOUR TOKEN GRADUATED', body: `$${tk} completed its curve and migrated · +${fmtUsd(GRAD_BONUS, 0)} creator bonus`, tone: 'xp', icon: '🎓' }, 'achievement')
@@ -1668,6 +1708,53 @@ export const useGame = create<GameState>()((set, get) => {
       const t = id ? s.market.tokens.find((x) => x.id === id) : undefined
       if (!t) return false
       return s.buy(amount * nativePrice(s.market, t.chain), t.id, slot)
+    },
+    postSocial: (text, tokenId) => {
+      const s = get()
+      const clean = text.trim().slice(0, 200)
+      if (!clean) return false
+      const soc = { ...freshSocial(), ...(s.profile.social ?? {}) }
+      const wait = POST_COOLDOWN_TICKS - (s.market.tick - soc.lastPostTick)
+      if (wait > 0 && soc.lastPostTick <= s.market.tick) {
+        s.notify({ title: 'SLOW DOWN', body: `You can post again in ${wait}s. Spamming the timeline kills your reach.`, tone: 'warn', icon: '⏳' })
+        return false
+      }
+      // A $TICKER in the text counts as a call on that coin, even without attaching it.
+      const tickerInText = clean.match(/\$([A-Z0-9]{2,8})\b/)?.[1]
+      const t = tokenId ? s.market.tokens.find((x) => x.id === tokenId) : tickerInText ? [...s.market.tokens].sort((a, b) => b.mcap - a.mcap).find((x) => x.ticker === tickerInText && (x.status === 'bonding' || x.status === 'graduated')) : undefined
+      const author = { ...playerAuthor(), followers: soc.followers, rep: soc.rep }
+      const repeats = soc.calls.filter((c) => c.tokenId === t?.id && s.market.tick - c.tick < CALL_SETTLE_TICKS).length
+      const call = t ? { tokenId: t.id, ticker: t.ticker, tick: s.market.tick, mcapAtPost: t.mcap, peak: t.mcap } : null
+      if (s.online) {
+        // The room's server runs the timeline's reaction on the shared market; the post comes back with the next tick.
+        netHooks.send?.({ t: 'post', text: clean, tokenId: t?.id, followers: soc.followers, rep: soc.rep, repeats })
+        const next = { ...soc, posts: soc.posts + 1, lastPostTick: s.market.tick, calls: call ? [{ ...call, postId: 0, likes: 0 }, ...soc.calls].slice(0, 30) : soc.calls }
+        set({ profile: { ...s.profile, social: next } })
+        persist()
+        return true
+      }
+      const rng = new Rng((s.market.seed ^ Math.imul(s.market.tick + 7, 0x9e3779b1) ^ soc.posts) >>> 0)
+      let res: ShillResult = { likes: 0, rts: 0, replies: [], buyers: 0, queue: [] }
+      let market = s.market
+      if (t) market = patchToken(market, t.id, (x) => (res = shill(s.market, rng, x, author, clean, repeats)))
+      else res = shill(s.market, rng, undefined, author, clean)
+      market = { ...market, shillQueue: [...(market.shillQueue ?? []), ...res.queue] }
+      const post: SocialPost = {
+        id: s.market.tick * 1000 + 900 + (soc.posts % 90), tick: s.market.tick, time: s.market.time, accountId: 'player', author, text: clean,
+        tokenId: t?.id, ticker: t?.ticker, mcapAtPost: t?.mcap, peakMcap: t?.mcap, isCall: !!t, likes: res.likes, rts: res.rts, replies: res.replies, buyers: res.buyers,
+      }
+      const next: SocialProfile = {
+        ...soc, posts: soc.posts + 1, lastPostTick: s.market.tick, followers: soc.followers + Math.round(res.likes * 0.1),
+        calls: call ? [{ ...call, postId: post.id, likes: res.likes }, ...soc.calls].slice(0, 30) : soc.calls,
+      }
+      set({ market, socialFeed: [post, ...s.socialFeed].slice(0, 150), profile: { ...s.profile, social: next } })
+      s.notify(
+        t
+          ? { title: 'CALL POSTED', body: `$${t.ticker} · ${res.likes} likes · ${res.buyers ? `${res.buyers} aped 🦍` : 'nobody bit yet'}`, tone: res.buyers ? 'up' : 'info', icon: '📣', tokenId: t.id }
+          : { title: 'POSTED', body: `${res.likes} likes`, tone: 'info', icon: '🐦' },
+      )
+      persist()
+      return true
     },
     setBot: (tokenId, patch) => {
       const s = get()

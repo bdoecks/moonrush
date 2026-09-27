@@ -305,6 +305,21 @@ function onTick(msg: TickMsg) {
     }
   }
 
+  // Your own posts come back with the crowd's reaction: count the likes toward followers and fill in the call.
+  const mine = msg.posts.filter((p) => p.author?.pid === me)
+  if (mine.length && s.profile.social) {
+    let soc = s.profile.social
+    for (const p of mine) {
+      const i = soc.calls.findIndex((c) => !c.settled && c.likes === 0 && c.tokenId === p.tokenId)
+      const calls = i >= 0 ? soc.calls.map((c, k) => (k === i ? { ...c, postId: p.id, likes: p.likes ?? 0 } : c)) : soc.calls
+      soc = { ...soc, calls, followers: soc.followers + Math.round((p.likes ?? 0) * 0.1) }
+      s.notify(p.tokenId
+        ? { title: 'CALL POSTED', body: `$${p.ticker} · ${p.likes ?? 0} likes · ${p.buyers ? `${p.buyers} aped 🦍` : 'nobody bit yet'}`, tone: p.buyers ? 'up' : 'info', icon: '📣', tokenId: p.tokenId }
+        : { title: 'POSTED', body: `${p.likes ?? 0} likes`, tone: 'info', icon: '🐦' })
+    }
+    s.patchState({ profile: { ...s.profile, social: soc } })
+  }
+
   s.tick({
     market,
     newEvents: msg.events.filter((e) => e.by !== me), // your own cooks / dev sells were already shown here

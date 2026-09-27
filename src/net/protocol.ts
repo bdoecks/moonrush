@@ -56,6 +56,7 @@ export type ClientMsg =
   | { t: 'candles'; tokenId: string }
   | { t: 'chat'; text: string }
   | { t: 'event'; event: MarketEvent } // something you did to your own coin (dev sells, bundle dumps)
+  | { t: 'post'; text: string; tokenId?: string; followers: number; rep: number; repeats: number } // a post / call on the timeline
 
 // ─── Server → browser ────────────────────────────────────────────────────────
 /** A coin in a tick: `id` plus only the fields that changed since the last tick (`tape` = new trades only). */

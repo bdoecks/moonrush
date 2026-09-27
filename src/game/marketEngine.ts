@@ -876,6 +876,27 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
     tokens.push(t)
   }
 
+  // 8b. Readers of player calls who decided to ape: their buys land now, on the same curve / pool as everyone's.
+  if (m.shillQueue?.length) {
+    const due = m.shillQueue.filter((q) => q.atTick <= m.tick)
+    m.shillQueue = m.shillQueue.filter((q) => q.atTick > m.tick)
+    for (const q of due) {
+      const t = tokens.find((x) => x.id === q.tokenId)
+      if (!t || (t.status !== 'bonding' && t.status !== 'graduated')) continue
+      const prev = t.price
+      t.price = quoteBuy(t, q.usd).newPrice
+      t.mcap = t.price * SUPPLY
+      t.ath = Math.max(t.ath, t.mcap)
+      touchCandles(t, m.time, prev, q.usd, native)
+      t.volume += q.usd
+      t.buys += 1
+      t.win = addWin(getWin(t, m.time), q.usd, 1, 0)
+      t.holders += 1
+      addTape(m, t, { time: m.time, side: 'buy', usd: q.usd, price: t.price, wallet: q.wallet })
+      if (t.status === 'bonding' && syncCurve(t, nativeUsdOf(native, t.chain))) migrate(t, m, nativeUsdOf(native, t.chain), emit)
+    }
+  }
+
   // 9. New launches keep the trenches fresh.
   // Hand-written names first, then generated memecoin names; a clash with a live ticker gets a "2"/"3"… suffix.
   const nextName = () => {

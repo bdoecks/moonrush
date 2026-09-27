@@ -103,11 +103,35 @@ export interface SocialAccount {
   walletId?: string // X accounts belonging to KOL wallets
 }
 
+/** A real player posting on the (simulated) X timeline. */
+export interface PostAuthor {
+  name: string
+  handle: string
+  avatar: string
+  followers: number
+  rep: number // 0..100 caller reputation
+  pid?: string // multiplayer: who posted it
+}
+
+/** Your side of the timeline: followers and caller rep grow (or shrink) with how your calls play out. */
+export interface SocialProfile {
+  followers: number
+  rep: number // 0..100
+  posts: number
+  lastPostTick: number
+  calls: { postId: number; tokenId: string; ticker: string; tick: number; mcapAtPost: number; peak: number; likes: number; settled?: boolean; x?: number }[]
+}
+
 export interface SocialPost {
   id: number
   tick: number
   time: number
-  accountId: string
+  accountId: string // 'player' for posts written by players (see `author`)
+  author?: PostAuthor
+  likes?: number
+  rts?: number
+  replies?: string[]
+  buyers?: number // bots who aped the call
   text: string
   tokenId?: string
   ticker?: string
@@ -453,6 +477,8 @@ export interface MarketState {
   /** classic = fast-forward clock (6s per tick) and regime-driven prices; realistic = real-time clock and
    *  order-flow-driven pump.fun coins with real launch rates and trade sizes. */
   engine?: MarketEngine
+  /** Buys from people who read a player's call, landing over the next few seconds. */
+  shillQueue?: { tokenId: string; atTick: number; usd: number; wallet: string }[]
 }
 
 export type MarketEngine = 'classic' | 'realistic'
@@ -640,6 +666,7 @@ export interface Profile {
   daily?: import('../game/daily').Daily // realized PnL per real calendar day (portfolio PnL calendar)
   season?: import('../game/season').SeasonState // this week's ranked season
   badges?: import('../game/season').SeasonBadge[] // tiers reached in past seasons, newest first
+  social?: SocialProfile // your X presence (followers, rep, calls)
 }
 
 export interface Toast {

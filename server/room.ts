@@ -4,7 +4,7 @@ import type { WebSocket } from 'ws'
 import { createMarket, candleStore, applyPlayerTrade, quoteBuy, quoteSell, secPerTickOf, setCandleLog, setClock, tickMarket, type CandlePoint } from '../src/game/marketEngine'
 import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
-import { tickSocial } from '../src/game/socialEngine'
+import { POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
 import { flagBundle, runBotTick, sleuthBundle } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
@@ -35,6 +35,7 @@ interface Member {
   info: RoomPlayer
   ws: WebSocket | null
   protect: string[]
+  lastPostTick?: number
 }
 
 export class Room {
@@ -51,6 +52,7 @@ export class Room {
   private pending = new Map<string, CandlePoint[]>() // chart points since the last tick
   private freshIds = new Set<string>() // coins cooked since the last tick (others need their candles)
   private playerEvents: MarketEvent[] = [] // cooks, dev sells… announced with the next tick
+  private playerPosts: SocialPost[] = [] // players' posts on the timeline, sent with the next tick
   private bots = new Map<string, VolumeBot>() // tokenId → a player's volume bot on their own coin
   private lastTapeId = 0
   private lastWalletTradeId = 0
@@ -146,6 +148,8 @@ export class Room {
         this.playerEvents.push({ ...msg.event, by: playerId, text: msg.event.text.replace('(you)', `(${me.info.name})`).slice(0, 200) })
         return
       }
+      case 'post':
+        return this.post(me, msg)
       case 'chat': {
         const text = msg.text.trim().slice(0, 200)
         if (text) this.broadcast({ t: 'chat', from: playerId, name: me.info.name, avatar: me.info.avatar, text, time: Date.now() })
@@ -201,6 +205,25 @@ export class Room {
     this.playerEvents.push({ by: me.info.id, id: this.market.tick * 100 + 97, tick: this.market.tick, time: this.market.time, kind: 'cook', tokenId: token.id, ticker: token.ticker, text: `${me.info.avatar} ${me.info.name} cooked $${token.ticker}`, icon: '🍳', tone: 'info' })
   }
 
+  /** A player's post on the timeline: the crowd reacts on the shared market; everyone sees it next tick. */
+  private post(me: Member, msg: Extract<ClientMsg, { t: 'post' }>) {
+    const text = String(msg.text ?? '').trim().slice(0, 200)
+    if (!text || this.market.tick - (me.lastPostTick ?? -999) < POST_COOLDOWN_TICKS) return
+    me.lastPostTick = this.market.tick
+    setClock(secPerTickOf(this.market))
+    const t = msg.tokenId ? this.market.tokens.find((x) => x.id === msg.tokenId) : undefined
+    const author = {
+      name: me.info.name, handle: me.info.name.toLowerCase().replace(/[^a-z0-9_]/g, '') || 'player', avatar: me.info.avatar, pid: me.info.id,
+      followers: Math.max(0, Math.min(5_000_000, Math.round(msg.followers) || 0)), rep: Math.max(0, Math.min(100, Math.round(msg.rep) || 0)),
+    }
+    const res = shill(this.market, new Rng((Math.random() * 2 ** 32) >>> 0), t, author, text, Math.max(0, Math.min(10, msg.repeats | 0)))
+    this.market.shillQueue = [...(this.market.shillQueue ?? []), ...res.queue]
+    this.playerPosts.push({
+      id: this.market.tick * 1000 + 900 + this.playerPosts.length, tick: this.market.tick, time: this.market.time, accountId: 'player', author, text,
+      tokenId: t?.id, ticker: t?.ticker, mcapAtPost: t?.mcap, peakMcap: t?.mcap, isCall: !!t, likes: res.likes, rts: res.rts, replies: res.replies, buyers: res.buyers,
+    })
+  }
+
   // ─── The clock ─────────────────────────────────────────────────────────────
   private tick() {
     if (![...this.members.values()].some((m) => m.info.online)) return // nobody watching: freeze
@@ -213,7 +236,8 @@ export class Room {
     const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds })
     const e2 = rollEvents(market, rng)
     const wr = tickWallets(this.wallets, market, rng)
-    const posts = tickSocial(market, rng, wr.actions, [...e1, ...e2])
+    const posts = [...tickSocial(market, rng, wr.actions, [...e1, ...e2]), ...this.playerPosts]
+    this.playerPosts = []
 
     // Players' dev tools: volume bots on their coins, and sleuths hunting bundles.
     const bots: Record<string, BotRun> = {}
