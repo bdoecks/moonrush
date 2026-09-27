@@ -18,7 +18,7 @@ import { emptyBalances, executeBuy, executeSell, nativePrice, swap, type Asset }
 import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
 import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
-import { ACCOUNTS, CALL_SETTLE_TICKS, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
+import { ACCOUNTS, CALL_SETTLE_TICKS, callerKey, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import type { ClientMsg, RoomPlayer, RoundInfo } from '../net/protocol'
 import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
@@ -1089,10 +1089,14 @@ export const useGame = create<GameState>()((set, get) => {
         else if (tr.alertSound) s.sfx('alert')
       }
       // Posts from accounts you follow.
-      const followedPost = newPosts.find((p) => s.followedAccounts.includes(p.accountId))
+      const followedPost = newPosts.find((p) => s.followedAccounts.includes(callerKey(p)) && !(p.accountId === 'player' && p.author?.pid === s.online?.you))
       if (followedPost) {
         const acc = ACCOUNTS.find((x) => x.id === followedPost.accountId)
-        s.notify({ title: acc?.platform === 'tg' ? 'TG CALL' : 'NEW POST', body: `@${acc?.handle}: ${followedPost.text.split('\n')[0]}`, tone: 'info', icon: acc?.avatar ?? '📣' }, 'alert')
+        const handle = acc?.handle ?? followedPost.author?.handle ?? 'player'
+        if (followedPost.isCall && followedPost.tokenId) {
+          // Callout Tracker alert: a caller you follow just called a coin (with quick-buy on the toast).
+          s.notify({ title: 'CALLOUT', body: `@${handle} called $${followedPost.ticker} at ${fmtCompact(followedPost.mcapAtPost ?? 0)} MC`, tone: 'info', icon: acc?.avatar ?? followedPost.author?.avatar ?? '📣', tokenId: followedPost.tokenId }, 'alert')
+        } else s.notify({ title: acc?.platform === 'tg' ? 'TG POST' : 'NEW POST', body: `@${handle}: ${followedPost.text.split('\n')[0]}`, tone: 'info', icon: acc?.avatar ?? '📣' }, 'alert')
       }
       // Price alerts (one-shot).
       const fired: PriceAlert[] = []

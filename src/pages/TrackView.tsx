@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { EmptyState, Pct, TokenIcon } from '../components/ui'
 import { QuickBuyButton, QuickSlotPicker } from '../components/chain'
 import { TrackerFeed } from '../components/tracker/TrackerFeed'
+import { CalloutTracker } from '../components/tracker/CalloutTracker'
 import { TrackerSettingsModal } from '../components/tracker/TrackerSettingsModal'
 import { STYLE_META } from '../data/wallets'
 import { useTokenMap } from '../hooks/useDerived'
@@ -53,7 +54,7 @@ export function TrackView() {
         <div className="min-h-0 flex-1 overflow-auto">
           {sub === 'wallet' && <WalletManager />}
           {sub === 'track' && <TrackerFeed onManage={() => setSub('wallet')} />}
-          {sub === 'callout' && <Callouts />}
+          {sub === 'callout' && <CalloutTracker />}
           {sub === 'alerts' && <Alerts />}
           {sub === 'social' && <div className="h-full lg:hidden"><SocialPanel /></div>}
         </div>
@@ -218,93 +219,6 @@ function WalletManager() {
             })}
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-// ─── Callout: calls from X / TG and how they performed ───────────────────────
-function Callouts() {
-  const feed = useGame((s) => s.socialFeed)
-  const tick = useGame((s) => s.market.tick)
-  const select = useGame((s) => s.select)
-  const map = useTokenMap()
-  const calls = feed.filter((p) => p.isCall && p.tokenId && p.mcapAtPost)
-  const board = useMemo(() => {
-    const agg = new Map<string, { n: number; peak: number; now: number; hits: number }>()
-    for (const p of calls) {
-      const t = map.get(p.tokenId!)
-      const a = agg.get(p.accountId) ?? { n: 0, peak: 0, now: 0, hits: 0 }
-      const peakX = (p.peakMcap ?? p.mcapAtPost!) / p.mcapAtPost!
-      a.n++
-      a.peak += peakX
-      a.now += t ? t.mcap / p.mcapAtPost! : 0
-      if (peakX >= 1.5) a.hits++
-      agg.set(p.accountId, a)
-    }
-    return [...agg.entries()].map(([id, a]) => ({ acc: accById.get(id)!, n: a.n, avgPeak: a.peak / a.n, avgNow: a.now / a.n, hit: a.hits / a.n })).sort((x, y) => y.avgPeak - x.avgPeak)
-  }, [calls, map])
-
-  if (!calls.length) return <EmptyState icon="📣" title="No calls yet this session" hint="KOLs and TG channels post calls as the market moves" />
-  return (
-    <div className="space-y-3 p-3">
-      <div className="rounded-md border border-line bg-panel">
-        <div className="border-b border-line px-3 py-2 text-[12px] font-bold">Caller scoreboard <span className="font-normal text-dim">· who actually calls winners</span></div>
-        <div className="grid gap-px bg-line/50 sm:grid-cols-2 xl:grid-cols-4">
-          {board.map((b) => (
-            <div key={b.acc.id} className="flex items-center gap-2 bg-panel px-3 py-2">
-              <span className="text-[18px]">{b.acc.avatar}</span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1 text-[12px] font-semibold">{b.acc.name}{b.acc.platform === 'tg' ? <Send size={10} className="text-info" /> : <AtSign size={10} className="text-muted" />}</div>
-                <div className="num text-[10px] text-dim">{b.n} calls · hit {(b.hit * 100).toFixed(0)}%</div>
-              </div>
-              <div className="text-right num text-[11px]">
-                <div className={b.avgPeak >= 1.5 ? 'text-up' : 'text-muted'}>peak {b.avgPeak.toFixed(2)}X</div>
-                <div className={toneClass(b.avgNow - 1)}>now {b.avgNow.toFixed(2)}X</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="overflow-x-auto rounded-md border border-line bg-panel">
-        <table className="w-full min-w-[760px] text-[12px]">
-          <thead>
-            <tr className="border-b border-line">
-              <th className={clsx(th, 'text-left')}>Age</th>
-              <th className={clsx(th, 'text-left')}>Caller</th>
-              <th className={clsx(th, 'text-left')}>Token</th>
-              <th className={clsx(th, 'text-right')}>Call MC</th>
-              <th className={clsx(th, 'text-right')}>Now</th>
-              <th className={clsx(th, 'text-right')}>Now X</th>
-              <th className={clsx(th, 'text-right')}>Peak X</th>
-              <th className={clsx(th, 'text-right')}>Buy</th>
-            </tr>
-          </thead>
-          <tbody>
-            {calls.map((p) => {
-              const acc = accById.get(p.accountId)!
-              const t = map.get(p.tokenId!)
-              const nowX = t ? t.mcap / p.mcapAtPost! : 0
-              const peakX = (p.peakMcap ?? p.mcapAtPost!) / p.mcapAtPost!
-              return (
-                <tr key={p.id} className="border-b border-line/40 hover:bg-panel2">
-                  <td className={clsx(td, 'num text-dim')}>{fmtAge((tick - p.tick) * SIM_SEC_PER_TICK)}</td>
-                  <td className={td}><span className="mr-1">{acc.avatar}</span><span className="font-semibold">{acc.name}</span> <span className="text-[10px] text-dim">{acc.platform === 'tg' ? 'TG' : 'X'}</span></td>
-                  <td className={td}>
-                    <button disabled={!t} onClick={() => t && select(t.id)} className="flex items-center gap-1.5 hover:text-accent">
-                      {t && <TokenIcon token={t} size={18} />}<span className="font-bold">{p.ticker}</span>
-                    </button>
-                  </td>
-                  <td className={clsx(td, 'text-right num text-muted')}>{fmtCompact(p.mcapAtPost!)}</td>
-                  <td className={clsx(td, 'text-right num')}>{t ? fmtCompact(t.mcap) : 'delisted'}</td>
-                  <td className={clsx(td, 'text-right num font-semibold', toneClass(nowX - 1))}>{t ? `${nowX.toFixed(2)}X` : '—'}</td>
-                  <td className={clsx(td, 'text-right num', peakX >= 1.5 ? 'text-up font-bold' : 'text-muted')}>{peakX.toFixed(2)}X</td>
-                  <td className={clsx(td, 'text-right')}><QuickBuy t={t} /></td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
       </div>
     </div>
   )

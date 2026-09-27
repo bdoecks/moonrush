@@ -24,6 +24,9 @@ export const ACCOUNTS: SocialAccount[] = [
   { id: 'tg-gemhunters', platform: 'tg', name: 'Gem Hunters VIP', handle: 'gemhuntersvip', avatar: '💎', followers: 51_000, kind: 'caller' },
   { id: 'tg-earlybird', platform: 'tg', name: 'Early Bird Alpha', handle: 'earlybirdalpha', avatar: '🐦', followers: 9_800, kind: 'caller' },
 ]
+/** Who made a post, as something you can follow: an account id, or `player:<id>` for a real player. */
+export const callerKey = (p: Pick<SocialPost, 'accountId' | 'author'>) => (p.accountId === 'player' ? `player:${p.author?.pid ?? p.author?.handle ?? 'you'}` : p.accountId)
+
 const byWallet = new Map(ACCOUNTS.filter((a) => a.walletId).map((a) => [a.walletId!, a]))
 
 const T = (t: Token) => `$${t.ticker}`
