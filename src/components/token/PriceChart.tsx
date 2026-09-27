@@ -26,6 +26,7 @@ import type { Candle, ChartStyle, Timeframe } from '../../types'
 import { TF_SECONDS } from '../../types'
 import { TradeBubbles, type Bubble } from './bubbles'
 import { pickFor, useTradePick } from './tradePick'
+import { useFriends } from '../../net/friends'
 import { MARKER_KINDS, type MarkerKind, type MarkerKinds } from './markers'
 import { fmtCompact, fmtPrice } from '../../utils/format'
 
@@ -82,6 +83,9 @@ export function PriceChart(o: ChartOptions) {
   const creatorIsYou = useGame((s) => s.market.tokens.find((t) => t.id === tokenId)?.creator === 'you')
   const wallets = useGame((s) => s.wallets)
   const tracked = useGame((s) => s.trackedWallets)
+  const online = useGame((s) => s.online)
+  const friendTrades = useFriends((s) => s.trades)
+  const friendWatch = useFriends((s) => s.watch)
   const launch = useGame((s) => s.launches.find((r) => r.tokenId === tokenId))
   const firstWallet = useGame((s) => s.portfolio.accounts?.[0]?.id)
 
@@ -366,18 +370,28 @@ export function PriceChart(o: ChartOptions) {
         for (const tr of w.trades) if (tr.tokenId === tokenId) add(tr.time, tr.side, 'tracked', w.avatar, tr.price)
       }
     }
+    // Friends in your room: every main-wallet trade is public (their avatar); side wallets only if you track the address.
+    if (markerKinds.friends !== false && online) {
+      const avatar = new Map(online.players.map((p) => [p.id, p.avatar]))
+      for (const tr of friendTrades) {
+        if (tr.tokenId !== tokenId) continue
+        if (tr.pid) add(tr.time, tr.side, 'friends', avatar.get(tr.pid) ?? '🧑', tr.price)
+        else if (tr.addr && friendWatch.some((w) => w.key === `a:${tr.addr}`)) add(tr.time, tr.side, 'friends', '🕶', tr.price)
+      }
+    }
     const b: Bubble[] = [...groups.values()]
       .map((g): Bubble => {
         const buy = g.side === 'buy'
         const sideColor = buy ? UP : DOWN
         const base = { time: g.time, price: g.px * k, side: g.side, kind: g.kind, n: g.n }
         if (g.kind === 'tracked') return { ...base, text: g.label, color: '#161a22', ink: '#fff', ring: sideColor }
+        if (g.kind === 'friends') return { ...base, text: g.label, color: '#2a1840', ink: '#fff', ring: sideColor }
         if (g.kind === 'dev') return { ...base, text: `D${buy ? 'B' : 'S'}`, color: MARKER_KINDS.find((m) => m.id === 'dev')!.color, ink: '#1a1204', ring: sideColor }
         return { ...base, text: buy ? 'B' : 'S', color: sideColor, ink: buy ? '#06140d' : '#fff' }
       })
       .sort((a, b) => a.time - b.time)
     markers.current.set(b)
-  }, [trades, devTrades, wallets, tracked, creatorIsYou, launch, firstWallet, markerKinds, tokenId, tf, style, unit, k, accent, showMarkers])
+  }, [trades, devTrades, wallets, tracked, friendTrades, friendWatch, online, creatorIsYou, launch, firstWallet, markerKinds, tokenId, tf, style, unit, k, accent, showMarkers])
 
   const chg = legend && legend.o ? legend.c / legend.o - 1 : 0
   const tone = chg >= 0 ? 'text-up' : 'text-down'

@@ -5,7 +5,7 @@ import { creatorRate, nativePrice, tradeFee } from '../game/tradingEngine'
 import { ChainBadge } from '../components/chain'
 import { PadBadge, PadTag } from '../components/pad'
 import { LAUNCHPADS } from '../data/launchpads'
-import { MARKER_KINDS, type MarkerKinds } from '../components/token/markers'
+import { MARKER_KINDS, withMarkerDefaults, type MarkerKinds } from '../components/token/markers'
 import { ArrowLeft, BarChart3, CandlestickChart, Copy, Eye, Globe, LineChart, Magnet, Maximize2, Send, Share2, Star, Tags, AtSign, Users } from 'lucide-react'
 import { useRef, useState, type ReactNode } from 'react'
 import { FlowStats } from '../components/token/FlowStats'
@@ -104,7 +104,8 @@ export function TokenView() {
   const [showVolume, setShowVolume] = usePersisted('chartVol', true)
   const [showMarkers, setShowMarkers] = usePersisted('chartMarkers', true)
   const [magnet, setMagnet] = usePersisted('chartMagnet', false)
-  const [kinds, setKinds] = usePersisted<MarkerKinds>('chartMarkerKinds', { me: true, dev: true, tracked: true })
+  const [kindsRaw, setKinds] = usePersisted<MarkerKinds>('chartMarkerKinds', withMarkerDefaults({}))
+  const kinds = withMarkerDefaults(kindsRaw)
   const tradesOpen = useTradePick((s) => s.open)
   const [fitSignal, setFitSignal] = useState(0)
   const [autoSignal, setAutoSignal] = useState(0)
