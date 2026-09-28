@@ -204,6 +204,7 @@ function Room() {
                 <span className="min-w-0">
                   <span className="flex items-center gap-1 text-[13px] font-semibold">
                     <span className="truncate">{p.name}</span>
+                    {p.verified && <span className="text-[10px] font-bold text-up" title="Signed in: this is their real account">✓</span>}
                     {p.id === online.you && <span className="text-[10px] text-accent">(you)</span>}
                     {p.id === online.hostId && <Crown size={12} className="text-warn" fill="currentColor" aria-label="Host" />}
                   </span>
