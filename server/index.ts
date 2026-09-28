@@ -6,6 +6,20 @@ import { extname, join, normalize } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { MP_PATH, type ClientMsg, type ServerMsg } from '../src/net/protocol'
 import { Room } from './room'
+import { nameTaken, verifyToken } from './auth'
+
+/**
+ * Who's joining: signed in (token checks out) → their account id and name; otherwise a guest, who can't use an
+ * account's id (u-…) or a registered name.
+ */
+async function identify(msg: Extract<ClientMsg, { t: 'hello' }>): Promise<{ playerId: string; name: string; avatar: string; verified: boolean }> {
+  const v = await verifyToken(msg.token)
+  if (v) return { playerId: `u-${v.id}`, name: v.username, avatar: String(msg.avatar || v.avatar).slice(0, 8), verified: true }
+  const pid = String(msg.playerId).startsWith('u-') ? `g-${String(msg.playerId).slice(2, 14)}` : String(msg.playerId).slice(0, 64)
+  let name = String(msg.name ?? '').trim().slice(0, 16) || 'Anon'
+  if (await nameTaken(name)) name = `${name.slice(0, 11)}_guest`
+  return { playerId: pid, name, avatar: String(msg.avatar ?? '🐸').slice(0, 8), verified: false }
+}
 
 const PORT = Number(process.env.PORT) || 8787
 const DIST = join(import.meta.dirname, '..', 'dist')
@@ -51,6 +65,7 @@ const wss = new WebSocketServer({ server: http, path: MP_PATH, perMessageDeflate
 wss.on('connection', (ws: WebSocket) => {
   let room: Room | null = null
   let playerId = ''
+  let joining: ClientMsg[] | null = null // messages that arrive while we check who's joining
   const fail = (message: string) => {
     ws.send(JSON.stringify({ t: 'error', message } satisfies ServerMsg))
     ws.close(4001, message)
@@ -62,24 +77,38 @@ wss.on('connection', (ws: WebSocket) => {
     } catch {
       return
     }
+    if (joining) {
+      joining.push(msg)
+      return
+    }
     if (!room) {
       if (msg.t !== 'hello' || !msg.playerId) return fail('Say hello first')
-      const name = String(msg.name ?? '').trim().slice(0, 16) || 'Anon'
-      if (msg.create) {
-        const code = newCode()
-        room = new Room(code)
-        rooms.set(code, room)
-      } else {
-        room = rooms.get(String(msg.room ?? '').toUpperCase()) ?? null
-        if (!room) return fail('No room with that code')
-        if (!room.members.has(msg.playerId) && room.members.size >= 12) return fail('Room is full (12 players)')
-      }
-      playerId = msg.playerId
-      room.join(ws, { ...msg, name })
+      joining = []
+      void identify(msg).then((who) => {
+        const queued = joining ?? []
+        joining = null
+        if (ws.readyState !== ws.OPEN) return
+        enter({ ...msg, ...who })
+        for (const m of queued) if (room) room.handle(playerId, m)
+      })
       return
     }
     room.handle(playerId, msg)
   })
+  const enter = (msg: Extract<ClientMsg, { t: 'hello' }> & { verified: boolean }) => {
+    const name = String(msg.name ?? '').trim().slice(0, 16) || 'Anon'
+    if (msg.create) {
+      const code = newCode()
+      room = new Room(code)
+      rooms.set(code, room)
+    } else {
+      room = rooms.get(String(msg.room ?? '').toUpperCase()) ?? null
+      if (!room) return fail('No room with that code')
+      if (!room.members.has(msg.playerId) && room.members.size >= 12) return fail('Room is full (12 players)')
+    }
+    playerId = msg.playerId
+    room.join(ws, { ...msg, name })
+  }
   ws.on('close', () => room?.leave(playerId, ws))
 })
 

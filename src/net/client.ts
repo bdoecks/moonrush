@@ -13,6 +13,7 @@ import { aggregate } from '../game/accounts'
 import { CHAINS } from '../data/chains'
 import { load, remove, save } from '../utils/storage'
 import { myAddresses, recordPlayerTrades, useFriends } from './friends'
+import { accessToken, accountPlayerId } from './account'
 import { MP_PATH, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TransferMsg } from './protocol'
 
 const STATUS_MS = 2000
@@ -34,6 +35,15 @@ let sessionPid: string | null = null
  * (sessionStorage `mp:pid`, or `?player=2` in the URL) to be a second player on the same PC — handy for testing.
  */
 export function playerId(): string {
+  // Signed in: your account is your player, on every device (a tab override still wins, for testing).
+  let override = false
+  try {
+    override = !!new URLSearchParams(location.search).get('player') || !!sessionStorage.getItem('mp:pid')
+  } catch {
+    /* storage blocked */
+  }
+  const acc = accountPlayerId()
+  if (acc && !override) return acc
   if (sessionPid) return sessionPid
   try {
     const slot = new URLSearchParams(location.search).get('player')
@@ -101,9 +111,10 @@ export function resumeRoom() {
 function open(opts: { create?: boolean; room?: string; name: string; avatar: string }) {
   const sock = new WebSocket(serverUrl())
   ws = sock
-  sock.onopen = () => {
+  sock.onopen = async () => {
     const s = useGame.getState()
-    send({ t: 'hello', name: opts.name, avatar: opts.avatar, level: levelFromXp(s.profile.xp).level, playerId: playerId(), room: opts.room, create: opts.create })
+    const token = await accessToken()
+    send({ t: 'hello', name: opts.name, avatar: opts.avatar, level: levelFromXp(s.profile.xp).level, playerId: playerId(), room: opts.room, create: opts.create, token })
   }
   sock.onmessage = (e) => {
     let msg: ServerMsg

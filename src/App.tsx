@@ -15,6 +15,7 @@ import { rankMap, watchRanks } from './game/rankWatch'
 import { isRanked } from './game/season'
 import { valuePortfolio } from './game/portfolioEngine'
 import { resumeRoom } from './net/client'
+import { initAccount, whenAccountReady } from './net/account'
 import { CookingView } from './pages/CookingView'
 import { CopyTradeView } from './pages/CopyTradeView'
 import { SniperView } from './pages/SniperView'
@@ -78,8 +79,11 @@ export default function App() {
   // Start (or roll over to) this week's ranked season.
   useEffect(() => useGame.getState().checkSeason(), [])
 
-  // Were you in a multiplayer room before this reload? Go back in.
-  useEffect(() => resumeRoom(), [])
+  // Your account (if signed in) first, so rejoining a room uses it; then back into the room you were in.
+  useEffect(() => {
+    initAccount()
+    return whenAccountReady(resumeRoom)
+  }, [])
 
   useEffect(() => {
     const root = document.documentElement

@@ -9,7 +9,8 @@ import { EnginePicker } from './Modals'
 import { fmtClock, fmtPct, fmtUsd, toneClass } from '../utils/format'
 import { Modal } from './ui'
 
-const AVATARS = ['🐸', '🐶', '🐱', '🦊', '🐼', '🐵', '🦍', '🐳', '🦄', '🤖', '👽', '🧙', '🥷', '🤠', '🦈', '🐙']
+import { AccountModal, AVATARS } from './Account'
+import { useAccount } from '../net/account'
 const MODE_ICON: Record<GameMode, string> = { practice: '🧪', challenge: '🎯', arena: '⚔️', hardcore: '☠️' }
 
 /** "Play with friends": create or join a room, then the room's lobby (players, chat, host starts the round). */
@@ -27,8 +28,14 @@ export function LobbyModal() {
 function JoinForm() {
   const setModal = useGame((s) => s.setModal)
   const saved = mpProfile()
-  const [name, setName] = useState(saved.name)
-  const [avatar, setAvatar] = useState(saved.avatar)
+  const account = useAccount((s) => s.profile)
+  const accountsOn = useAccount((s) => s.status !== 'off')
+  const [signIn, setSignIn] = useState(false)
+  const [nameState, setName] = useState(saved.name)
+  const [avatarState, setAvatar] = useState(saved.avatar)
+  // Signed in: you play under your account name (the server checks it).
+  const name = account?.username ?? nameState
+  const avatar = account?.avatar ?? avatarState
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState<'create' | 'join' | null>(null)
   const [error, setError] = useState('')
@@ -52,7 +59,21 @@ function JoinForm() {
       <p className="text-[12px] text-muted">
         Everyone in a room trades the <b className="text-ink">same live market</b>: you'll see each other's buys on the tape, move each other's prices, and can buy (or get rugged by) each other's cooked coins. The leaderboard is just your room.
       </p>
+      {account ? (
+        <div className="flex items-center gap-2 rounded-md bg-bg px-3 py-2">
+          <span className="text-[20px]">{account.avatar}</span>
+          <span className="font-bold">{account.username}</span>
+          <span className="rounded bg-up/15 px-1.5 text-[10px] font-bold text-up">✓ Signed in</span>
+          <span className="ml-auto text-[10px] text-dim">Change your avatar from the account button at the top</span>
+        </div>
+      ) : (
       <div>
+        {accountsOn && (
+          <div className="mb-2 flex items-center gap-2 rounded-md border border-accent/30 bg-accent/5 px-3 py-2 text-[11px]">
+            <span className="text-muted">Playing as a guest. Sign in to lock your name and keep your progress on every device.</span>
+            <button onClick={() => setSignIn(true)} className="ml-auto shrink-0 rounded border border-accent/50 px-2 py-0.5 font-bold text-accent hover:bg-accent/10">Sign in</button>
+          </div>
+        )}
         <div className="mb-1 text-[11px] font-semibold text-muted">Your name & avatar</div>
         <div className="flex gap-2">
           <span className="grid size-9 shrink-0 place-items-center rounded-md bg-raise text-[20px]">{avatar}</span>
@@ -64,6 +85,8 @@ function JoinForm() {
           ))}
         </div>
       </div>
+      )}
+      {signIn && <AccountModal onClose={() => setSignIn(false)} />}
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-line2 bg-bg p-3">
           <div className="text-[13px] font-bold">Start a room</div>

@@ -19,6 +19,7 @@ export interface RoomPlayer {
   finished?: boolean
   seasonPoints?: number // their real season points (sets the tier everyone sees for them)
   holdings?: MainHolding[] // what their public main wallet holds (side wallets stay hidden)
+  verified?: boolean // signed in: the server confirmed this is their account
 }
 
 /** A coin in a player's main wallet, as everyone in the room can see it on-chain. */
@@ -55,7 +56,8 @@ export interface BotRun {
 
 // ─── Browser → server ────────────────────────────────────────────────────────
 export type ClientMsg =
-  | { t: 'hello'; name: string; avatar: string; level: number; playerId: string; room?: string; create?: boolean }
+  // `token`: your login (signed-in players); the server checks it and uses your account name.
+  | { t: 'hello'; name: string; avatar: string; level: number; playerId: string; room?: string; create?: boolean; token?: string }
   | { t: 'start'; mode: GameMode; durationTicks: number | null; engine?: MarketEngine }
   // `main`: traded from your public main wallet (shows your name); otherwise it shows only `addr` (stealth side wallet).
   | { t: 'trade'; tokenId: string; side: 'buy' | 'sell'; usd: number; qty: number; addr?: string; main?: boolean }

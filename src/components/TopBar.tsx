@@ -15,6 +15,7 @@ import { WalletChip } from './chain'
 import { WalletSelector } from './wallets'
 import { GlobalSearch } from './GlobalSearch'
 import { RoomChip } from './Multiplayer'
+import { AccountButton } from './Account'
 
 const UNITS = ['usd', 'sol', 'bsc', 'hood'] as const
 
@@ -217,6 +218,7 @@ export function TopBar() {
           <div className={clsx('num text-[12px]', toneClass(v.portfolio.realized))}>{money(v.portfolio.realized, true)}</div>
         </div>
         <CashbackChip />
+        <AccountButton />
       </div>
 
       <div className="flex items-center gap-0.5 border-l border-line pl-2">

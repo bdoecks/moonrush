@@ -75,11 +75,11 @@ export class Room {
   }
 
   // ─── Players ───────────────────────────────────────────────────────────────
-  join(ws: WebSocket, msg: Extract<ClientMsg, { t: 'hello' }>) {
+  join(ws: WebSocket, msg: Extract<ClientMsg, { t: 'hello' }> & { verified?: boolean }) {
     const existing = this.members.get(msg.playerId)
     const info: RoomPlayer = existing
-      ? { ...existing.info, name: msg.name, avatar: msg.avatar, level: msg.level, online: true }
-      : { id: msg.playerId, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, equity: 0, startEquity: 0, trades: 0, wins: 0 }
+      ? { ...existing.info, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, verified: !!msg.verified }
+      : { id: msg.playerId, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, equity: 0, startEquity: 0, trades: 0, wins: 0, verified: !!msg.verified }
     existing?.ws?.close(4000, 'Joined from another tab')
     this.members.set(msg.playerId, { info, ws, protect: existing?.protect ?? [], addrs: existing?.addrs })
     if (!this.hostId) this.hostId = msg.playerId
