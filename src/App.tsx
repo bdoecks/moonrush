@@ -24,6 +24,7 @@ import { MonitorView } from './pages/MonitorView'
 import { TrackView } from './pages/TrackView'
 import { AdminView } from './pages/AdminView'
 import { NoticeBanner } from './components/NoticeBanner'
+import { AdminFloat } from './components/AdminFloat'
 import { watchFlags } from './game/flags'
 import { DiscoverView } from './pages/DiscoverView'
 import { TrenchesView } from './pages/TrenchesView'
@@ -100,6 +101,7 @@ export default function App() {
     <div className="flex h-full flex-col">
       <TopBar />
       <NoticeBanner />
+      <AdminFloat />
       <TickerStrip />
       <div className="flex min-h-0 flex-1">
         {/* Wallet + social trackers; places itself on the left or right edge. */}

@@ -3,53 +3,26 @@ import { Ban, Crown, DoorClosed, Megaphone, RefreshCw, ShieldCheck, UserX } from
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { CHAIN_IDS, CHAINS } from '../data/chains'
 import { setFlag, useFlags, type GameFlags } from '../game/flags'
-import { adminMarket, type AdminMarketAction } from '../game/marketEngine'
+import type { AdminMarketAction } from '../game/marketEngine'
+import { adminAct, adminApi, adminBan, adminMarketOn, type RoomSummary } from '../net/adminApi'
 import { levelFromXp, xpForLevel } from '../game/progression'
 import { useGame } from '../game/store'
-import { accessToken, useAccount } from '../net/account'
-import type { RoomPlayer } from '../net/protocol'
+import { useAccount } from '../net/account'
 import { supabase } from '../net/supabase'
 import type { Archetype, Chain } from '../types'
-import { Rng } from '../utils/rng'
 import { fmtAge, fmtCompact, fmtUsd } from '../utils/format'
 import { EmptyState, Toggle } from '../components/ui'
 
 type Tab = 'rooms' | 'market' | 'accounts' | 'switches'
-interface RoomSummary {
-  code: string
-  hostId: string
-  round: { state: string; mode: string; engine: string; tick: number }
-  players: RoomPlayer[]
-  emptySince: number | null
-  coins: { id: string; ticker: string; emoji: string; chain: Chain; mcap: number; status: string; creator: string | null }[]
-  sentiment: number
-}
-
-async function api<T>(path: string, body?: unknown): Promise<{ ok: boolean; data?: T; error?: string }> {
-  const token = await accessToken()
-  try {
-    const res = await fetch(path, {
-      method: body ? 'POST' : 'GET',
-      headers: { Authorization: `Bearer ${token ?? ''}`, ...(body ? { 'content-type': 'application/json' } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    })
-    const data = await res.json().catch(() => ({}))
-    return res.ok ? { ok: true, data: data as T } : { ok: false, error: (data as { error?: string }).error ?? `Error ${res.status}` }
-  } catch {
-    return { ok: false, error: 'Could not reach the game server' }
-  }
-}
-
 /** Admin panel: only shows for accounts on the admin list (the server and database enforce it too). */
 export function AdminView() {
   const admin = useAccount((s) => s.admin)
   const [tab, setTab] = useState<Tab>('rooms')
   const [rooms, setRooms] = useState<RoomSummary[]>([])
   const [roomsError, setRoomsError] = useState('')
-  const notify = useGame((s) => s.notify)
 
   const refresh = useCallback(async () => {
-    const r = await api<{ rooms: RoomSummary[] }>('/admin/api/rooms')
+    const r = await adminApi<{ rooms: RoomSummary[] }>('/admin/api/rooms')
     if (r.ok) {
       setRooms(r.data!.rooms)
       setRoomsError('')
@@ -63,10 +36,9 @@ export function AdminView() {
   }, [admin, refresh])
 
   const act = async (body: unknown, done?: string) => {
-    const r = await api('/admin/api/action', body)
-    notify(r.ok ? { title: 'ADMIN', body: done ?? 'Done', tone: 'info', icon: '🛠' } : { title: 'ADMIN FAILED', body: r.error ?? 'Failed', tone: 'warn', icon: '⚠️' })
+    const ok = await adminAct(body, done)
     void refresh()
-    return r.ok
+    return ok
   }
 
   if (!admin) return <EmptyState icon="🔒" title="Admins only" hint="Sign in with an admin account to use this page." />
@@ -91,7 +63,7 @@ export function AdminView() {
         </div>
         {roomsError && tab !== 'accounts' && tab !== 'switches' && <div className="rounded-md border border-down/40 bg-down/10 px-3 py-2 text-[12px] text-down">Game server: {roomsError}</div>}
         {tab === 'rooms' && <Rooms rooms={rooms} act={act} />}
-        {tab === 'market' && <Market rooms={rooms} act={act} />}
+        {tab === 'market' && <Market rooms={rooms} />}
         {tab === 'accounts' && <Accounts />}
         {tab === 'switches' && <Switches rooms={rooms} />}
       </div>
@@ -153,7 +125,7 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
                           <input value={gift[p.id] ?? ''} onChange={(e) => setGift({ ...gift, [p.id]: e.target.value.replace(/[^0-9.-]/g, '') })} placeholder="$" className="num h-6 w-16 rounded border border-line2 bg-bg px-1 text-[11px] outline-none" />
                           <button disabled={!Number(gift[p.id])} onClick={() => act({ action: 'grant', room: r.code, playerId: p.id, usd: Number(gift[p.id]) }, `Gave ${p.name} ${fmtUsd(Number(gift[p.id]))}`)} className={clsx(btn, 'border-up/50 text-up hover:bg-up/10')}>Give $</button>
                           <button onClick={() => act({ action: 'kick', room: r.code, playerId: p.id, reason: 'You were removed from the room by an admin' }, `Kicked ${p.name}`)} className={clsx(btn, 'flex items-center gap-0.5 border-warn/50 text-warn hover:bg-warn/10')}><UserX size={10} /> Kick</button>
-                          <button onClick={() => confirm(`Ban ${p.name}?${p.verified ? ' Their account can\'t join any room until you unban it (Accounts tab).' : ' (Guest: banned until the server restarts.)'}`) && banPlayer(p, r.code, act)} className={clsx(btn, 'flex items-center gap-0.5 border-down/50 text-down hover:bg-down/10')}><Ban size={10} /> Ban</button>
+                          <button onClick={() => confirm(`Ban ${p.name}?${p.verified ? ' Their account can\'t join any room until you unban it (Accounts tab).' : ' (Guest: banned until the server restarts.)'}`) && adminBan(p, r.code)} className={clsx(btn, 'flex items-center gap-0.5 border-down/50 text-down hover:bg-down/10')}><Ban size={10} /> Ban</button>
                         </span>
                       </td>
                     </tr>
@@ -168,11 +140,6 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
   )
 }
 
-async function banPlayer(p: RoomPlayer, room: string, act: (b: unknown, done?: string) => Promise<boolean>) {
-  if (p.verified && p.id.startsWith('u-') && supabase) await supabase.from('bans').insert({ user_id: p.id.slice(2), reason: 'Banned by admin' })
-  await act({ action: 'kick', room, playerId: p.id, reason: 'You are banned from MOONRUSH rooms' }, `Banned ${p.name}`)
-}
-
 // ─── Market god mode ─────────────────────────────────────────────────────────
 const ARCHETYPES: { id: Archetype; label: string }[] = [
   { id: 'runner', label: '🚀 Runner (pumps)' },
@@ -183,11 +150,10 @@ const ARCHETYPES: { id: Archetype; label: string }[] = [
 ]
 const SIZES = [1_000, 10_000, 50_000, 250_000]
 
-function Market({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: string) => Promise<boolean> }) {
+function Market({ rooms }: { rooms: RoomSummary[] }) {
   const online = useGame((s) => s.online?.code)
   const localTokens = useGame((s) => s.market.tokens)
   const localMood = useGame((s) => s.market.sentiment)
-  const notify = useGame((s) => s.notify)
   const [target, setTarget] = useState<string>(online ?? 'solo')
   const [q, setQ] = useState('')
   const [coin, setCoin] = useState<string | null>(null)
@@ -204,18 +170,7 @@ function Market({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?:
   const sel = coins.find((c) => c.id === coin)
   const mood = solo ? localMood : room?.sentiment ?? 0
 
-  const run = async (a: AdminMarketAction, done: string) => {
-    if (solo) {
-      // Solo: your own browser runs the market, so do it right here.
-      const s = useGame.getState()
-      if (s.online) return notify({ title: 'ADMIN', body: "You're in a room: pick that room as the target", tone: 'warn', icon: '⚠️' })
-      const r = adminMarket(s.market, a, new Rng((Date.now() ^ s.market.seed) >>> 0))
-      if (r.error) return notify({ title: 'ADMIN FAILED', body: r.error, tone: 'warn', icon: '⚠️' })
-      s.patchState({ market: r.market })
-      return notify({ title: 'ADMIN', body: done, tone: 'info', icon: '🛠' })
-    }
-    await act({ action: 'market', room: target, market: a }, done)
-  }
+  const run = (a: AdminMarketAction, done: string) => adminMarketOn(target, a, done)
   const size = (v: number) => (Number(custom) > 0 ? Number(custom) : v)
 
   return (
