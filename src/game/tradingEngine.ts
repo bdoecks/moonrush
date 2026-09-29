@@ -104,6 +104,7 @@ export interface ExecOpts {
   autoSwap?: boolean
   setting?: TradeSetting // GMGN-style slippage / fees / anti-MEV; omitted for copy trades, bundles and bots
   rand?: () => number
+  who?: { name: string; pid?: string; addr?: string } // rooms: the server tags the tape with who traded
 }
 
 // ─── Execution frictions ─────────────────────────────────────────────────────
@@ -252,7 +253,7 @@ export function executeBuy(p: Portfolio, m: MarketState, tokenId: string, usd: n
     feesPaid: p.feesPaid + q.fee + gasUsd,
     tradedTokens: firstTimeToken ? [...p.tradedTokens, tokenId] : p.tradedTokens,
   }
-  return { ok: true, portfolio, market: applyPlayerTrade(m, tokenId, 'buy', usd, q.newPrice), trade, firstTimeToken, swapped, exec: f }
+  return { ok: true, portfolio, market: applyPlayerTrade(m, tokenId, 'buy', usd, q.newPrice, opts.who), trade, firstTimeToken, swapped, exec: f }
 }
 
 export function executeSell(p: Portfolio, m: MarketState, tokenId: string, qty: number, nextId: number, opts: ExecOpts = {}): Result {
@@ -302,5 +303,5 @@ export function executeSell(p: Portfolio, m: MarketState, tokenId: string, qty: 
     realized: p.realized + q.pnl,
     feesPaid: p.feesPaid + q.fee + gasUsd,
   }
-  return { ok: true, portfolio, market: applyPlayerTrade(m, tokenId, 'sell', q.gross, q.newPrice), trade, firstTimeToken: false, exec: f }
+  return { ok: true, portfolio, market: applyPlayerTrade(m, tokenId, 'sell', q.gross, q.newPrice, opts.who), trade, firstTimeToken: false, exec: f }
 }

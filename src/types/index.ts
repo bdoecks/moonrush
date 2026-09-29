@@ -538,6 +538,7 @@ export interface Trade {
   via?: string // copy-trade source wallet name
   gas?: number // USD of priority fee + tip
   walletId?: string // which of your wallets traded
+  ref?: number // rooms: the order this fill belongs to (the server's fills replace the on-screen ones)
   mev?: number // USD lost to a sandwich
   lag?: number // fraction the price moved against you before the fill
   image?: string

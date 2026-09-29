@@ -5,7 +5,7 @@ import { portfolioStats, valuePortfolio } from '../game/portfolioEngine'
 import { levelFromXp } from '../game/progression'
 import { seasonNumber } from '../game/season'
 import { nativePrice } from '../game/tradingEngine'
-import { netHooks, roomRivals, useGame, type BotTickRun, type ChatLine, type MpSave, type OnlineState } from '../game/store'
+import { netHooks, quietly, roomRivals, useGame, type BotTickRun, type ChatLine, type MpSave, type OnlineState } from '../game/store'
 import type { Chain, MarketEngine, MarketState, SimWallet, TapeTrade, Token, Trade } from '../types'
 import { walletAddress } from '../utils/address'
 import { fmtCompact, fmtUsd } from '../utils/format'
@@ -15,6 +15,7 @@ import { load, remove, save } from '../utils/storage'
 import { myAddresses, recordPlayerTrades, useFriends } from './friends'
 import { accessToken, accountPlayerId } from './account'
 import { giveLocal } from '../game/gifts'
+import { diffWallet, layoutOf, mergeWalletState } from '../game/orders'
 import { MP_PATH, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TransferMsg } from './protocol'
 
 const STATUS_MS = 2000
@@ -26,6 +27,9 @@ let leaving = false
 let retries = 0
 let statusTimer: ReturnType<typeof setInterval> | null = null
 let unsubTrades: (() => void) | null = null
+let unsubWallet: (() => void) | null = null
+let seq = 0 // wallet messages sent on this connection
+let lastLayout = ''
 let muted = false // while restoring / starting a round, don't echo the whole trade list to the server
 let pending: { resolve: () => void; reject: (e: Error) => void } | null = null
 
@@ -135,6 +139,8 @@ function open(opts: { create?: boolean; room?: string; name: string; avatar: str
       // Same player opened the game in another tab: that tab plays now, this one steps aside.
       stopLoops()
       netHooks.send = null
+      netHooks.order = null
+      netHooks.op = null
       if (s.online) s.patchState({ online: { ...s.online, conn: 'reconnecting' } })
       s.notify({ title: 'OPENED IN ANOTHER TAB', body: 'This room is now playing in your other tab. Reload here to take it back.', tone: 'warn', icon: '🗂' })
       return
@@ -204,7 +210,7 @@ export function sendFunds(o: { to?: string; toAddr?: string; asset: SendAsset; a
         moveFunds(o.asset, -amount, o.fromWallet, -usd * (amount / o.amount))
       },
     })
-    send({ t: 'send', ref, to: o.to, toAddr: o.toAddr, asset: o.asset, amount: o.amount, usd, main: fromMain, fromAddr: walletAddress(playerId(), main ? o.fromWallet : 'main', 'sol') })
+    send({ t: 'send', ref, to: o.to, toAddr: o.toAddr, asset: o.asset, amount: o.amount, usd, main: fromMain, fromWallet: o.fromWallet, fromAddr: walletAddress(playerId(), main ? o.fromWallet : 'main', 'sol') })
     setTimeout(() => {
       if (!sends.delete(ref)) return
       resolve({ ok: false, error: 'No answer from the room. Nothing was sent.' })
@@ -219,7 +225,34 @@ function moveFunds(asset: SendAsset, amount: number, walletId: string, usd: numb
   if (asset === 'usdc') p = { ...p, cash: Math.max(0, p.cash + amount) }
   else p = aggregate({ ...p, accounts: (p.accounts ?? []).map((a) => (a.id === walletId ? { ...a, balances: { ...a.balances, [asset]: Math.max(0, a.balances[asset] + amount) } } : a)) })
   p = { ...p, startBalance: Math.max(1, p.startBalance + usd), dayStartEquity: p.dayStartEquity + usd }
-  s.patchState({ portfolio: p })
+  quietly(() => s.patchState({ portfolio: p })) // the server moves this money in its own wallets too
+}
+
+/**
+ * Your wallets as the server has them. The server is the judge: its fills replace the ones shown instantly, and its
+ * balances win, but only once it has handled every wallet message we sent (otherwise the next answer will).
+ */
+function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
+  if (import.meta.env.DEV) (window as unknown as { __srvWallet: unknown }).__srvWallet = msg // test copies only: inspect the server's answer
+  const s = useGame.getState()
+  if (!s.online || s.runStatus === 'select') return
+  let p = s.portfolio
+  if (msg.ref !== undefined) {
+    const mine = p.trades.filter((t) => t.ref === msg.ref)
+    p = { ...p, trades: [...(msg.fills ?? []), ...p.trades.filter((t) => t.ref !== msg.ref)] }
+    if (mine.length && !(msg.fills ?? []).length) {
+      s.notify({ title: 'ORDER FAILED ON THE SERVER', body: (msg.failures ?? []).join(' · ') || 'The server rejected it. Your wallet was put back.', tone: 'warn', icon: '⛔' }, 'alert')
+    } else if (mine.length) {
+      // The server filled a different size than the screen showed (e.g. you had less than you thought): say so.
+      const shown = mine.reduce((a, t) => a + t.value, 0)
+      const real = (msg.fills ?? []).reduce((a, t) => a + t.value, 0)
+      if (shown > 0 && Math.abs(real - shown) / shown > 0.05) {
+        s.notify({ title: 'ORDER ADJUSTED BY THE SERVER', body: `Filled ${fmtUsd(real)} instead of ${fmtUsd(shown)}${(msg.failures ?? []).length ? ` · ${msg.failures!.join(' · ')}` : ''}`, tone: 'warn', icon: '⚖️' }, 'alert')
+      }
+    }
+  }
+  if (msg.ack === seq) p = mergeWalletState(p, msg.state)
+  if (p !== s.portfolio) quietly(() => s.patchState({ portfolio: p }))
 }
 
 function onRecv(msg: TransferMsg) {
@@ -264,6 +297,8 @@ function onMessage(msg: ServerMsg) {
     }
     case 'recv':
       return onRecv(msg)
+    case 'wallet':
+      return onWallet(msg)
     case 'notice':
       return st.notify({ title: 'ANNOUNCEMENT', body: msg.text, tone: 'info', icon: '📢' }, 'alert')
     case 'kicked':
@@ -273,7 +308,7 @@ function onMessage(msg: ServerMsg) {
       return leaveRoom()
     case 'grant':
       // Currency from an admin: into your round.
-      giveLocal(msg.asset ?? 'usd', msg.amount ?? msg.usd)
+      quietly(() => giveLocal(msg.asset ?? 'usd', msg.amount ?? msg.usd)) // the server added it to its wallets too
       return
     case 'error':
       if (pending) {
@@ -301,6 +336,16 @@ function onWelcome(msg: Extract<ServerMsg, { t: 'welcome' }>) {
   save('mpRoom', { code: msg.code })
   retries = 0
   netHooks.send = send
+  // Phase 2: your wallets in the room are run by the server. Every wallet message is numbered (restarting on each
+  // connection, like the server) so we know which of its answers already include everything we sent.
+  seq = 0
+  lastLayout = ''
+  netHooks.order = (order) => {
+    const n = ++seq
+    send({ t: 'order', seq: n, ref: n, order })
+    return n
+  }
+  netHooks.op = (op) => send({ t: 'op', seq: ++seq, op })
 
   const market = migrateMarket(localMarket(msg.market, msg.you))
   setClock(secPerTickOf(market)) // the room's clock (Classic 6x or Realistic real-time)
@@ -511,7 +556,8 @@ function startLoops() {
   unsubTrades = useGame.subscribe((s, prev) => {
     if (muted || !s.online || s.portfolio.trades === prev.portfolio.trades) return
     const seen = new Set(prev.portfolio.trades.map(key))
-    const fresh = s.portfolio.trades.filter((tr) => !seen.has(key(tr)) && tr.status === 'FILLED')
+    // Orders the server ran (they carry a ref) already moved the market there; only other fills are reported here.
+    const fresh = s.portfolio.trades.filter((tr) => !seen.has(key(tr)) && tr.status === 'FILLED' && tr.ref === undefined)
     if (fresh.length > 8 && fresh.length === s.portfolio.trades.length) return // a whole list swapped in, not new fills
     const main = mainWalletId()
     for (const tr of fresh.reverse()) {
@@ -519,6 +565,18 @@ function startLoops() {
       // One address per wallet (its Solana-style id) so it can be followed on every chain.
       send({ t: 'trade', tokenId: tr.tokenId, side: tr.side, usd: tr.value, qty: tr.qty, addr: walletAddress(playerId(), main ? wid : 'main', 'sol'), main: !main || wid === main })
     }
+  })
+  // Wallet layout (names / order / which you trade from) and changes from actions that don't run on the server yet.
+  unsubWallet = useGame.subscribe((s, prev) => {
+    if (muted || !s.online || s.runStatus !== 'running') return
+    const lay = JSON.stringify(layoutOf(s.portfolio))
+    if (lay !== lastLayout) {
+      lastLayout = lay
+      send({ t: 'layout', seq: ++seq, layout: layoutOf(s.portfolio) })
+    }
+    if (s.portfolio === prev.portfolio || netHooks.quiet > 0 || prev.runStatus !== 'running') return
+    const delta = diffWallet(prev.portfolio, s.portfolio)
+    if (delta) send({ t: 'adjust', seq: ++seq, delta })
   })
   const report = () => {
     const s = useGame.getState()
@@ -562,6 +620,8 @@ function stopLoops() {
   statusTimer = null
   unsubTrades?.()
   unsubTrades = null
+  unsubWallet?.()
+  unsubWallet = null
 }
 
 export const sendChat = (text: string) => send({ t: 'chat', text })

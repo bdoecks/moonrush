@@ -15,14 +15,15 @@ import { candleStore, COOK_FEE, cookToken, createMarket, migrateMarket, rebuildC
 import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
 import { lengthTicks, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS, type RoundLength } from './progression'
-import { accountOf, activeAccounts, aggregate, commitView, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf, withAccount } from './accounts'
-import { emptyBalances, executeBuy, executeSell, nativePrice, swap, type Asset } from './tradingEngine'
+import { accountOf, activeAccounts, aggregate, commitView, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf } from './accounts'
+import { emptyBalances, executeBuy, executeSell, nativePrice, type Asset } from './tradingEngine'
 import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
 import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
 import { ACCOUNTS, CALL_SETTLE_TICKS, callerKey, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
-import type { ClientMsg, RoomPlayer, RoundInfo } from '../net/protocol'
+import type { ClientMsg, OpMsg, OrderMsg, RoomPlayer, RoundInfo } from '../net/protocol'
+import { runBuy, runSell, runSwap } from './orders'
 import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
 
 export type View = 'discover' | 'trenches' | 'token' | 'portfolio' | 'missions' | 'leaderboard' | 'cooking' | 'copytrade' | 'sniper' | 'monitor' | 'track' | 'rewards' | 'admin'
@@ -174,7 +175,30 @@ export interface OnlineState {
 }
 
 /** Set by the network client while online; the store calls it to tell the server about your cooks, bots and coins. */
-export const netHooks: { send: ((msg: ClientMsg) => void) | null } = { send: null }
+export const netHooks: {
+  send: ((msg: ClientMsg) => void) | null
+  /** Rooms: send a buy / sell to the server (the judge) and get the order's ref back. */
+  order: ((o: OrderMsg) => number) | null
+  /** Rooms: run a swap / transfer on the server too. */
+  op: ((o: OpMsg) => void) | null
+  /** >0 while a wallet change is already being handled by the server (so it isn't reported again). */
+  quiet: number
+} = { send: null, order: null, op: null, quiet: 0 }
+
+/** Tag the newest `n` trades with the room order they belong to (the server's fills replace them). */
+function tagRef(p: Portfolio, n: number, ref: number): Portfolio {
+  return n ? { ...p, trades: p.trades.map((t, i) => (i < n ? { ...t, ref } : t)) } : p
+}
+
+/** Change the store without reporting the wallet change to the room server (it already knows about it). */
+export function quietly(fn: () => void) {
+  netHooks.quiet++
+  try {
+    fn()
+  } finally {
+    netHooks.quiet--
+  }
+}
 
 export interface GameState {
   online: OnlineState | null
@@ -423,8 +447,9 @@ function patchToken(m: MarketState, id: string, fn: (t: Token) => void): MarketS
   }
 }
 
-function startBalanceFor(mode: GameMode, settings: Settings) {
-  return mode === 'practice' ? settings.practiceBalance : MODES[mode].startBalance
+function startBalanceFor(mode: GameMode, settings: Settings, online = false) {
+  // In a room the server sets everyone's start balance (the mode's standard one), so practice's own setting doesn't apply.
+  return mode === 'practice' && !online ? settings.practiceBalance : MODES[mode].startBalance
 }
 
 function challengeCtx(p: Portfolio, market: MarketState, rs: RunStats): ChallengeContext {
@@ -529,15 +554,6 @@ export const useGame = create<GameState>()((set, get) => {
   }
 
   /** A failed on-chain order (slippage) still burns its priority fee, from the wallet that sent it. */
-  function burnFee(p: Portfolio, walletId: string, burn?: { chain: Chain; native: number }): Portfolio {
-    if (!burn || !(burn.native > 0)) return p
-    const view = viewOf(p, walletId)
-    const balances = { ...view.balances }
-    const burned = Math.min(balances[burn.chain], burn.native)
-    balances[burn.chain] -= burned
-    return commitView(p, walletId, { ...view, balances, feesPaid: view.feesPaid + burned * nativePrice(get().market, burn.chain) })
-  }
-
   /**
    * Buy `usd` of a token from each of these wallets. On coins you cooked, only the deployer (and wallets sleuths have
    * linked to it) count as the dev; any other wallet looks like a normal buyer — unless this buy gets it linked.
@@ -546,29 +562,14 @@ export const useGame = create<GameState>()((set, get) => {
     const s = get()
     const tok = s.market.tokens.find((x) => x.id === id)
     const setting = tok ? slotSetting(s.settings, tok.chain, 'buy', slot) : undefined
-    let portfolio = s.portfolio
-    let market = s.market
-    const fills: Trade[] = []
-    const failures: string[] = []
-    let firstTimeToken = false
-    let swappedUsd = 0
-    for (const wid of walletIds) {
-      const a = accountOf(portfolio, wid)
-      if (!a) continue
-      const { res, portfolio: next } = withAccount(portfolio, a.id, (view) => executeBuy(view, market, id, usd, portfolio.trades.length + 1, { autoSwap: s.settings.autoSwap, setting }))
-      if (!res.ok) {
-        portfolio = burnFee(portfolio, a.id, res.burn)
-        failures.push(`${a.emoji} ${a.name}: ${res.error}`)
-        continue
-      }
-      portfolio = next
-      market = res.market
-      fills.push({ ...res.trade, walletId: a.id })
-      firstTimeToken ||= res.firstTimeToken
-      swappedUsd += res.swapped?.usd ?? 0
-    }
+    const r = runBuy(s.portfolio, s.market, walletIds, usd, id, { autoSwap: s.settings.autoSwap, setting })
+    let portfolio = r.portfolio
+    let market = r.market
+    const { fills, failures, firstTimeToken, swappedUsd } = r
+    // Rooms: the server runs the same order and its result wins (this one just shows it instantly).
+    if (s.online && netHooks.order) portfolio = tagRef(portfolio, fills.length, netHooks.order({ side: 'buy', tokenId: id, walletIds, usdEach: usd, setting, autoSwap: s.settings.autoSwap }))
     if (!fills.length) {
-      set({ portfolio })
+      quietly(() => set({ portfolio }))
       s.notify({ title: failures[0]?.includes('Slippage') ? 'TX FAILED' : 'ORDER REJECTED', body: failures.join(' · ') || 'No wallet selected', tone: 'warn', icon: '⛔' }, 'alert')
       return false
     }
@@ -605,11 +606,11 @@ export const useGame = create<GameState>()((set, get) => {
       })
       if (newLinks.length) s.notify({ title: 'WALLET LINKED TO DEV 🔗', body: `Sleuths tied ${newLinks.map((w) => accountOf(portfolio, w)?.name ?? w).join(', ')} to your dev wallet on $${t.ticker}. Hype took a hit (dev % is still only your deployer's bag).`, tone: 'down', icon: '🔗' }, 'alert')
     }
-    set({
+    quietly(() => set({
       portfolio, market, launches, events,
       runStats: early ? { ...s.runStats, earlyBuys: s.runStats.earlyBuys + 1 } : s.runStats,
       profile: { ...s.profile, lifetimeTrades: s.profile.lifetimeTrades + fills.length },
-    })
+    }))
     if (t.creator === 'you') sendTokenPatch(id)
     if (swappedUsd > 0) s.notify({ title: 'AUTO-SWAP', body: `${fmtUsd(swappedUsd)} USD → ${CHAINS[t.chain].native}`, tone: 'info', icon: '🔄' })
     const nat = fills.reduce((acc, f) => acc + (f.native ?? 0), 0)
@@ -1247,24 +1248,14 @@ export const useGame = create<GameState>()((set, get) => {
         return false
       }
       const frac = Math.min(1, qty / held)
-      let portfolio = s.portfolio
-      let market = s.market
-      const fills: Trade[] = []
-      const failures: string[] = []
-      for (const a of holders) {
-        const q = frac >= 0.999999 ? a.positions[id].qty : a.positions[id].qty * frac
-        const { res, portfolio: next } = withAccount(portfolio, a.id, (view) => executeSell(view, market, id, q, portfolio.trades.length + 1, { setting }))
-        if (!res.ok) {
-          portfolio = burnFee(portfolio, a.id, res.burn)
-          failures.push(`${a.emoji} ${a.name}: ${res.error}`)
-          continue
-        }
-        portfolio = next
-        market = res.market
-        fills.push(res.trade)
-      }
+      const legs = holders.map((a) => ({ walletId: a.id, qty: frac >= 0.999999 ? a.positions[id].qty : a.positions[id].qty * frac }))
+      const r = runSell(s.portfolio, s.market, legs, id, { setting })
+      let portfolio = r.portfolio
+      let market = r.market
+      const { fills, failures } = r
+      if (s.online && netHooks.order) portfolio = tagRef(portfolio, fills.length, netHooks.order({ side: 'sell', tokenId: id, legs, setting }))
       if (!fills.length) {
-        set({ portfolio })
+        quietly(() => set({ portfolio }))
         s.notify({ title: failures[0]?.includes('Slippage') ? 'TX FAILED' : 'ORDER REJECTED', body: failures.join(' · '), tone: 'warn', icon: '⛔' }, 'alert')
         return false
       }
@@ -1320,7 +1311,7 @@ export const useGame = create<GameState>()((set, get) => {
         events = [...evs, ...events].slice(0, 120)
         if (s.online) for (const e of evs) netHooks.send?.({ t: 'event', event: e }) // everyone sees the dev dump
       }
-      set({ portfolio: res.portfolio, market, events, launches, profile: { ...s.profile, lifetimeTrades: s.profile.lifetimeTrades + fills.length } })
+      quietly(() => set({ portfolio: res.portfolio, market, events, launches, profile: { ...s.profile, lifetimeTrades: s.profile.lifetimeTrades + fills.length } }))
       if (tok?.creator === 'you') sendTokenPatch(id)
       s.notify(
         { title: `${closed ? 'POSITION CLOSED' : 'SELL EXECUTED'}${fills.length > 1 ? ` · ${fills.length} WALLETS` : ''}`, body: `$${tr.ticker} ${pnl >= 0 ? '+' : ''}${fmtUsd(pnl)} (${fmtPct(tr.pnlPct ?? 0)})${failures.length ? ` · ${failures.length} failed` : ''}`, tone: pnl >= 0 ? 'up' : 'down', icon: pnl >= 0 ? '💰' : '🩸' },
@@ -1394,7 +1385,7 @@ export const useGame = create<GameState>()((set, get) => {
         set({ market, wallets: createWallets(new Rng((market.seed ^ 0xa11ce) >>> 0)), events: [], socialFeed: [], walletFeed: [], selectedId: defaultSelection(market), watchlist: [] })
       }
       const s = get()
-      const balance = startBalanceFor(mode, s.settings)
+      const balance = startBalanceFor(mode, s.settings, !!s.online)
       const runDuration = opts?.durationTicks !== undefined ? opts.durationTicks : lengthTicks(mode, s.roundLength)
       // Your wallets carry over to the new round (emptied); the bank starts with the mode's balance.
       const portfolio = ensureAccounts({
@@ -1642,12 +1633,13 @@ export const useGame = create<GameState>()((set, get) => {
         return false
       }
       const wid = walletId ?? primaryId(s.portfolio)
-      const { res, portfolio } = withAccount(s.portfolio, wid, (view) => swap(view, s.market, from, to, amount))
+      const res = runSwap(s.portfolio, s.market, from, to, amount, wid)
       if (!res.ok) {
         s.notify({ title: 'SWAP FAILED', body: res.error, tone: 'warn', icon: '⛔' }, 'alert')
         return false
       }
-      set({ portfolio })
+      if (s.online) netHooks.op?.({ kind: 'swap', from, to, amount, walletId: wid })
+      quietly(() => set({ portfolio: res.portfolio }))
       const label = (a: Asset, n: number) => (a === 'usd' ? fmtUsd(n) : fmtNative(n, a))
       s.notify({ title: 'SWAPPED', body: `${label(from, amount)} → ${label(to, res.received)}`, tone: 'info', icon: '🔄' }, 'click')
       persist()
@@ -1712,7 +1704,8 @@ export const useGame = create<GameState>()((set, get) => {
             ? { ...a, balances: { ...a.balances, [chain]: a.balances[chain] + amt }, fundedBy: { ...(a.fundedBy ?? {}), [fromId]: s.market.tick } }
             : a,
       )
-      set({ portfolio: ensureAccounts({ ...s.portfolio, accounts }) })
+      if (s.online) netHooks.op?.({ kind: 'transfer', fromId, toId, chain, amount: amt })
+      quietly(() => set({ portfolio: ensureAccounts({ ...s.portfolio, accounts }) }))
       s.notify({ title: 'TRANSFERRED', body: `${fmtNative(amt, chain)} · ${from.emoji} ${from.name} → ${to.emoji} ${to.name}`, tone: 'info', icon: '💸' }, 'click')
       persist()
       return true
@@ -1729,16 +1722,18 @@ export const useGame = create<GameState>()((set, get) => {
       let done = 0
       let got = 0
       const errors: string[] = []
+      const ops: OpMsg[] = []
       for (const id of targets) {
         if (source === 'usd') {
           // Swap from the USD bank straight into that wallet.
-          const r = withAccount(portfolio, id, (view) => swap(view, s.market, 'usd', chain, amountEach))
-          if (!r.res.ok) {
-            errors.push(r.res.error ?? 'swap failed')
+          const r = runSwap(portfolio, s.market, 'usd', chain, amountEach, id)
+          if (!r.ok) {
+            errors.push(r.error)
             break
           }
           portfolio = r.portfolio
-          got += r.res.received
+          got += r.received
+          ops.push({ kind: 'swap', from: 'usd', to: chain, amount: amountEach, walletId: id })
         } else {
           const from = accountOf(portfolio, source)
           if (!from || from.balances[chain] < amountEach - 1e-12) {
@@ -1755,11 +1750,13 @@ export const useGame = create<GameState>()((set, get) => {
           )
           portfolio = ensureAccounts({ ...portfolio, accounts })
           got += amt
+          ops.push({ kind: 'transfer', fromId: source, toId: id, chain, amount: amt })
         }
         done++
       }
       if (done) {
-        set({ portfolio })
+        if (s.online) ops.forEach((o) => netHooks.op?.(o))
+        quietly(() => set({ portfolio }))
         persist()
       }
       const src = source === 'usd' ? 'USD bank' : `${accountOf(s.portfolio, source)?.emoji ?? ''} ${accountOf(s.portfolio, source)?.name ?? ''}`

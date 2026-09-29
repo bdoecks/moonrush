@@ -5,10 +5,12 @@ import { adminMarket, type AdminMarketAction, createMarket, candleStore, applyPl
 import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
 import { POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
+import { addFunds, applyDelta, applyLayout, freshWallet, fundsIn, runBuy, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
+import { walletAddress } from '../src/utils/address'
 import { flagBundle, runBotTick, sleuthBundle } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
-import type { GameMode, MarketEngine, MarketEvent, MarketState, SimWallet, SocialPost, VolumeBot } from '../src/types'
+import type { GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Trade, VolumeBot } from '../src/types'
 import type { BotRun, ClientMsg, NetMarket, NetToken, RoomPlayer, RoundInfo, ServerMsg, TickMsg, TokenDiff, TransferMsg, WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
@@ -38,6 +40,10 @@ interface Member {
   lastPostTick?: number
   addrs?: string[] // their wallet addresses (private: only used to route transfers sent to an address)
   inbox?: TransferMsg[] // transfers that arrived while they were offline
+  // Phase 2: the server's copy of this player's wallets in the round (the judge), and the wallet messages it has handled.
+  wallet?: Portfolio
+  layout?: WalletLayout
+  ack: number
 }
 
 export class Room {
@@ -81,7 +87,7 @@ export class Room {
       ? { ...existing.info, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, verified: !!msg.verified }
       : { id: msg.playerId, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, equity: 0, startEquity: 0, trades: 0, wins: 0, verified: !!msg.verified }
     existing?.ws?.close(4000, 'Joined from another tab')
-    this.members.set(msg.playerId, { info, ws, protect: existing?.protect ?? [], addrs: existing?.addrs })
+    this.members.set(msg.playerId, { info, ws, protect: existing?.protect ?? [], addrs: existing?.addrs, wallet: existing?.wallet, layout: existing?.layout, ack: 0 }) // a new connection restarts the wallet message count (the game does too)
     if (!this.hostId) this.hostId = msg.playerId
     this.emptySince = null
     this.send(ws, {
@@ -89,6 +95,8 @@ export class Room {
       market: this.netMarket(), wallets: round(this.wallets) as SimWallet[], posts: this.posts, events: this.events,
     })
     for (const tr of existing?.inbox ?? []) this.send(ws, tr) // transfers that came in while they were away
+    const joined = this.members.get(msg.playerId)!
+    if (this.walletOf(joined)) this.sendWallet(joined)
     this.broadcastPlayers()
   }
 
@@ -159,6 +167,24 @@ export class Room {
         return this.post(me, msg)
       case 'send':
         return this.transfer(me, msg)
+      case 'order':
+        return this.order(me, msg)
+      case 'op':
+        return this.op(me, msg)
+      case 'layout': {
+        me.layout = msg.layout
+        const w = this.walletOf(me)
+        if (w) me.wallet = applyLayout(w, msg.layout)
+        me.ack = Math.max(me.ack, msg.seq)
+        return this.sendWallet(me)
+      }
+      case 'adjust': {
+        // An action that doesn't run on the server yet (cooking, copy trading, claims…): follow what it changed.
+        const w = this.walletOf(me)
+        if (w && msg.delta) me.wallet = applyDelta(w, msg.delta)
+        me.ack = Math.max(me.ack, msg.seq)
+        return this.sendWallet(me)
+      }
       case 'airdrop': {
         // Recipients of a player's airdrop who'll dump what they got (on the shared market, for everyone).
         const t = this.market.tokens.find((x) => x.id === msg.tokenId) as NetToken | undefined
@@ -201,9 +227,70 @@ export class Room {
   private startRound(mode: GameMode, durationTicks: number | null, engine: MarketEngine) {
     if (!MODES[mode]) return
     this.newMarket({ id: this.round.id + 1, state: 'running', mode, durationTicks, startTick: 0, seed: 0, startTime: 0, engine })
-    for (const m of this.members.values()) m.info = { ...m.info, equity: 0, startEquity: 0, trades: 0, wins: 0, finished: false }
+    for (const m of this.members.values()) {
+      m.info = { ...m.info, equity: 0, startEquity: 0, trades: 0, wins: 0, finished: false }
+      m.wallet = freshWallet(MODES[mode].startBalance, m.layout)
+    }
     this.broadcast({ t: 'round', round: this.round, market: this.netMarket(), wallets: round(this.wallets) as SimWallet[] })
+    for (const m of this.members.values()) this.sendWallet(m)
     this.broadcastPlayers()
+  }
+
+  // ─── Wallets (Phase 2: the server is the judge of every player's wallets) ──
+  /** This player's wallets in the running round (created fresh when they first need them). */
+  private walletOf(m: Member): Portfolio | null {
+    if (this.round.state !== 'running') return null
+    if (!m.wallet) m.wallet = freshWallet(MODES[this.round.mode].startBalance, m.layout)
+    return m.wallet
+  }
+
+  /** Tell a player their wallets as the server has them (after the wallet message numbered `m.ack`). */
+  private sendWallet(m: Member, extra: { ref?: number; fills?: Trade[]; failures?: string[] } = {}) {
+    if (!m.wallet) return
+    this.sendTo(m.info.id, { t: 'wallet', ack: m.ack, state: walletStateOf(m.wallet), ...extra })
+  }
+
+  /** How a wallet shows on the trades tape: the main wallet under the player's name, side wallets as a bare address. */
+  private whoFor(m: Member) {
+    const main = m.wallet?.accounts?.[0]?.id
+    return (walletId: string) => {
+      const addr = walletAddress(m.info.id, walletId, 'sol')
+      return walletId === main ? { name: m.info.name, pid: m.info.id, addr } : { name: addr, addr }
+    }
+  }
+
+  private order(me: Member, msg: Extract<ClientMsg, { t: 'order' }>) {
+    me.ack = Math.max(me.ack, msg.seq)
+    const w = this.walletOf(me)
+    const o = msg.order
+    if (!w || !o) return this.sendWallet(me, { ref: msg.ref, fills: [], failures: ['No round running'] })
+    const t = this.market.tokens.find((x) => x.id === o.tokenId)
+    if (!t) return this.sendWallet(me, { ref: msg.ref, fills: [], failures: ['Coin not found'] })
+    setClock(secPerTickOf(this.market))
+    setCandleLog(this.pending)
+    const who = this.whoFor(me)
+    const r = o.side === 'buy'
+      ? runBuy(w, this.market, (o.walletIds ?? []).slice(0, 12), Math.max(0, Number(o.usdEach) || 0), t.id, { autoSwap: !!o.autoSwap, setting: o.setting, who })
+      : runSell(w, this.market, (o.legs ?? []).slice(0, 12).map((l) => ({ walletId: String(l.walletId), qty: Math.max(0, Number(l.qty) || 0) })), t.id, { setting: o.setting, who })
+    me.wallet = r.portfolio
+    this.market = r.market
+    this.sendWallet(me, { ref: msg.ref, fills: r.fills.map((f) => ({ ...f, ref: msg.ref })), failures: r.failures })
+  }
+
+  private op(me: Member, msg: Extract<ClientMsg, { t: 'op' }>) {
+    me.ack = Math.max(me.ack, msg.seq)
+    const w = this.walletOf(me)
+    const o = msg.op
+    if (w && o) {
+      if (o.kind === 'swap') {
+        const r = runSwap(w, this.market, o.from, o.to, Number(o.amount) || 0, String(o.walletId))
+        if (r.ok) me.wallet = r.portfolio
+      } else if (o.kind === 'transfer') {
+        const r = runTransfer(w, String(o.fromId), String(o.toId), o.chain, Number(o.amount) || 0, this.market.tick)
+        if (r.ok) me.wallet = r.portfolio
+      }
+    }
+    this.sendWallet(me)
   }
 
   // ─── Player actions on the shared market ───────────────────────────────────
@@ -233,6 +320,15 @@ export class Room {
     }
     if (!target) return fail(msg.toAddr ? 'No wallet in this room has that address' : 'That player isn’t in this room')
     if (target === me) return fail('That’s your own wallet — move coins between your wallets in Wallets')
+    // The server moves the money in its own wallets too (it's the judge of both players' wallets).
+    const sw = this.walletOf(me)
+    const tw = this.walletOf(target)
+    if (sw && fundsIn(sw, msg.asset, msg.fromWallet) < msg.amount - 1e-9) return fail('Not enough in that wallet')
+    if (sw) me.wallet = addFunds(sw, msg.asset, -msg.amount, msg.fromWallet)
+    if (tw) {
+      const toWallet = toAddr ? (tw.accounts ?? []).find((a) => walletAddress(target!.info.id, a.id, 'sol') === toAddr)?.id : undefined
+      target.wallet = addFunds(tw, msg.asset, msg.amount, toWallet)
+    }
     const fromAddr = String(msg.fromAddr ?? '').slice(0, 24)
     const recv: TransferMsg = {
       t: 'recv', asset: msg.asset, amount: msg.amount, usd: Math.max(0, +msg.usd || 0),
@@ -242,6 +338,8 @@ export class Room {
     this.sendTo(me.info.id, { t: 'sendResult', ref: msg.ref, ok: true, toName: toAddr ?? target.info.name })
     if (target.ws) this.send(target.ws, recv)
     else target.inbox = [...(target.inbox ?? []), recv].slice(-50)
+    this.sendWallet(me)
+    this.sendWallet(target)
   }
 
   private cook(me: Member, msg: Extract<ClientMsg, { t: 'cook' }>) {
@@ -441,8 +539,12 @@ export class Room {
   }
 
   grant(playerId: string, amount: number, asset: 'usd' | 'sol' | 'bsc' | 'hood' = 'usd') {
-    if (!this.members.has(playerId)) return false
+    const m = this.members.get(playerId)
+    if (!m) return false
+    const w = this.walletOf(m)
+    if (w) m.wallet = addFunds(w, asset, amount)
     this.sendTo(playerId, { t: 'grant', usd: asset === 'usd' ? amount : 0, asset, amount })
+    this.sendWallet(m)
     return true
   }
 

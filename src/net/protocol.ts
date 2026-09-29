@@ -1,6 +1,9 @@
 // Messages between the MOONRUSH multiplayer server and browsers. The server owns the shared market (coins, prices,
 // bot wallets, posts, events); each browser owns its own wallet and sends its trades so everyone feels the impact.
 import type { CandlePoint } from '../game/marketEngine'
+import type { WalletDelta, WalletLayout, WalletState } from '../game/orders'
+import type { Asset } from '../game/tradingEngine'
+import type { Chain, TradeSetting } from '../types'
 import type { Candle, GameMode, MarketEngine, MarketEvent, MarketState, SimWallet, SocialPost, Timeframe, Token, VolumeBot, WalletAction } from '../types'
 
 export const MP_PATH = '/mp'
@@ -54,6 +57,16 @@ export interface BotRun {
   event?: MarketEvent
 }
 
+// ─── Wallets run by the server (rooms) ───────────────────────────────────────
+/** A buy or sell for the server to run on your wallets (it's the judge; your screen shows it instantly). */
+export type OrderMsg =
+  | { side: 'buy'; tokenId: string; walletIds: string[]; usdEach: number; setting?: TradeSetting; autoSwap?: boolean }
+  | { side: 'sell'; tokenId: string; legs: { walletId: string; qty: number }[]; setting?: TradeSetting }
+/** A swap inside one wallet, or moving a coin between two of your wallets. */
+export type OpMsg =
+  | { kind: 'swap'; from: Asset; to: Asset; amount: number; walletId: string }
+  | { kind: 'transfer'; fromId: string; toId: string; chain: Chain; amount: number }
+
 // ─── Browser → server ────────────────────────────────────────────────────────
 export type ClientMsg =
   // `token`: your login (signed-in players); the server checks it and uses your account name.
@@ -66,11 +79,16 @@ export type ClientMsg =
   | { t: 'bot'; tokenId: string; bot: VolumeBot | null }
   | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[]; addrs?: string[] }
   | { t: 'candles'; tokenId: string }
+  // Wallets (rooms). `seq` numbers every wallet message so the game knows which server answers are up to date.
+  | { t: 'order'; seq: number; ref: number; order: OrderMsg }
+  | { t: 'op'; seq: number; op: OpMsg }
+  | { t: 'layout'; seq: number; layout: WalletLayout }
+  | { t: 'adjust'; seq: number; delta: WalletDelta; reason?: string } // an action that doesn't run on the server yet
   | { t: 'chat'; text: string }
   | { t: 'airdrop'; tokenId: string; queue: NonNullable<MarketState['shillQueue']> } // recipients of your airdrop who'll dump
   | { t: 'event'; event: MarketEvent } // something you did to your own coin (dev sells, bundle dumps)
   // Send coins to another player: to their main wallet (`to` = player id) or to any wallet address they gave you.
-  | { t: 'send'; ref: number; to?: string; toAddr?: string; asset: SendAsset; amount: number; usd: number; main: boolean; fromAddr: string }
+  | { t: 'send'; ref: number; to?: string; toAddr?: string; asset: SendAsset; amount: number; usd: number; main: boolean; fromAddr: string; fromWallet?: string }
   | { t: 'post'; text: string; tokenId?: string; followers: number; rep: number; repeats: number } // a post / call on the timeline
 
 // ─── Server → browser ────────────────────────────────────────────────────────
@@ -103,6 +121,8 @@ export type ServerMsg =
   | { t: 'error'; message: string }
   // Admin: a message for everyone, being removed from the room, or money added to your round.
   | { t: 'notice'; text: string }
+  // Your wallets as the server has them, after it handled your message number `ack` (and the order `ref`'s fills).
+  | { t: 'wallet'; ack: number; state: WalletState; ref?: number; fills?: import('../types').Trade[]; failures?: string[] }
   | { t: 'kicked'; reason: string }
   | { t: 'grant'; usd: number; asset?: 'usd' | 'sol' | 'bsc' | 'hood'; amount?: number }
   | { t: 'sendResult'; ref: number; ok: boolean; error?: string; toName?: string }
