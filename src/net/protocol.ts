@@ -1,7 +1,7 @@
 // Messages between the MOONRUSH multiplayer server and browsers. The server owns the shared market (coins, prices,
-// bot wallets, posts, events); each browser owns its own wallet and sends its trades so everyone feels the impact.
+// bot wallets, posts, events) and every player's wallets; browsers send orders and show the results instantly.
 import type { CandlePoint } from '../game/marketEngine'
-import type { WalletDelta, WalletLayout, WalletState } from '../game/orders'
+import type { WalletLayout, WalletState } from '../game/orders'
 import type { Asset } from '../game/tradingEngine'
 import type { Chain, TradeSetting } from '../types'
 import type { Candle, GameMode, MarketEngine, MarketEvent, MarketState, SimWallet, SocialPost, Timeframe, Token, VolumeBot, WalletAction } from '../types'
@@ -55,6 +55,7 @@ export interface BotRun {
   vol: number
   cost: number
   event?: MarketEvent
+  stop?: string // the server stopped it (dev wallet out of coin, budget used up)
 }
 
 // ─── Wallets run by the server (rooms) ───────────────────────────────────────
@@ -66,26 +67,36 @@ export type OrderMsg =
 export type OpMsg =
   | { kind: 'swap'; from: Asset; to: Asset; amount: number; walletId: string }
   | { kind: 'transfer'; fromId: string; toId: string; chain: Chain; amount: number }
+  | { kind: 'claimFees'; tokenIds?: string[] } // creator fees from your coins' vaults, into each coin's dev wallet
+  | { kind: 'cashback'; chains: Chain[]; as: 'coin' | 'usdc' }
+
+/** What a launch costs and buys: the server charges it and runs the dev buy / bundle on your wallet. */
+export interface CookMoney {
+  devWallet: string
+  devBuy: number // chain coin
+  bundle?: { wallets: number; perWallet: number; stagger: boolean }
+  marketing: number // USD
+  autoSwap?: boolean
+}
 
 // ─── Browser → server ────────────────────────────────────────────────────────
 export type ClientMsg =
   // `token`: your login (signed-in players); the server checks it and uses your account name.
   | { t: 'hello'; name: string; avatar: string; level: number; playerId: string; room?: string; create?: boolean; token?: string }
   | { t: 'start'; mode: GameMode; durationTicks: number | null; engine?: MarketEngine }
-  // `main`: traded from your public main wallet (shows your name); otherwise it shows only `addr` (stealth side wallet).
-  | { t: 'trade'; tokenId: string; side: 'buy' | 'sell'; usd: number; qty: number; addr?: string; main?: boolean }
-  | { t: 'cook'; token: NetToken; candles?: Record<Timeframe, Candle[]>; event?: MarketEvent }
+  // `token` is the fresh coin before any buys; the server runs your dev buy / bundle (`money`) on it as order `ref`.
+  | { t: 'cook'; token: NetToken; candles?: Record<Timeframe, Candle[]>; event?: MarketEvent; seq?: number; ref?: number; money?: CookMoney }
   | { t: 'patch'; tokenId: string; patch: Partial<Pick<Token, 'devPct' | 'bundlePct' | 'bundleWallets' | 'holders' | 'top10Pct' | 'hype' | 'bundleFlagged'>> }
   | { t: 'bot'; tokenId: string; bot: VolumeBot | null }
-  | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[]; addrs?: string[] }
+  | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[]; addrs?: string[]; cbVolume?: number; cbAuto?: 'off' | 'coin' | 'usdc' }
   | { t: 'candles'; tokenId: string }
   // Wallets (rooms). `seq` numbers every wallet message so the game knows which server answers are up to date.
   | { t: 'order'; seq: number; ref: number; order: OrderMsg }
   | { t: 'op'; seq: number; op: OpMsg }
   | { t: 'layout'; seq: number; layout: WalletLayout }
-  | { t: 'adjust'; seq: number; delta: WalletDelta; reason?: string } // an action that doesn't run on the server yet
   | { t: 'chat'; text: string }
-  | { t: 'airdrop'; tokenId: string; queue: NonNullable<MarketState['shillQueue']> } // recipients of your airdrop who'll dump
+  // Your airdrop: `qty` leaves your dev wallet `walletId` for `wallets` recipients; `queue` = the ones who'll dump.
+  | { t: 'airdrop'; seq?: number; tokenId: string; queue: NonNullable<MarketState['shillQueue']>; walletId?: string; qty?: number; wallets?: number; target?: 'holders' | 'fresh' }
   | { t: 'event'; event: MarketEvent } // something you did to your own coin (dev sells, bundle dumps)
   // Send coins to another player: to their main wallet (`to` = player id) or to any wallet address they gave you.
   | { t: 'send'; ref: number; to?: string; toAddr?: string; asset: SendAsset; amount: number; usd: number; main: boolean; fromAddr: string; fromWallet?: string }

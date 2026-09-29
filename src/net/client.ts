@@ -1,12 +1,12 @@
 ﻿// Browser side of multiplayer: connects to a room, turns the server's market updates into ticks for the local
-// store, and sends your trades / status. Your wallet stays in this browser ("trust friends").
+// store, and sends your orders / status. The server runs your wallets (it's the judge); this shows results instantly.
 import { applyCandlePoints, candleStore, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock } from '../game/marketEngine'
 import { portfolioStats, valuePortfolio } from '../game/portfolioEngine'
 import { levelFromXp } from '../game/progression'
 import { seasonNumber } from '../game/season'
 import { nativePrice } from '../game/tradingEngine'
 import { netHooks, quietly, roomRivals, useGame, type BotTickRun, type ChatLine, type MpSave, type OnlineState } from '../game/store'
-import type { Chain, MarketEngine, MarketState, SimWallet, TapeTrade, Token, Trade } from '../types'
+import type { Chain, MarketEngine, MarketState, SimWallet, TapeTrade, Token } from '../types'
 import { walletAddress } from '../utils/address'
 import { fmtCompact, fmtUsd } from '../utils/format'
 import { aggregate } from '../game/accounts'
@@ -16,6 +16,7 @@ import { myAddresses, recordPlayerTrades, useFriends } from './friends'
 import { accessToken, accountPlayerId } from './account'
 import { giveLocal } from '../game/gifts'
 import { diffWallet, layoutOf, mergeWalletState } from '../game/orders'
+import { cashbackOf } from '../game/rewardsEngine'
 import { MP_PATH, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TransferMsg } from './protocol'
 
 const STATUS_MS = 2000
@@ -141,6 +142,7 @@ function open(opts: { create?: boolean; room?: string; name: string; avatar: str
       netHooks.send = null
       netHooks.order = null
       netHooks.op = null
+      netHooks.wallet = null
       if (s.online) s.patchState({ online: { ...s.online, conn: 'reconnecting' } })
       s.notify({ title: 'OPENED IN ANOTHER TAB', body: 'This room is now playing in your other tab. Reload here to take it back.', tone: 'warn', icon: '🗂' })
       return
@@ -239,7 +241,10 @@ function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
   let p = s.portfolio
   if (msg.ref !== undefined) {
     const mine = p.trades.filter((t) => t.ref === msg.ref)
-    p = { ...p, trades: [...(msg.fills ?? []), ...p.trades.filter((t) => t.ref !== msg.ref)] }
+    // The server lists fills in the order they ran; the trade list is newest first. Labels only the game knows (copy
+    // trade, sniper task…) carry over onto the matching server fill.
+    const fills = [...(msg.fills ?? [])].reverse().map((f, i) => (mine[i]?.via && !f.via ? { ...f, via: mine[i].via } : f))
+    p = { ...p, trades: [...fills, ...p.trades.filter((t) => t.ref !== msg.ref)] }
     if (mine.length && !(msg.fills ?? []).length) {
       s.notify({ title: 'ORDER FAILED ON THE SERVER', body: (msg.failures ?? []).join(' · ') || 'The server rejected it. Your wallet was put back.', tone: 'warn', icon: '⛔' }, 'alert')
     } else if (mine.length) {
@@ -253,6 +258,16 @@ function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
   }
   if (msg.ack === seq) p = mergeWalletState(p, msg.state)
   if (p !== s.portfolio) quietly(() => s.patchState({ portfolio: p }))
+  // Cashback and creator-fee vaults are counted on the server too: show its numbers.
+  if (msg.ack === seq) {
+    const g = useGame.getState()
+    const cb = cashbackOf(g.rewards)
+    const vaults = msg.state.vaults
+    g.patchState({
+      ...(msg.state.cashback ? { rewards: { ...g.rewards, cashback: { ...cb, pending: { ...msg.state.cashback } } } } : {}),
+      ...(vaults ? { launches: g.launches.map((r) => (r.tokenId in vaults ? { ...r, unclaimed: vaults[r.tokenId] } : r)) } : {}),
+    })
+  }
 }
 
 function onRecv(msg: TransferMsg) {
@@ -346,6 +361,11 @@ function onWelcome(msg: Extract<ServerMsg, { t: 'welcome' }>) {
     return n
   }
   netHooks.op = (op) => send({ t: 'op', seq: ++seq, op })
+  netHooks.wallet = (m) => {
+    const n = ++seq
+    send({ ...m, seq: n, ...(m.t === 'cook' ? { ref: n } : {}) } as ClientMsg)
+    return n
+  }
 
   const market = migrateMarket(localMarket(msg.market, msg.you))
   setClock(secPerTickOf(market)) // the room's clock (Classic 6x or Realistic real-time)
@@ -445,7 +465,8 @@ function onTick(msg: TickMsg) {
     return d ? { ...w, ...d, trades: [...(d.trades ?? []), ...w.trades].slice(0, WALLET_TRADES) } : w
   })
 
-  // Your volume bots run on the server; you pay for them here, and stop them when the money runs out.
+  // Your volume bots run on the server and are paid from your dev wallet there (your wallet update arrives with the
+  // tick); this just keeps each bot's spend / volume and stops it when the server does.
   const botRuns = new Map<string, BotTickRun>()
   const botCost = new Map<string, Record<Chain, number>>()
   if (s.runStatus === 'running') {
@@ -453,19 +474,9 @@ function onTick(msg: TickMsg) {
       if (!r.bot?.on) continue
       const t = market.tokens.find((x) => x.id === r.tokenId)
       const run = msg.bots[r.tokenId]
-      if (!t || (t.status !== 'bonding' && t.status !== 'graduated')) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: `$${r.ticker} is ${t?.status ?? 'gone'}` })
-      else if (r.bot.spent >= r.bot.budget) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: 'budget used up' })
-      else if (run) {
-        const devW = r.devWallet ?? s.portfolio.accounts?.[0]?.id ?? 'w-main'
-        const acc = s.portfolio.accounts?.find((a) => a.id === devW)
-        const cost = botCost.get(devW) ?? { sol: 0, bsc: 0, hood: 0 }
-        if ((acc?.balances[t.chain] ?? 0) * nativePrice(market, t.chain) - cost[t.chain] < run.cost) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: `out of ${t.chain.toUpperCase()}` })
-        else {
-          cost[t.chain] += run.cost
-          botCost.set(devW, cost)
-          botRuns.set(r.tokenId, { vol: run.vol, cost: run.cost })
-        }
-      }
+      if (run?.stop) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: run.stop })
+      else if (!t || (t.status !== 'bonding' && t.status !== 'graduated')) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: `$${r.ticker} is ${t?.status ?? 'gone'}` })
+      else if (run) botRuns.set(r.tokenId, { vol: run.vol, cost: run.cost })
     }
   }
 
@@ -551,22 +562,9 @@ function pickDefault(m: MarketState) {
 // ─── Outgoing loops ──────────────────────────────────────────────────────────
 function startLoops() {
   stopLoops()
-  // Every new fill of yours (buy, sell, instant, copy, sniper…) goes to the server so everyone feels the impact.
-  const key = (tr: Trade) => `${tr.id}|${tr.walletId ?? ''}|${tr.tick}|${tr.side}|${tr.qty}`
-  unsubTrades = useGame.subscribe((s, prev) => {
-    if (muted || !s.online || s.portfolio.trades === prev.portfolio.trades) return
-    const seen = new Set(prev.portfolio.trades.map(key))
-    // Orders the server ran (they carry a ref) already moved the market there; only other fills are reported here.
-    const fresh = s.portfolio.trades.filter((tr) => !seen.has(key(tr)) && tr.status === 'FILLED' && tr.ref === undefined)
-    if (fresh.length > 8 && fresh.length === s.portfolio.trades.length) return // a whole list swapped in, not new fills
-    const main = mainWalletId()
-    for (const tr of fresh.reverse()) {
-      const wid = tr.walletId ?? main ?? 'main'
-      // One address per wallet (its Solana-style id) so it can be followed on every chain.
-      send({ t: 'trade', tokenId: tr.tokenId, side: tr.side, usd: tr.value, qty: tr.qty, addr: walletAddress(playerId(), main ? wid : 'main', 'sol'), main: !main || wid === main })
-    }
-  })
-  // Wallet layout (names / order / which you trade from) and changes from actions that don't run on the server yet.
+  // Every trade, cook, airdrop, bot and claim runs on the server (the judge), so nothing is reported from here.
+  unsubTrades = () => {}
+  // Wallet layout: names / order / which wallets you trade from are yours to choose.
   unsubWallet = useGame.subscribe((s, prev) => {
     if (muted || !s.online || s.runStatus !== 'running') return
     const lay = JSON.stringify(layoutOf(s.portfolio))
@@ -574,9 +572,11 @@ function startLoops() {
       lastLayout = lay
       send({ t: 'layout', seq: ++seq, layout: layoutOf(s.portfolio) })
     }
-    if (s.portfolio === prev.portfolio || netHooks.quiet > 0 || prev.runStatus !== 'running') return
-    const delta = diffWallet(prev.portfolio, s.portfolio)
-    if (delta) send({ t: 'adjust', seq: ++seq, delta })
+    // Test copies: a money change the server wasn't told about would be undone by its next answer. Flag it.
+    if (import.meta.env.DEV && s.portfolio !== prev.portfolio && netHooks.quiet === 0 && prev.runStatus === 'running') {
+      const delta = diffWallet(prev.portfolio, s.portfolio)
+      if (delta && (Math.abs(delta.cash) > 1e-6 || Object.keys(delta.balances).length || Object.keys(delta.positions).length)) console.warn('[wallet] change not run on the server', delta)
+    }
   })
   const report = () => {
     const s = useGame.getState()
@@ -595,6 +595,7 @@ function startLoops() {
       // Your main wallet's bags are public on-chain; side wallets are never included.
       holdings: running ? mainHoldings() : [],
       addrs: [...ownAddrs()], // private: lets friends send coins to a wallet by its address
+      cbVolume: cashbackOf(s.rewards).volume, cbAuto: cashbackOf(s.rewards).auto, // your cashback tier and auto-claim
       protect: [...Object.keys(s.portfolio.positions), ...s.watchlist, ...(s.selectedId ? [s.selectedId] : [])],
     })
   }

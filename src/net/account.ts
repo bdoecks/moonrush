@@ -237,10 +237,10 @@ function scheduleSync() {
 }
 
 /** Upload your progress and refresh your public card (level, season points). */
-/** Claim currency an admin sent you (only while a round is running: it goes into the round). */
+/** Claim currency an admin sent you (only while a round is running: it goes into the round). In rooms the server does it. */
 export async function pullGifts() {
   const a = useAccount.getState()
-  if (!supabase || !a.userId || useGame.getState().runStatus !== 'running') return
+  if (!supabase || !a.userId || useGame.getState().runStatus !== 'running' || useGame.getState().online) return
   const { data, error } = await supabase.rpc('claim_gifts')
   if (error || !Array.isArray(data)) return
   for (const g of data as { asset: GiftAsset; amount: number | string }[]) giveLocal(g.asset, Number(g.amount))

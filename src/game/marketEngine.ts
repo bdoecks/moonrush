@@ -1031,6 +1031,9 @@ export function applyPlayerTrade(m: MarketState, tokenId: string, side: 'buy' | 
 
 // ─── Cooking: player-launched tokens ─────────────────────────────────────────
 export const COOK_FEE = 25
+export const GRAD_BONUS = 250 // USD paid to a coin's creator when it graduates
+export const COOK_COOLDOWN_TICKS = 30
+export const MAX_COOKS_PER_ROUND = 8
 
 /**
  * How appealing a launch looks to the (simulated) market, 0..1. Deterministic; the actual launch adds luck.

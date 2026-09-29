@@ -49,3 +49,24 @@ export async function deleteRoom(code: string) {
     /* it just expires */
   }
 }
+
+/**
+ * Rooms: claim the gifts an admin sent this account (marks them received, like the game's `claim_gifts()`), so the
+ * server can add them to the player's wallet in the round.
+ */
+export async function claimGifts(userId: string): Promise<{ asset: 'usd' | 'sol' | 'bsc' | 'hood'; amount: number }[]> {
+  if (!persistOn || !/^[0-9a-f-]{36}$/i.test(userId)) return []
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/gifts?user_id=eq.${userId}&claimed_at=is.null&select=asset,amount`, {
+      method: 'PATCH',
+      headers: { ...headers(), Prefer: 'return=representation' },
+      body: JSON.stringify({ claimed_at: new Date().toISOString() }),
+      signal: AbortSignal.timeout(TIMEOUT),
+    })
+    if (!res.ok) return []
+    const rows = (await res.json()) as { asset: string; amount: number | string }[]
+    return rows.filter((r) => ['usd', 'sol', 'bsc', 'hood'].includes(r.asset) && Number(r.amount) > 0).map((r) => ({ asset: r.asset as 'usd', amount: Number(r.amount) }))
+  } catch {
+    return []
+  }
+}

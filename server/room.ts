@@ -1,16 +1,22 @@
 // One multiplayer room: a shared market ticking once a second, the players in it, and the current round.
-// The market code is the same the single-player game runs; browsers keep their own wallets and send trades here.
+// The market code is the same the single-player game runs. The server is the judge of every player's wallets: orders,
+// cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
-import { adminMarket, type AdminMarketAction, rebuildCandlesFor, createMarket, candleStore, applyPlayerTrade, quoteBuy, quoteSell, secPerTickOf, setCandleLog, setClock, tickMarket, type CandlePoint } from '../src/game/marketEngine'
+import { adminMarket, type AdminMarketAction, rebuildCandlesFor, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, GRAD_BONUS, MAX_COOKS_PER_ROUND, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
 import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
 import { POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
-import { addFunds, applyDelta, applyLayout, freshWallet, fundsIn, runBuy, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
+import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
+import { accountOf } from '../src/game/accounts'
+import { nativePrice } from '../src/game/tradingEngine'
+import { cashbackUsd } from '../src/game/rewardsEngine'
+import { claimGifts } from './persist'
+import { CHAINS } from '../src/data/chains'
 import { walletAddress } from '../src/utils/address'
-import { flagBundle, runBotTick, sleuthBundle } from '../src/game/devTools'
+import { airdropFeePerWallet, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
-import type { Candle, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
+import type { Candle, Chain, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
 import type { BotRun, ClientMsg, NetMarket, NetToken, RoomPlayer, RoundInfo, ServerMsg, TickMsg, TokenDiff, TransferMsg, WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
@@ -44,6 +50,21 @@ interface Member {
   wallet?: Portfolio
   layout?: WalletLayout
   ack: number
+  cashback?: Record<Chain, number> // earned on their fills, not yet claimed (chain coin)
+  cbVolume?: number // their lifetime trading volume (sets the cashback tier)
+  cbAuto?: 'off' | 'coin' | 'usdc'
+  cooks?: number // coins cooked this round
+  lastCookTick?: number
+}
+
+/** A coin a player cooked: who, the dev wallet that pays its bot and earns its fees, and its creator-fee vault. */
+interface Cooked {
+  pid: string
+  walletId: string
+  chain: Chain
+  vault: number // unclaimed creator fees (chain coin)
+  feeMark: number // the coin's creatorFees (USD) already counted into the vault
+  grad: boolean // graduation bonus already added
 }
 
 /** A chart candle as saved: [time, open, high, low, close, volume]. */
@@ -64,6 +85,7 @@ export interface RoomSnapshot {
   lastTapeId: number
   lastWalletTradeId: number
   members: Omit<Member, 'ws' | 'ack'>[]
+  cooked?: [string, Cooked][]
 }
 
 export class Room {
@@ -82,6 +104,7 @@ export class Room {
   private playerEvents: MarketEvent[] = [] // cooks, dev sells… announced with the next tick
   private playerPosts: SocialPost[] = [] // players' posts on the timeline, sent with the next tick
   private bots = new Map<string, VolumeBot>() // tokenId → a player's volume bot on their own coin
+  private cooked = new Map<string, Cooked>() // tokenId → players' coins
   private lastTapeId = 0
   private lastWalletTradeId = 0
   private sentTokens = new Map<string, Record<string, string>>() // coin → field → JSON last sent (for diffs)
@@ -106,8 +129,11 @@ export class Room {
     return {
       v: 1, code: this.code, hostId: this.hostId, round: this.round, market: this.market, wallets: this.wallets,
       posts: this.posts.slice(0, 80), events: this.events.slice(0, 80), bots: [...this.bots.entries()],
-      lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId,
-      members: [...this.members.values()].map((m) => ({ info: { ...m.info, online: false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick })),
+      lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()],
+      members: [...this.members.values()].map((m) => ({
+        info: { ...m.info, online: false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
+        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick,
+      })),
     }
   }
 
@@ -136,6 +162,7 @@ export class Room {
     r.posts = s.posts ?? []
     r.events = s.events ?? []
     r.bots = new Map(s.bots ?? [])
+    r.cooked = new Map(s.cooked ?? [])
     r.lastTapeId = s.lastTapeId ?? r.market.nextTradeId - 1
     r.lastWalletTradeId = s.lastWalletTradeId ?? r.market.nextTradeId - 1
     for (const m of s.members ?? []) r.members.set(m.info.id, { ...m, ws: null, ack: 0, info: { ...m.info, online: false } })
@@ -162,7 +189,7 @@ export class Room {
       ? { ...existing.info, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, verified: !!msg.verified }
       : { id: msg.playerId, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, equity: 0, startEquity: 0, trades: 0, wins: 0, verified: !!msg.verified }
     existing?.ws?.close(4000, 'Joined from another tab')
-    this.members.set(msg.playerId, { info, ws, protect: existing?.protect ?? [], addrs: existing?.addrs, wallet: existing?.wallet, layout: existing?.layout, ack: 0 }) // a new connection restarts the wallet message count (the game does too)
+    this.members.set(msg.playerId, { ...existing, info, ws, protect: existing?.protect ?? [], inbox: undefined, ack: 0 }) // a new connection restarts the wallet message count (the game does too)
     if (!this.hostId) this.hostId = msg.playerId
     this.emptySince = null
     this.send(ws, {
@@ -202,8 +229,6 @@ export class Room {
       case 'start':
         if (playerId !== this.hostId) return this.sendTo(playerId, { t: 'error', message: 'Only the host can start a round' })
         return this.startRound(msg.mode, msg.durationTicks, msg.engine === 'realistic' ? 'realistic' : 'classic')
-      case 'trade':
-        return this.trade(me, msg)
       case 'cook':
         return this.cook(me, msg)
       case 'patch': {
@@ -214,7 +239,9 @@ export class Room {
       case 'bot': {
         const t = this.market.tokens.find((x) => x.id === msg.tokenId) as NetToken | undefined
         if (!t || t.creatorId !== playerId) return
-        if (msg.bot?.on) this.bots.set(msg.tokenId, msg.bot)
+        // What it has spent is counted here (the bot is paid on the server), not taken from the game.
+        const was = this.bots.get(msg.tokenId)
+        if (msg.bot?.on) this.bots.set(msg.tokenId, { ...msg.bot, spent: was?.spent ?? Math.max(0, Number(msg.bot.spent) || 0), volume: was?.volume ?? Math.max(0, Number(msg.bot.volume) || 0) })
         else this.bots.delete(msg.tokenId)
         return
       }
@@ -228,6 +255,8 @@ export class Room {
         }
         me.protect = msg.protect.slice(0, 200)
         if (Array.isArray(msg.addrs)) me.addrs = msg.addrs.filter((a) => typeof a === 'string').slice(0, 12).map((a) => a.slice(0, 24))
+        if (Number.isFinite(msg.cbVolume)) me.cbVolume = Math.max(0, Number(msg.cbVolume))
+        if (msg.cbAuto === 'off' || msg.cbAuto === 'coin' || msg.cbAuto === 'usdc') me.cbAuto = msg.cbAuto
         this.playersDirty = true
         return
       case 'candles':
@@ -253,30 +282,38 @@ export class Room {
         me.ack = Math.max(me.ack, msg.seq)
         return this.sendWallet(me)
       }
-      case 'adjust': {
-        // An action that doesn't run on the server yet (cooking, copy trading, claims…): follow what it changed.
-        const w = this.walletOf(me)
-        if (w && msg.delta) me.wallet = applyDelta(w, msg.delta)
-        me.ack = Math.max(me.ack, msg.seq)
-        return this.sendWallet(me)
-      }
-      case 'airdrop': {
-        // Recipients of a player's airdrop who'll dump what they got (on the shared market, for everyone).
-        const t = this.market.tokens.find((x) => x.id === msg.tokenId) as NetToken | undefined
-        if (!t || t.creatorId !== playerId || !Array.isArray(msg.queue)) return
-        const tick = this.market.tick
-        const queue = msg.queue.slice(0, 200).filter((q) => q && q.side === 'sell' && q.qty! > 0 && q.qty! < 1e12).map((q) => ({
-          tokenId: t.id, atTick: Math.min(tick + 3600, Math.max(tick + 1, Math.round(+q.atTick || 0))), usd: 0, wallet: String(q.wallet ?? '').slice(0, 24), side: 'sell' as const, qty: +q.qty!,
-        }))
-        this.market = { ...this.market, shillQueue: [...(this.market.shillQueue ?? []), ...queue] }
-        return
-      }
+      case 'airdrop':
+        return this.airdrop(me, msg)
       case 'chat': {
         const text = msg.text.trim().slice(0, 200)
         if (text) this.broadcast({ t: 'chat', from: playerId, name: me.info.name, avatar: me.info.avatar, text, time: Date.now() })
         return
       }
     }
+  }
+
+  /** A player's airdrop: the tokens leave their dev wallet here, and recipients who'll dump go on the shared market. */
+  private airdrop(me: Member, msg: Extract<ClientMsg, { t: 'airdrop' }>) {
+    if (msg.seq !== undefined) me.ack = Math.max(me.ack, msg.seq)
+    const t = this.market.tokens.find((x) => x.id === msg.tokenId) as NetToken | undefined
+    const c = this.cooked.get(msg.tokenId)
+    const w = this.walletOf(me)
+    if (!t || !c || c.pid !== me.info.id || !w || !Array.isArray(msg.queue) || !live(t)) return this.sendWallet(me)
+    const n = Math.max(1, Math.min(500, Math.round(Number(msg.wallets) || 1)))
+    const fee = airdropFeePerWallet(t.chain, msg.target === 'fresh' ? 'fresh' : 'holders') * n
+    const r = runGiveAway(w, c.walletId, t.id, Math.max(0, Number(msg.qty) || 0), t.chain, fee)
+    if (!r.ok) return this.sendWallet(me)
+    me.wallet = r.portfolio
+    // Recipients who'll dump what they got (never more than was given away).
+    const tick = this.market.tick
+    let left = r.qty
+    const queue = msg.queue.slice(0, 200).filter((q) => q && q.side === 'sell' && q.qty! > 0 && q.qty! < 1e12).map((q) => {
+      const qty = Math.min(+q.qty!, left)
+      left -= qty
+      return { tokenId: t.id, atTick: Math.min(tick + 3600, Math.max(tick + 1, Math.round(+q.atTick || 0))), usd: 0, wallet: String(q.wallet ?? '').slice(0, 24), side: 'sell' as const, qty }
+    }).filter((q) => q.qty > 0)
+    this.market = { ...this.market, shillQueue: [...(this.market.shillQueue ?? []), ...queue] }
+    this.sendWallet(me)
   }
 
   // ─── Rounds ────────────────────────────────────────────────────────────────
@@ -290,6 +327,7 @@ export class Room {
     this.posts = []
     this.events = []
     this.bots.clear()
+    this.cooked.clear()
     this.freshIds.clear()
     this.sentTokens?.clear() // new market: the next tick sends every coin in full
     this.sentWallets?.clear()
@@ -305,6 +343,9 @@ export class Room {
     for (const m of this.members.values()) {
       m.info = { ...m.info, equity: 0, startEquity: 0, trades: 0, wins: 0, finished: false }
       m.wallet = freshWallet(MODES[mode].startBalance, m.layout)
+      m.cashback = undefined
+      m.cooks = 0
+      m.lastCookTick = undefined
     }
     this.broadcast({ t: 'round', round: this.round, market: this.netMarket(), wallets: round(this.wallets) as SimWallet[] })
     for (const m of this.members.values()) this.sendWallet(m)
@@ -322,7 +363,28 @@ export class Room {
   /** Tell a player their wallets as the server has them (after the wallet message numbered `m.ack`). */
   private sendWallet(m: Member, extra: { ref?: number; fills?: Trade[]; failures?: string[] } = {}) {
     if (!m.wallet) return
-    this.sendTo(m.info.id, { t: 'wallet', ack: m.ack, state: walletStateOf(m.wallet), ...extra })
+    const vaults: Record<string, number> = {}
+    for (const [id, c] of this.cooked) if (c.pid === m.info.id) vaults[id] = c.vault
+    const state = { ...walletStateOf(m.wallet), cashback: m.cashback ?? { sol: 0, bsc: 0, hood: 0 }, vaults }
+    this.sendTo(m.info.id, { t: 'wallet', ack: m.ack, state, ...extra })
+  }
+
+  /** Cashback on a player's fills (a share of the platform fee, tiered by their volume), paid now if they auto-claim. */
+  private earn(m: Member, fills: Trade[]) {
+    if (!m.wallet || !fills.length) return
+    const earned: [Chain, number][] = []
+    for (const f of fills) {
+      const usd = cashbackUsd(f, m.cbVolume ?? 0)
+      m.cbVolume = (m.cbVolume ?? 0) + f.value
+      const chain = f.chain ?? this.market.tokens.find((t) => t.id === f.tokenId)?.chain ?? 'sol'
+      if (usd > 0) earned.push([chain, usd / nativePrice(this.market, chain)])
+    }
+    if (m.cbAuto === 'coin' || m.cbAuto === 'usdc') m.wallet = payNative(m.wallet, this.market, earned, m.cbAuto).portfolio
+    else {
+      const cb = { sol: 0, bsc: 0, hood: 0, ...(m.cashback ?? {}) }
+      for (const [c, n] of earned) cb[c] += n
+      m.cashback = cb
+    }
   }
 
   /** How a wallet shows on the trades tape: the main wallet under the player's name, side wallets as a bare address. */
@@ -349,6 +411,7 @@ export class Room {
       : runSell(w, this.market, (o.legs ?? []).slice(0, 12).map((l) => ({ walletId: String(l.walletId), qty: Math.max(0, Number(l.qty) || 0) })), t.id, { setting: o.setting, who })
     me.wallet = r.portfolio
     this.market = r.market
+    this.earn(me, r.fills)
     this.sendWallet(me, { ref: msg.ref, fills: r.fills.map((f) => ({ ...f, ref: msg.ref })), failures: r.failures })
   }
 
@@ -363,22 +426,25 @@ export class Room {
       } else if (o.kind === 'transfer') {
         const r = runTransfer(w, String(o.fromId), String(o.toId), o.chain, Number(o.amount) || 0, this.market.tick)
         if (r.ok) me.wallet = r.portfolio
+      } else if (o.kind === 'claimFees') {
+        // Creator fees: each coin's vault goes to its dev wallet.
+        const only = Array.isArray(o.tokenIds) ? new Set(o.tokenIds.map(String)) : null
+        let p = w
+        for (const [id, c] of this.cooked) {
+          if (c.pid !== me.info.id || !(c.vault > 1e-12) || (only && !only.has(id))) continue
+          p = payNative(p, this.market, [[c.chain, c.vault]], 'coin', c.walletId).portfolio
+          c.vault = 0
+        }
+        me.wallet = p
+      } else if (o.kind === 'cashback') {
+        const cb = { sol: 0, bsc: 0, hood: 0, ...(me.cashback ?? {}) }
+        const chains = (Array.isArray(o.chains) ? o.chains : []).filter((c): c is Chain => c === 'sol' || c === 'bsc' || c === 'hood')
+        me.wallet = payNative(w, this.market, chains.map((c) => [c, cb[c]]), o.as === 'usdc' ? 'usdc' : 'coin').portfolio
+        for (const c of chains) cb[c] = 0
+        me.cashback = cb
       }
     }
     this.sendWallet(me)
-  }
-
-  // ─── Player actions on the shared market ───────────────────────────────────
-  private trade(me: Member, msg: Extract<ClientMsg, { t: 'trade' }>) {
-    const t = this.market.tokens.find((x) => x.id === msg.tokenId)
-    if (!t || !live(t) || !(msg.usd > 0)) return
-    setClock(secPerTickOf(this.market))
-    setCandleLog(this.pending)
-    const newPrice = msg.side === 'buy' ? quoteBuy(t, msg.usd).newPrice : Math.max(1e-13, quoteSell(t, Math.max(0, msg.qty)).newPrice)
-    // Main wallet: public, shows the player's name. Side wallets: only the address, so nobody knows it's them.
-    const addr = typeof msg.addr === 'string' ? msg.addr.slice(0, 24) : undefined
-    const who = msg.main !== false || !addr ? { name: me.info.name, pid: me.info.id, addr } : { name: addr, addr }
-    this.market = applyPlayerTrade(this.market, t.id, msg.side, msg.usd, newPrice, who)
   }
 
   /** Coins from one player to another (to their main wallet, or to a wallet by address). */
@@ -417,13 +483,64 @@ export class Room {
     this.sendWallet(target)
   }
 
+  /**
+   * A player launches a coin: the server charges the launch fee, marketing and bundle fees, puts the fresh coin on
+   * the market, then runs the dev buy and the bundle from their dev wallet (the game showed all this instantly).
+   */
   private cook(me: Member, msg: Extract<ClientMsg, { t: 'cook' }>) {
-    if (this.market.tokens.some((x) => x.id === msg.token.id)) return
-    const token: NetToken = { ...msg.token, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, tape: msg.token.tape ?? [] }
+    if (msg.seq !== undefined) me.ack = Math.max(me.ack, msg.seq)
+    const fail = (why: string) => this.sendWallet(me, { ref: msg.ref, fills: [], failures: [why] })
+    const w = this.walletOf(me)
+    const money = msg.money
+    if (!w || !money || !msg.token?.id) return fail('No round running')
+    if (this.market.tokens.some((x) => x.id === msg.token.id)) return fail('That coin already exists')
+    if ((me.cooks ?? 0) >= MAX_COOKS_PER_ROUND) return fail(`Max ${MAX_COOKS_PER_ROUND} launches per round`)
+    if (this.market.tick - (me.lastCookTick ?? -999) < COOK_COOLDOWN_TICKS) return fail('Kitchen cooling down')
+    const chain = msg.token.chain
+    const px = nativePrice(this.market, chain)
+    const devWallet = accountOf(w, String(money.devWallet)) ? String(money.devWallet) : w.accounts?.[0]?.id ?? 'w-main'
+    const b = money.bundle && money.bundle.wallets > 0 ? { wallets: Math.min(50, Math.round(money.bundle.wallets)), perWallet: Math.max(0, Number(money.bundle.perWallet) || 0), stagger: !!money.bundle.stagger } : null
+    const bundleUsd = b ? b.wallets * b.perWallet * px : 0
+    const bundleFees = bundleUsd > 0 ? b!.wallets * BUNDLE_WALLET_FEE + (b!.stagger ? bundleUsd * STAGGER_FEE : 0) : 0
+    const marketing = Math.max(0, Number(money.marketing) || 0)
+    const usdCosts = COOK_FEE + marketing + bundleFees
+    if (usdCosts > w.cash + 1e-9) return fail('Not enough USD for the launch fees')
+
+    me.cooks = (me.cooks ?? 0) + 1
+    me.lastCookTick = this.market.tick
+    me.wallet = { ...w, cash: w.cash - usdCosts, feesPaid: w.feesPaid + COOK_FEE + bundleFees }
+    const token: NetToken = { ...msg.token, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, tape: msg.token.tape ?? [], status: 'bonding', creatorFees: 0 }
     this.market = { ...this.market, tokens: [token, ...this.market.tokens] }
     if (msg.candles) candleStore.set(token.id, msg.candles)
     this.freshIds.add(token.id)
+    this.cooked.set(token.id, { pid: me.info.id, walletId: devWallet, chain, vault: 0, feeMark: 0, grad: false })
+
+    // Dev buy (shows as the dev wallet), then the bundle (shows as random wallets).
+    setClock(secPerTickOf(this.market))
+    setCandleLog(this.pending)
+    const fills: Trade[] = []
+    const failures: string[] = []
+    const devUsd = Math.max(0, Number(money.devBuy) || 0) * px
+    if (devUsd > 0) {
+      const r = runBuy(me.wallet, this.market, [devWallet], devUsd, token.id, { autoSwap: !!money.autoSwap, who: this.whoFor(me) })
+      me.wallet = r.portfolio
+      this.market = r.market
+      fills.push(...r.fills)
+      failures.push(...r.failures)
+    }
+    if (bundleUsd > 0) {
+      const rng = new Rng((Math.random() * 2 ** 32) >>> 0)
+      const r = runBuy(me.wallet, this.market, [devWallet], bundleUsd, token.id, { autoSwap: !!money.autoSwap, who: () => ({ name: walletName(rng) }) })
+      me.wallet = r.portfolio
+      this.market = r.market
+      fills.push(...r.fills.map((f) => ({ ...f, via: `Bundle ×${b!.wallets}` })))
+      failures.push(...r.failures)
+    }
+    this.earn(me, fills)
+    const c = this.cooked.get(token.id)!
+    c.feeMark = this.market.tokens.find((x) => x.id === token.id)?.creatorFees ?? 0
     this.playerEvents.push({ by: me.info.id, id: this.market.tick * 100 + 97, tick: this.market.tick, time: this.market.time, kind: 'cook', tokenId: token.id, ticker: token.ticker, text: `${me.info.avatar} ${me.info.name} cooked $${token.ticker}`, icon: '🍳', tone: 'info' })
+    this.sendWallet(me, { ref: msg.ref, fills: fills.map((f) => ({ ...f, ref: msg.ref })), failures })
   }
 
   /** A player's post on the timeline: the crowd reacts on the shared market; everyone sees it next tick. */
@@ -463,15 +580,55 @@ export class Room {
     // Players' dev tools: volume bots on their coins, and sleuths hunting bundles.
     const bots: Record<string, BotRun> = {}
     const devEvents: MarketEvent[] = []
+    // A bot is paid for by its coin's dev wallet, here on the server; it stops when the money or budget runs out.
+    const billed = new Set<Member>()
     for (const [tokenId, bot] of this.bots) {
       const t = market.tokens.find((x) => x.id === tokenId)
+      const c = this.cooked.get(tokenId)
+      const owner = c && this.members.get(c.pid)
+      const w = owner && this.walletOf(owner)
+      const stop = (why: string) => {
+        this.bots.delete(tokenId)
+        bots[tokenId] = { vol: 0, cost: 0, stop: why }
+      }
       if (!t || !live(t)) {
         this.bots.delete(tokenId)
         continue
       }
+      if (!c || !owner || !w) {
+        stop('no dev wallet')
+        continue
+      }
+      const px = nativePrice(market, t.chain)
+      const have = (accountOf(w, c.walletId)?.balances[t.chain] ?? 0) * px
+      if ((bot.spent ?? 0) >= bot.budget) {
+        stop('budget used up')
+        continue
+      }
+      if (have < botTickCost(t, bot.rate / 5)) {
+        stop(`out of ${CHAINS[t.chain].native}`)
+        continue
+      }
       const res = runBotTick(t, bot, market, rng)
+      const cost = Math.min(res.cost, have)
+      owner.wallet = { ...addFunds(w, t.chain, -cost / px, c.walletId), feesPaid: w.feesPaid + cost }
+      this.bots.set(tokenId, { ...bot, spent: (bot.spent ?? 0) + cost, volume: (bot.volume ?? 0) + res.vol })
+      billed.add(owner)
       bots[tokenId] = res
       if (res.event) devEvents.push(res.event)
+    }
+    // Creator fees pile up in each player coin's vault (in its chain coin) until they claim them.
+    for (const [id, c] of this.cooked) {
+      const t = market.tokens.find((x) => x.id === id)
+      if (!t) continue
+      const fees = t.creatorFees ?? 0
+      let usd = Math.max(0, fees - c.feeMark)
+      c.feeMark = Math.max(c.feeMark, fees)
+      if (!c.grad && t.status === 'graduated') {
+        c.grad = true
+        usd += GRAD_BONUS
+      }
+      if (usd > 0) c.vault += usd / nativePrice(market, c.chain)
     }
     for (const t of market.tokens as NetToken[]) {
       if (t.creatorId && sleuthBundle(t, rng)) devEvents.push(flagBundle(t, market, t.bundleWallets ?? 0))
@@ -480,6 +637,7 @@ export class Room {
     market.seed = rng.s
     this.market = market
     this.wallets = wr.wallets
+    for (const m of billed) this.sendWallet(m)
 
     // Coins that appeared this tick: send their whole chart instead of points.
     const newCandles: TickMsg['newCandles'] = {}
@@ -607,6 +765,15 @@ export class Room {
     this.playersDirty = true
     this.broadcastPlayers()
     return true
+  }
+
+  /** Gifts an admin sent to signed-in players here: claimed by the server and added to their round's wallet. */
+  async pullGifts() {
+    if (this.round.state !== 'running') return
+    for (const m of this.members.values()) {
+      if (!m.info.online || !m.info.verified || !m.info.id.startsWith('u-')) continue
+      for (const g of await claimGifts(m.info.id.slice(2))) this.grant(m.info.id, g.amount, g.asset)
+    }
   }
 
   notice(text: string) {

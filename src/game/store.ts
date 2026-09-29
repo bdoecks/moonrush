@@ -11,19 +11,19 @@ import { createChallenges, evaluateChallenges, type ChallengeContext } from './c
 import { rollEvents } from './eventEngine'
 import { createRivals, tickRivals } from './leaderboardEngine'
 import { freshSeason, isRanked, placementPoints, seasonNumber, tierFor, type SeasonState } from './season'
-import { candleStore, COOK_FEE, cookToken, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, SUPPLY, tickMarket, walletName } from './marketEngine'
+import { candleStore, COOK_FEE, cookToken, COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, SUPPLY, tickMarket, walletName } from './marketEngine'
 import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
 import { lengthTicks, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS, type RoundLength } from './progression'
-import { accountOf, activeAccounts, aggregate, commitView, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf } from './accounts'
-import { emptyBalances, executeBuy, executeSell, nativePrice, type Asset } from './tradingEngine'
+import { accountOf, activeAccounts, commitView, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf } from './accounts'
+import { emptyBalances, executeBuy, nativePrice, type Asset } from './tradingEngine'
 import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
 import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
 import { ACCOUNTS, CALL_SETTLE_TICKS, callerKey, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import type { ClientMsg, OpMsg, OrderMsg, RoomPlayer, RoundInfo } from '../net/protocol'
-import { runBuy, runSell, runSwap } from './orders'
+import { payNative, runBuy, runGiveAway, runSell, runSwap } from './orders'
 import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
 
 export type View = 'discover' | 'trenches' | 'token' | 'portfolio' | 'missions' | 'leaderboard' | 'cooking' | 'copytrade' | 'sniper' | 'monitor' | 'track' | 'rewards' | 'admin'
@@ -179,11 +179,16 @@ export const netHooks: {
   send: ((msg: ClientMsg) => void) | null
   /** Rooms: send a buy / sell to the server (the judge) and get the order's ref back. */
   order: ((o: OrderMsg) => number) | null
-  /** Rooms: run a swap / transfer on the server too. */
+  /** Rooms: run a swap / transfer / claim on the server too. */
   op: ((o: OpMsg) => void) | null
-  /** >0 while a wallet change is already being handled by the server (so it isn't reported again). */
+  /** Rooms: a cook or airdrop for the server to run on your wallets; returns its ref (its fills carry it). */
+  wallet: ((msg: NumberedMsg) => number) | null
+  /** >0 while a wallet change is being made that the server runs too (test copies flag any other change). */
   quiet: number
-} = { send: null, order: null, op: null, quiet: 0 }
+} = { send: null, order: null, op: null, wallet: null, quiet: 0 }
+
+/** Wallet messages the network client numbers (`seq` / `ref`) before sending. */
+export type NumberedMsg = Omit<Extract<ClientMsg, { t: 'cook' }>, 'seq' | 'ref'> | Omit<Extract<ClientMsg, { t: 'airdrop' }>, 'seq'>
 
 /** Tag the newest `n` trades with the room order they belong to (the server's fills replace them). */
 function tagRef(p: Portfolio, n: number, ref: number): Portfolio {
@@ -360,9 +365,7 @@ let toastSeq = 1
 let lastEventToast = -999
 
 // Cooking rules.
-export const GRAD_BONUS = 250
-export const COOK_COOLDOWN_TICKS = 30
-export const MAX_COOKS_PER_ROUND = 8
+export { COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND }
 
 /** Returns an error message, or null if the launch spec is valid. */
 export function validateCook(spec: CookSpec, tokens: Token[]): string | null {
@@ -665,7 +668,7 @@ export const useGame = create<GameState>()((set, get) => {
         const p1 = get().portfolio
         const added = p1.trades.length - before
         const fills = p1.trades.slice(0, added).filter((tr) => tr.tokenId === t.id && tr.side === 'buy')
-        set({ portfolio: { ...p1, trades: [...p1.trades.slice(0, added).map((tr) => (tr.tokenId === t.id ? { ...tr, via: `🎯 ${task.name}` } : tr)), ...p1.trades.slice(added)] } })
+        quietly(() => set({ portfolio: { ...p1, trades: [...p1.trades.slice(0, added).map((tr) => (tr.tokenId === t.id ? { ...tr, via: `🎯 ${task.name}` } : tr)), ...p1.trades.slice(added)] } }))
         const qty = fills.reduce((a, f) => a + f.qty, 0)
         const cost = fills.reduce((a, f) => a + f.value + (f.gas ?? 0), 0)
         const prev = task.holdings[t.id]
@@ -694,7 +697,7 @@ export const useGame = create<GameState>()((set, get) => {
         if (get().sell(qty, tokenId, task.slot, h.walletIds)) {
           const p1 = get().portfolio
           const sells = p1.trades.slice(0, p1.trades.length - before).filter((tr) => tr.tokenId === tokenId && tr.side === 'sell')
-          set({ portfolio: { ...p1, trades: p1.trades.map((tr) => (sells.includes(tr) ? { ...tr, via: `🎯 ${task.name}` } : tr)) } })
+          quietly(() => set({ portfolio: { ...p1, trades: p1.trades.map((tr) => (sells.includes(tr) ? { ...tr, via: `🎯 ${task.name}` } : tr)) } }))
           task.stats.realized += sells.reduce((a, f) => a + (f.pnl ?? 0), 0)
           task.stats.sells++
           delete task.holdings[tokenId]
@@ -754,38 +757,41 @@ export const useGame = create<GameState>()((set, get) => {
   function runCopies(actions: WalletAction[]) {
     const s0 = get()
     if (!s0.copies.some((c) => !c.paused)) return
-    // Copy trades run from your primary wallet.
+    // Copy trades run from your primary wallet. In rooms each one is an order the server runs too (its result wins).
     const pid = primaryId(s0.portfolio)
-    let portfolio = viewOf(s0.portfolio, pid)
-    const startTrades = portfolio.trades.length
+    let portfolio = s0.portfolio
     let market = s0.market
+    const online = !!s0.online && !!netHooks.order
     const walletName = new Map(s0.wallets.map((w) => [w.id, w.name]))
     const copies = s0.copies.map((c) => ({ ...c, holdings: { ...c.holdings }, stats: { ...c.stats } }))
     const notes: { title: string; body: string; tone: 'up' | 'down' | 'warn'; icon: string }[] = []
     const copiedFeed = new Set<string>()
     const tokenOf = (id: string) => market.tokens.find((x) => x.id === id)
+    const held = (tokenId: string) => accountOf(portfolio, pid)?.positions[tokenId]
     const tag = (via: string) => {
       portfolio = { ...portfolio, trades: [{ ...portfolio.trades[0], via }, ...portfolio.trades.slice(1)] }
     }
     const sellCopied = (c: CopyConfig, tokenId: string, qtyWanted: number, label: string) => {
-      const qty = Math.min(qtyWanted, portfolio.positions[tokenId]?.qty ?? 0)
+      const qty = Math.min(qtyWanted, held(tokenId)?.qty ?? 0)
       if (!(qty > 0)) {
         delete c.holdings[tokenId]
         return
       }
-      const res = executeSell(portfolio, market, tokenId, qty, portfolio.trades.length + 1)
-      if (!res.ok) return
+      const legs = [{ walletId: pid, qty }]
+      const res = runSell(portfolio, market, legs, tokenId, {})
+      if (!res.fills.length) return
       portfolio = res.portfolio
       market = res.market
+      if (online) portfolio = tagRef(portfolio, res.fills.length, netHooks.order!({ side: 'sell', tokenId, legs }))
       const via = walletName.get(c.walletId) ?? 'copy'
       tag(via)
       const left = (c.holdings[tokenId] ?? 0) - qty
-      if (left <= 1e-9 || !portfolio.positions[tokenId]) delete c.holdings[tokenId]
+      if (left <= 1e-9 || !held(tokenId)) delete c.holdings[tokenId]
       else c.holdings[tokenId] = left
+      const pnl = res.fills.reduce((a, f) => a + (f.pnl ?? 0), 0)
       c.stats.sells++
-      c.stats.realized += res.trade.pnl ?? 0
-      const pnl = res.trade.pnl ?? 0
-      notes.push({ title: label, body: `${via} → $${res.trade.ticker} ${pnl >= 0 ? '+' : ''}${fmtUsd(pnl)}`, tone: pnl >= 0 ? 'up' : 'down', icon: '⚡' })
+      c.stats.realized += pnl
+      notes.push({ title: label, body: `${via} → $${res.fills[0].ticker} ${pnl >= 0 ? '+' : ''}${fmtUsd(pnl)}`, tone: pnl >= 0 ? 'up' : 'down', icon: '⚡' })
     }
 
     for (const a of actions) {
@@ -798,21 +804,24 @@ export const useGame = create<GameState>()((set, get) => {
             c.stats.skipped++
             continue
           }
-          const usd = Math.min(c.mode === 'fixed' ? c.amount : a.usd * c.amount, c.maxPerTrade, c.budget - c.stats.spent, portfolio.cash + (portfolio.balances?.[t.chain] ?? 0) * nativePrice(market, t.chain))
+          const coin = accountOf(portfolio, pid)?.balances[t.chain] ?? 0
+          const usd = Math.min(c.mode === 'fixed' ? c.amount : a.usd * c.amount, c.maxPerTrade, c.budget - c.stats.spent, portfolio.cash + coin * nativePrice(market, t.chain))
           if (!(usd >= 1)) {
             c.stats.skipped++
             continue
           }
-          const res = executeBuy(portfolio, market, t.id, usd, portfolio.trades.length + 1, { autoSwap: s0.settings.autoSwap })
-          if (!res.ok) {
+          const res = runBuy(portfolio, market, [pid], usd, t.id, { autoSwap: s0.settings.autoSwap })
+          if (!res.fills.length) {
+            portfolio = res.portfolio // a failed order can still burn its priority fee
             c.stats.skipped++
             continue
           }
           portfolio = res.portfolio
           market = res.market
+          if (online) portfolio = tagRef(portfolio, res.fills.length, netHooks.order!({ side: 'buy', tokenId: t.id, walletIds: [pid], usdEach: usd, autoSwap: s0.settings.autoSwap }))
           const via = walletName.get(c.walletId) ?? 'copy'
           tag(via)
-          c.holdings[t.id] = (c.holdings[t.id] ?? 0) + res.trade.qty
+          c.holdings[t.id] = (c.holdings[t.id] ?? 0) + res.fills[0].qty
           c.stats.buys++
           c.stats.spent += usd
           copiedFeed.add(`${a.walletId}:${a.tokenId}:buy`)
@@ -828,7 +837,7 @@ export const useGame = create<GameState>()((set, get) => {
     for (const c of copies) {
       if (c.paused || (c.tp === null && c.sl === null)) continue
       for (const [tokenId, qty] of Object.entries(c.holdings)) {
-        const pos = portfolio.positions[tokenId]
+        const pos = held(tokenId)
         const t = tokenOf(tokenId)
         if (!pos || !t) {
           delete c.holdings[tokenId]
@@ -841,7 +850,7 @@ export const useGame = create<GameState>()((set, get) => {
     }
 
     const walletFeed = copiedFeed.size ? get().walletFeed.map((f) => (f.tick === market.tick && copiedFeed.has(`${f.walletId}:${f.tokenId}:${f.side}`) ? { ...f, copied: true } : f)) : get().walletFeed
-    set({ portfolio: commitView(s0.portfolio, pid, portfolio, startTrades), market, copies, walletFeed })
+    quietly(() => set({ portfolio, market, copies, walletFeed }))
     notes.slice(0, 3).forEach((n, i) => get().notify(n, i === 0 ? (n.title.includes('BUY') ? 'buy' : n.tone === 'up' ? 'profit' : 'sell') : undefined))
   }
 
@@ -1035,7 +1044,8 @@ export const useGame = create<GameState>()((set, get) => {
         return { id: market.tick * 1000 + i, tick: market.tick, time: market.time, walletId: a.walletId, tokenId: a.tokenId, ticker: t?.ticker ?? '?', emoji: t?.emoji ?? '❔', hue: t?.hue ?? 0, side: a.side, usd: a.usd, fraction: a.fraction, copied: false, kind: a.kind, mcap: a.mcap }
       })
 
-      set({
+      // Rooms: bot costs are charged on the server too (this shows them right away).
+      quietly(() => set({
         market,
         portfolio,
         runStats,
@@ -1051,7 +1061,7 @@ export const useGame = create<GameState>()((set, get) => {
         events: newEvents.length ? [...newEvents.reverse().map((e) => (e.tokenId && e.mcap === undefined ? { ...e, mcap: map.get(e.tokenId)?.mcap } : e)), ...s.events].slice(0, 200) : s.events,
         players,
         runTicks: running ? s.runTicks + 1 : s.runTicks,
-      })
+      }))
 
       // Notifications: anything touching your bags or watchlist, market-wide moves, and a throttled sample of the rest.
       const eventToasts = s.settings.eventToasts !== false && useFlags.getState().eventPopups
@@ -1483,6 +1493,7 @@ export const useGame = create<GameState>()((set, get) => {
 
       const rng = new Rng((s.market.seed ^ Math.imul(s.market.tick + 1, 0x9e3779b1)) >>> 0)
       const cooked = cookToken(s.market, rng, spec)
+      const fresh = s.online ? structuredClone(cooked.token) : null // rooms: the server runs the dev buy / bundle on the fresh coin
       let market = cooked.market
       const devView = viewOf(s.portfolio, devId)
       let portfolio: Portfolio = { ...devView, cash: devView.cash - COOK_FEE - spec.marketing - bundleFees, feesPaid: devView.feesPaid + COOK_FEE + bundleFees }
@@ -1531,7 +1542,7 @@ export const useGame = create<GameState>()((set, get) => {
         chain: t.chain, devWallet: devId, ...(bundleQty > 0 ? { bundleQty, bundleWallets: bundle.wallets } : {}),
       }
       const cookEvents = bundleEvent ? [bundleEvent, cooked.event] : [cooked.event]
-      set({
+      quietly(() => set({
         market, portfolio,
         launches: [record, ...s.launches],
         lastCookTick: s.market.tick,
@@ -1539,9 +1550,17 @@ export const useGame = create<GameState>()((set, get) => {
         events: [...cookEvents, ...s.events].slice(0, 120),
         watchlist: s.watchlist.includes(t.id) ? s.watchlist : [...s.watchlist, t.id],
         profile: { ...s.profile, lifetimeTrades: s.profile.lifetimeTrades + (spec.devBuy > 0 ? 1 : 0) + (bundleQty > 0 ? 1 : 0) },
-      })
-      // Online: put the coin (with its dev buy already priced in) on the shared market for everyone.
-      if (s.online) netHooks.send?.({ t: 'cook', token: get().market.tokens.find((x) => x.id === t.id) ?? t, candles: candleStore.get(t.id), event: cooked.event })
+      }))
+      // Rooms: the server charges the launch, puts the coin on the shared market and runs the same dev buy / bundle
+      // (its fills replace the ones shown here).
+      if (fresh && netHooks.wallet) {
+        const ref = netHooks.wallet({
+          t: 'cook', token: fresh, candles: candleStore.get(t.id), event: cooked.event,
+          money: { devWallet: devId, devBuy: spec.devBuy, bundle: bundleNative > 0 ? bundle : undefined, marketing: spec.marketing, autoSwap: s.settings.autoSwap },
+        })
+        const p = get().portfolio
+        quietly(() => set({ portfolio: tagRef(p, p.trades.length - s.portfolio.trades.length, ref) }))
+      }
       s.notify({ title: 'TOKEN COOKED', body: `$${t.ticker} is live on the curve${spec.devBuy > 0 ? ` · dev bag ${t.devPct.toFixed(1)}%` : ''}${bundleQty > 0 ? ` · bundle ${(t.bundlePct ?? 0).toFixed(1)}% across ${bundle.wallets} wallets` : ''}`, tone: 'up', icon: '🍳' }, 'achievement')
       if (bundleEvent) s.notify({ title: 'BUNDLE SPOTTED', body: (bundleEvent as MarketEvent).text, tone: 'down', icon: '📦' }, 'alert')
       gainXp(25, `Cooked $${t.ticker}`)
@@ -1779,12 +1798,11 @@ export const useGame = create<GameState>()((set, get) => {
       const paid: string[] = []
       for (const r of recs) {
         const chain = r.chain ?? 'sol'
-        const w = devSet(portfolio, r)[0]
-        const view = viewOf(portfolio, w)
-        portfolio = commitView(portfolio, w, { ...view, balances: { ...view.balances, [chain]: view.balances[chain] + (r.unclaimed ?? 0) } })
-        paid.push(`${fmtNative(r.unclaimed ?? 0, chain)} from $${r.ticker}`)
+        portfolio = payNative(portfolio, s.market, [[chain, r.unclaimed ?? 0]], 'coin', devSet(portfolio, r)[0]).portfolio
+        paid.push(`${fmtNative(r.unclaimed ?? 0, chain)} from ${r.ticker}`)
       }
-      set({ portfolio, launches: s.launches.map((r) => (recs.includes(r) ? { ...r, unclaimed: 0 } : r)) })
+      if (s.online) netHooks.op?.({ kind: 'claimFees', tokenIds: recs.map((r) => r.tokenId) }) // the server pays from its own vaults
+      quietly(() => set({ portfolio, launches: s.launches.map((r) => (recs.includes(r) ? { ...r, unclaimed: 0 } : r)) }))
       if (!silent) s.notify({ title: 'CREATOR FEES CLAIMED', body: `${paid.slice(0, 3).join(' · ')}${paid.length > 3 ? ` +${paid.length - 3} more` : ''} → your dev wallet`, tone: 'up', icon: '💰' }, 'profit')
       persist()
     },
@@ -1860,18 +1878,9 @@ export const useGame = create<GameState>()((set, get) => {
       const rng = new Rng((s.market.seed ^ Math.imul(s.market.tick + 1, 0x2c1b3c6d) ^ n) >>> 0)
       const plan = planAirdrop(t, qty, n, target, rng, s.market.tick, secPerTickOf(s.market))
       // The tokens leave your bag for nothing: their cost is written off as a realized loss.
-      const frac = qty / pos.qty
-      const lost = pos.costBasis * frac
-      const left = pos.qty - qty
-      const nextPos = left > 0 ? { ...pos, qty: left, costBasis: pos.costBasis - lost, realized: pos.realized - lost } : undefined
-      const positions = { ...acc.positions }
-      if (nextPos) positions[tokenId] = nextPos
-      else delete positions[tokenId]
-      const portfolio = aggregate({
-        ...s.portfolio,
-        realized: s.portfolio.realized - lost,
-        accounts: (s.portfolio.accounts ?? []).map((a) => (a.id === devW ? { ...a, positions, balances: { ...a.balances, [t.chain]: a.balances[t.chain] - fee } } : a)),
-      })
+      const given = runGiveAway(s.portfolio, devW, tokenId, qty, t.chain, fee)
+      if (!given.ok) return fail(given.error)
+      const portfolio = given.portfolio
       const launches = s.launches.map((r) => (r.tokenId === tokenId ? { ...r, airdropped: { qty: (r.airdropped?.qty ?? 0) + qty, wallets: (r.airdropped?.wallets ?? 0) + n, count: (r.airdropped?.count ?? 0) + 1 } } : r))
       const stake = devStake(portfolio, rec, tokenId)
       let market = patchToken(s.market, tokenId, (x) => {
@@ -1887,9 +1896,9 @@ export const useGame = create<GameState>()((set, get) => {
         id: s.market.tick * 100 + 93, tick: s.market.tick, time: s.market.time, kind: 'airdrop', tokenId, ticker: t.ticker,
         text: `Dev airdropped ${pctTxt} of $${t.ticker} to ${n} ${target === 'fresh' ? 'fresh wallets' : 'holders'}`, icon: '🪂', tone: 'info',
       }
-      set({ portfolio, market, launches, events: [ev, ...s.events].slice(0, 120) })
+      quietly(() => set({ portfolio, market, launches, events: [ev, ...s.events].slice(0, 120) }))
       if (s.online) {
-        netHooks.send?.({ t: 'airdrop', tokenId, queue: plan.queue })
+        netHooks.wallet?.({ t: 'airdrop', tokenId, queue: plan.queue, walletId: devW, qty, wallets: n, target }) // the server takes the tokens and fee too
         netHooks.send?.({ t: 'event', event: ev })
         sendTokenPatch(tokenId)
       }
@@ -1956,7 +1965,7 @@ export const useGame = create<GameState>()((set, get) => {
         s.notify({ title: 'ROUND NOT ACTIVE', body: 'Start a round to claim rewards', tone: 'warn', icon: '⏸' })
         return
       }
-      const asCash = s.mode === 'practice'
+      const asCash = s.mode === 'practice' && !s.online
       const claim: RewardClaim = { id: `c${Date.now()}`, time: Date.now(), kind, amount, paidAs: asCash ? 'cash' : 'xp' }
       set({
         rewards: {
@@ -1979,11 +1988,12 @@ export const useGame = create<GameState>()((set, get) => {
       const cb = cashbackOf(s.rewards)
       const chains = (which === 'all' ? (Object.keys(cb.pending) as Chain[]) : [which]).filter((c) => cb.pending[c] > 1e-9)
       if (!chains.length) return
-      const paid = payCashback(s.portfolio, s.market, chains.map((c) => [c, cb.pending[c]]), as)
+      const paid = payNative(s.portfolio, s.market, chains.map((c) => [c, cb.pending[c]]), as)
       const pending = { ...cb.pending }
       for (const c of chains) pending[c] = 0
       const claims: RewardClaim[] = paid.lines.map((l, i) => ({ id: `c${Date.now()}${i}`, time: Date.now(), kind: 'cashback', amount: l.usd, paidAs: as === 'coin' ? 'coin' : 'cash', chain: l.chain, native: l.native }))
-      set({ portfolio: paid.portfolio, rewards: { ...s.rewards, cashback: { ...cb, pending, lifetimeUsd: cb.lifetimeUsd + paid.usd }, history: [...claims, ...s.rewards.history].slice(0, 50) } })
+      if (s.online) netHooks.op?.({ kind: 'cashback', chains, as }) // the server pays what it counted
+      quietly(() => set({ portfolio: paid.portfolio, rewards: { ...s.rewards, cashback: { ...cb, pending, lifetimeUsd: cb.lifetimeUsd + paid.usd }, history: [...claims, ...s.rewards.history].slice(0, 50) } }))
       const body = as === 'usdc' ? `+${fmtUsd(paid.usd)} USDC` : paid.lines.map((l) => `+${fmtNative(l.native, l.chain)}`).join(' · ')
       s.notify({ title: 'CASHBACK CLAIMED', body: `${body}${as === 'coin' ? ' → your wallet' : ''}`, tone: 'up', icon: '💸' }, 'profit')
       persist()
@@ -1999,7 +2009,7 @@ export const useGame = create<GameState>()((set, get) => {
       if (r.checkIn.lastDate === todayKey()) return
       const streak = r.checkIn.lastDate === yesterdayKey() ? (r.checkIn.streak % 7) + 1 : 1
       const amount = CHECKIN_REWARDS[streak - 1]
-      const asCash = s.mode === 'practice' && s.runStatus === 'running'
+      const asCash = s.mode === 'practice' && s.runStatus === 'running' && !s.online
       const claim: RewardClaim = { id: `c${Date.now()}`, time: Date.now(), kind: 'checkin', amount, paidAs: asCash ? 'cash' : 'xp' }
       set({
         rewards: { ...r, checkIn: { lastDate: todayKey(), streak }, history: [claim, ...r.history].slice(0, 50) },
@@ -2057,18 +2067,6 @@ export const useGame = create<GameState>()((set, get) => {
 
 const nativeUsd = (m: MarketState, c: Chain) => m.native?.[c]?.price ?? CHAINS[c].basePrice
 
-/** Pay chain-coin cashback: into your primary wallet as the coin, or converted to USDC (the USD bank). */
-function payCashback(p: Portfolio, m: MarketState, lines: [Chain, number][], as: 'coin' | 'usdc') {
-  const out = lines.map(([chain, native]) => ({ chain, native, usd: native * nativeUsd(m, chain) }))
-  const usd = out.reduce((a, l) => a + l.usd, 0)
-  if (as === 'usdc') return { portfolio: { ...p, cash: p.cash + usd }, usd, lines: out }
-  const id = primaryId(p)
-  const view = viewOf(p, id)
-  const balances = { ...view.balances }
-  for (const l of out) balances[l.chain] += l.native
-  return { portfolio: commitView(p, id, { ...view, balances }), usd, lines: out }
-}
-
 // Every new fill (manual, instant, copy, sniper, limit…) earns cashback in its chain's coin, priced at fill time.
 useGame.subscribe((s, prev) => {
   if (s.portfolio.trades === prev.portfolio.trades || s.runStatus !== 'running') return
@@ -2097,11 +2095,11 @@ useGame.subscribe((s, prev) => {
   let portfolio = s.portfolio
   let lifetimeUsd = cb.lifetimeUsd
   if (cb.auto !== 'off' && earned.length) {
-    const paid = payCashback(portfolio, s.market, earned, cb.auto)
+    const paid = payNative(portfolio, s.market, earned, cb.auto) // rooms: the server auto-pays it too
     portfolio = paid.portfolio
     lifetimeUsd += paid.usd
   } else for (const [c, n] of earned) pending[c] += n
-  useGame.setState({ ...(portfolio !== s.portfolio ? { portfolio } : {}), rewards: { ...s.rewards, cashback: { ...cb, pending, volume, roundVolume, roundUsd, lifetimeUsd } } })
+  quietly(() => useGame.setState({ ...(portfolio !== s.portfolio ? { portfolio } : {}), rewards: { ...s.rewards, cashback: { ...cb, pending, volume, roundVolume, roundUsd, lifetimeUsd } } }))
 })
 
 export const TICK_REAL_SECONDS = 1

@@ -15,9 +15,11 @@ const PRESETS: Record<GiftAsset, number[]> = { usd: [1_000, 10_000, 100_000, 1_0
  * Admin: give USD / SOL / BNB / ETH to yourself (instant), a player in a room (instant), or any account by
  * username (waits in their gift box until they're in a round, then lands within a minute).
  */
-export function GiveBox({ room, players, initialTo, compact }: { room?: string; players?: RoomPlayer[]; initialTo?: string; compact?: boolean }) {
+export function GiveBox({ room: roomProp, players, initialTo, compact }: { room?: string; players?: RoomPlayer[]; initialTo?: string; compact?: boolean }) {
   const me = useAccount((s) => s.profile?.username)
   const myId = useGame((s) => s.online?.you)
+  const myRoom = useGame((s) => s.online?.code)
+  const room = roomProp ?? myRoom
   const running = useGame((s) => s.runStatus === 'running')
   const notify = useGame((s) => s.notify)
   const [to, setTo] = useState(initialTo ?? 'me') // 'me' | 'room:<playerId>' | 'account'
@@ -33,7 +35,11 @@ export function GiveBox({ room, players, initialTo, compact }: { room?: string; 
     if (!(amt > 0)) return
     setBusy(true)
     try {
-      if (to === 'me') {
+      if (to === 'me' && room && myId) {
+        // In a room your wallet is on the server: it adds the currency there.
+        if (!running) say(false, 'Start a round first: currency goes into your current round')
+        else if (await adminAct({ action: 'grant', room, playerId: myId, asset, amount: amt }, `Gave yourself ${fmtGift(asset, amt)}`)) setAmount('')
+      } else if (to === 'me') {
         if (giveLocal(asset, amt)) setAmount('')
         else say(false, 'Start a round first: currency goes into your current round')
       } else if (to.startsWith('room:')) {
@@ -45,7 +51,7 @@ export function GiveBox({ room, players, initialTo, compact }: { room?: string; 
         const { data } = await supabase.from('profiles').select('id, username').ilike('username', name.replace(/_/g, '\\_')).maybeSingle()
         if (!data) return say(false, `No account called "${name}"`)
         // Yourself by name while you're playing: just add it now.
-        if (data.username === me && running) {
+        if (data.username === me && running && !room) {
           giveLocal(asset, amt)
           setAmount('')
           return

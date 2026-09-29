@@ -166,8 +166,9 @@ for (const sig of ['SIGTERM', 'SIGINT'] as const) {
   })
 }
 
-// Close rooms nobody has been in for a while.
+// Close rooms nobody has been in for a while; hand out gifts admins sent to players who are in a round.
 setInterval(() => {
+  for (const r of rooms.values()) void r.pullGifts()
   for (const [code, r] of rooms) {
     if (r.emptySince && Date.now() - r.emptySince > ROOM_IDLE_MS) {
       r.dispose()

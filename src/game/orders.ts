@@ -1,7 +1,7 @@
 // Money moves on a player's wallets, as pure functions shared by the game (solo rounds, and the instant on-screen
 // result in rooms) and the room server (which is the judge in rooms). Same code on both sides = same rules.
 import type { Account, Chain, MarketState, Portfolio, Position, Trade, TradeSetting } from '../types'
-import { accountOf, aggregate, commitView, ensureAccounts, viewOf, withAccount } from './accounts'
+import { accountOf, aggregate, commitView, ensureAccounts, primaryId, viewOf, withAccount } from './accounts'
 import { newPortfolio } from './portfolioEngine'
 import { emptyBalances, executeBuy, executeSell, nativePrice, swap, type Asset } from './tradingEngine'
 
@@ -140,6 +140,8 @@ export interface WalletState {
   feesPaid: number
   tradedTokens: string[]
   tradeCount: number
+  cashback?: Record<Chain, number> // rooms: cashback earned and not yet claimed (the server counts it)
+  vaults?: Record<string, number> // rooms: creator fees waiting in each of your coins' vaults, in the chain coin
 }
 
 export const walletStateOf = (p: Portfolio): WalletState => ({
@@ -151,11 +153,8 @@ export function mergeWalletState(local: Portfolio, w: WalletState): Portfolio {
   return aggregate({ ...local, cash: w.cash, accounts: w.accounts, active: w.active ?? local.active, realized: w.realized, feesPaid: w.feesPaid, tradedTokens: w.tradedTokens })
 }
 
-// ─── Other money changes (transition): the difference a local-only action made ───
-/**
- * While not every action runs on the server yet (cooking, copy trading, claims…), the game reports what such an
- * action changed so the server's wallet follows. Later pieces move those actions onto the server too.
- */
+// ─── Wallet differences ───────────────────────────────────────────────────────
+/** What changed between two versions of a wallet (test copies use it to flag changes the server didn't run). */
 export interface WalletDelta {
   cash: number
   realized: number
@@ -198,31 +197,6 @@ export function diffWallet(before: Portfolio, after: Portfolio): WalletDelta | n
   return changed ? d : null
 }
 
-export function applyDelta(p: Portfolio, d: WalletDelta): Portfolio {
-  const accounts = (p.accounts ?? []).map((a) => {
-    const bal = d.balances[a.id]
-    const pos = d.positions[a.id]
-    if (!bal && !pos) return a
-    const balances = { ...a.balances }
-    for (const [c, v] of Object.entries(bal ?? {}) as [Chain, number][]) balances[c] = Math.max(0, (balances[c] ?? 0) + v)
-    const positions = { ...a.positions }
-    for (const [id, np] of Object.entries(pos ?? {})) {
-      if (np) positions[id] = np
-      else delete positions[id]
-    }
-    return { ...a, balances, positions }
-  })
-  return aggregate({
-    ...p,
-    cash: Math.max(0, p.cash + d.cash),
-    realized: p.realized + d.realized,
-    feesPaid: p.feesPaid + d.feesPaid,
-    accounts,
-    trades: [...d.trades, ...p.trades].slice(0, 2000),
-    tradedTokens: [...p.tradedTokens, ...d.tradedTokens.filter((t) => !p.tradedTokens.includes(t))],
-  })
-}
-
 /** Add (or, with a negative amount, take) USD or a chain coin: USD to the bank, coins to a wallet (default: main). */
 export function addFunds(p: Portfolio, asset: 'usd' | 'usdc' | Chain, amount: number, walletId?: string): Portfolio {
   if (!Number.isFinite(amount) || amount === 0) return p
@@ -235,4 +209,41 @@ export function addFunds(p: Portfolio, asset: 'usd' | 'usdc' | Chain, amount: nu
 export function fundsIn(p: Portfolio, asset: 'usd' | 'usdc' | Chain, walletId?: string): number {
   if (asset === 'usd' || asset === 'usdc') return p.cash
   return accountOf(p, walletId ?? p.accounts?.[0]?.id ?? '')?.balances[asset] ?? 0
+}
+
+// ─── Dev tools and rewards (rooms run these on the server too) ───────────────
+/**
+ * Airdrop: `qty` of a coin leaves this wallet for nothing (its cost is written off as a realized loss), and the
+ * network fee comes out of the wallet's chain coin.
+ */
+export function runGiveAway(p: Portfolio, walletId: string, tokenId: string, qty: number, chain: Chain, fee: number): { ok: true; portfolio: Portfolio; qty: number } | { ok: false; error: string } {
+  const acc = accountOf(p, walletId)
+  const pos = acc?.positions[tokenId]
+  if (!acc || !pos || !(qty > 0)) return { ok: false, error: 'No tokens to give away' }
+  if (acc.balances[chain] < fee - 1e-12) return { ok: false, error: 'Not enough for network fees' }
+  const give = Math.min(qty, pos.qty)
+  const lost = pos.costBasis * (give / pos.qty)
+  const left = pos.qty - give
+  const positions = { ...acc.positions }
+  if (left > 0) positions[tokenId] = { ...pos, qty: left, costBasis: pos.costBasis - lost, realized: pos.realized - lost }
+  else delete positions[tokenId]
+  const portfolio = aggregate({
+    ...p,
+    realized: p.realized - lost,
+    accounts: (p.accounts ?? []).map((a) => (a.id === walletId ? { ...a, positions, balances: { ...a.balances, [chain]: Math.max(0, a.balances[chain] - fee) } } : a)),
+  })
+  return { ok: true, portfolio, qty: give }
+}
+
+/** Pay chain-coin rewards (cashback, creator fees): into a wallet as the coin (default: primary), or as USDC. */
+export function payNative(p: Portfolio, m: MarketState, lines: [Chain, number][], as: 'coin' | 'usdc', walletId?: string) {
+  const out = lines.filter(([, n]) => n > 0).map(([chain, native]) => ({ chain, native, usd: native * nativePrice(m, chain) }))
+  const usd = out.reduce((a, l) => a + l.usd, 0)
+  if (!out.length) return { portfolio: p, usd: 0, lines: out }
+  if (as === 'usdc') return { portfolio: { ...p, cash: p.cash + usd }, usd, lines: out }
+  const id = walletId && accountOf(p, walletId) ? walletId : primaryId(p)
+  const view = viewOf(p, id)
+  const balances = { ...view.balances }
+  for (const l of out) balances[l.chain] += l.native
+  return { portfolio: commitView(p, id, { ...view, balances }), usd, lines: out }
 }
