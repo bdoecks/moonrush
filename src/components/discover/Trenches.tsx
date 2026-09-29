@@ -9,7 +9,6 @@ import { LAUNCHPADS } from '../../data/launchpads'
 import { AtSign, Boxes, ChefHat, Crosshair, Eye, Ghost, Globe, GraduationCap, Search, Send, Star, UserRound, Users } from 'lucide-react'
 import { memo, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTokenMap } from '../../hooks/useDerived'
-import { useFlash } from '../../hooks/useFlash'
 import { useGame } from '../../game/store'
 import { publicBundlePct } from '../../game/devTools'
 import { devPctOf, top10Of } from '../../game/ledger'
@@ -19,7 +18,7 @@ import { countActive, EMPTY_FILTER, matchesFilter, presetFor, withDefaults, type
 import { useFilterPresets } from '../../hooks/useFilterPresets'
 import { TrenchFilterButton } from './TrenchFilterPanel'
 import { fmtAge, fmtCompact, fmtNum } from '../../utils/format'
-import { EmptyState, Pct, Segmented, TokenIcon } from '../ui'
+import { EmptyState, FlashNum, Pct, Segmented, TokenIcon } from '../ui'
 
 type Col = 'new' | 'stretch' | 'grad'
 const COLS: { id: Col; title: string }[] = [
@@ -154,7 +153,6 @@ export const Card = memo(function Card({ t, now, preview }: { t: Token; now: num
   const watched = useGame((s) => s.watchlist.includes(t.id))
   const held = useGame((s) => !!s.portfolio.positions[t.id])
   const hidden = useHidden((s) => s.ids.includes(t.id))
-  const [dir, key] = useFlash(t.mcap)
   const dead = t.status === 'rugged' || t.status === 'dead'
   const age = now - t.createdAt
   const tx = t.buys + t.sells
@@ -231,7 +229,7 @@ export const Card = memo(function Card({ t, now, preview }: { t: Token; now: num
         {/* Market stats */}
         <div className="shrink-0 text-right leading-[1.35]">
           <div className="text-[11px] text-dim">
-            MC <span key={key} className={clsx('num rounded-sm px-0.5 text-[14px] font-bold', mcClass(t.mcap), dir && `tflash-${dir}`)}>{fmtCompact(t.mcap)}</span>
+            MC <FlashNum value={t.mcap} format={fmtCompact} className={clsx('rounded-sm px-0.5 text-[14px] font-bold', mcClass(t.mcap))} />
           </div>
           <div className="text-[11px] text-dim">V <span className="num text-[12px] font-semibold text-ink">{fmtCompact(t.volume)}</span></div>
           <div className="text-[10px] text-dim" title="Fees paid to the pool (1h)">F <span className="num text-muted">{fmtCompact(t.volume * 0.01)}</span></div>

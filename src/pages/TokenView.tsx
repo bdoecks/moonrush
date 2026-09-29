@@ -290,10 +290,10 @@ function Header({ t }: { t: Token }) {
         </div>
       </div>
 
-      <FlashNum value={t.mcap} className="text-[24px] font-bold leading-none">{fmtCompact(t.mcap)}</FlashNum>
+      <FlashNum value={t.mcap} format={fmtCompact} className="text-[24px] font-bold leading-none" />
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
-        <HeaderStat label="Price"><FlashNum value={t.price}>{fmtPrice(t.price)}</FlashNum></HeaderStat>
+        <HeaderStat label="Price"><FlashNum value={t.price} format={fmtPrice} /></HeaderStat>
         <HeaderStat label="Liq">{fmtCompact(t.liquidity)}</HeaderStat>
         <HeaderStat label="1h Vol">{fmtCompact(t.volume)}</HeaderStat>
         <HeaderStat label="Global fees paid">

@@ -3,13 +3,12 @@ import { ChevronDown, ChevronUp, Star } from 'lucide-react'
 import { HideButton } from '../HideButton'
 import { useHidden } from '../../game/hidden'
 import { memo, useEffect, useRef } from 'react'
-import { useFlash } from '../../hooks/useFlash'
 import { useGame } from '../../game/store'
 import { ChainBadge, QuickBuyButton } from '../chain'
 import type { Token } from '../../types'
 import { winBuys, winSells, winVolume } from '../../game/windows'
 import { fmtAge, fmtCompact, fmtNum, fmtPrice } from '../../utils/format'
-import { EmptyState, HypeMeter, MomentumBar, Pct, RiskBadge, TokenIcon } from '../ui'
+import { EmptyState, FlashNum, HypeMeter, MomentumBar, Pct, RiskBadge, TokenIcon } from '../ui'
 import type { ChangeTf, SortKey } from './filters'
 
 interface Col {
@@ -92,7 +91,6 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
   const select = useGame((s) => s.select)
   const toggleWatch = useGame((s) => s.toggleWatch)
   const hidden = useHidden((s) => s.ids.includes(t.id))
-  const [dir, key] = useFlash(t.price)
   const ref = useRef<HTMLTableRowElement>(null)
   const dead = t.status === 'rugged' || t.status === 'dead'
   const buys = winBuys(t, tf, now)
@@ -141,7 +139,7 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
         </div>
       </td>
       <td className={clsx('border-b border-line/60 px-2 text-right', py)}>
-        <span key={key} className={clsx('num rounded px-1', dir && `flash-${dir}`)}>{fmtPrice(t.price)}</span>
+        <FlashNum value={t.price} format={fmtPrice} className="rounded px-1" />
       </td>
       <td className={clsx('border-b border-line/60 px-2 text-right', py)}>
         <Pct v={t.change[tf]} />

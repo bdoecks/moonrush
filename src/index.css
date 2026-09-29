@@ -56,12 +56,13 @@ body {
 /* Price flashes */
 @keyframes flash-up { 0% { background-color: rgb(25 217 137 / 0.22); } 100% { background-color: transparent; } }
 @keyframes flash-down { 0% { background-color: rgb(255 77 106 / 0.22); } 100% { background-color: transparent; } }
-@keyframes text-up { 0% { color: #7dffc6; text-shadow: 0 0 8px rgb(25 217 137 / 0.7); } 100% { color: inherit; text-shadow: none; } }
-@keyframes text-down { 0% { color: #ff9aab; text-shadow: 0 0 8px rgb(255 77 106 / 0.7); } 100% { color: inherit; text-shadow: none; } }
+/* Live numbers: a soft tint toward green / red that fades out (no boxes, no glow), like Axiom / GMGN. */
+@keyframes text-up { 0% { color: #5ee3a8; } 100% { color: inherit; } }
+@keyframes text-down { 0% { color: #ff8095; } 100% { color: inherit; } }
 .flash-up { animation: flash-up 0.9s ease-out; }
 .flash-down { animation: flash-down 0.9s ease-out; }
-.tflash-up { animation: text-up 0.7s ease-out; }
-.tflash-down { animation: text-down 0.7s ease-out; }
+.tflash-up { animation: text-up 0.9s ease-out; }
+.tflash-down { animation: text-down 0.9s ease-out; }
 
 @keyframes toast-in { from { transform: translateX(110%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes toast-out { to { transform: translateX(110%); opacity: 0; } }

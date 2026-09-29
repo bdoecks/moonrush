@@ -69,6 +69,8 @@ export function PriceChart(o: ChartOptions) {
   const vol = useRef<ISeriesApi<'Histogram'> | null>(null)
   const markers = useRef<TradeBubbles | null>(null)
   const pickSeries = useRef<ISeriesApi<'Histogram'> | null>(null)
+  const glide = useRef<{ raf: number; shown: Candle | null }>({ raf: 0, shown: null })
+  const animations = useGame((s) => s.settings.animations)
   const pick = useTradePick((s) => pickFor(s.pick, tokenId))
   const athLine = useRef<IPriceLine | null>(null)
   const entryLine = useRef<IPriceLine | null>(null)
@@ -151,6 +153,7 @@ export function PriceChart(o: ChartOptions) {
     else (s as ISeriesApi<'Area'>).setData(data.map((d) => ({ time: d.time as UTCTimestamp, value: d.close * k })))
     v.setData(data.map(toVol))
     lastTime.current = data[data.length - 1]?.time ?? 0
+    glide.current.shown = data.length ? { ...data[data.length - 1] } : null
     // Open zoomed in like GMGN / Axiom: the last ~60-90 candles fill the chart (big, readable candles), newest
     // near the right edge. Brand-new coins with only a few candles don't get stretched into giant bars.
     const width = el.current.clientWidth || 600
@@ -351,12 +354,42 @@ export function PriceChart(o: ChartOptions) {
     if (!data?.length || !main.current || !vol.current) return
     let i = data.length - 1
     while (i > 0 && data[i - 1].time >= lastTime.current) i--
+    const put = (c: Candle) => {
+      if (style === 'candles') (main.current as ISeriesApi<'Candlestick'>).update(toBar(c))
+      else (main.current as ISeriesApi<'Area'>).update({ time: c.time as UTCTimestamp, value: c.close * k })
+    }
+    cancelAnimationFrame(glide.current.raf)
     try {
-      for (; i < data.length; i++) {
-        const c = data[i]
-        if (style === 'candles') (main.current as ISeriesApi<'Candlestick'>).update(toBar(c))
-        else (main.current as ISeriesApi<'Area'>).update({ time: c.time as UTCTimestamp, value: c.close * k })
-        vol.current.update(toVol(c))
+      // Finished candles land as they are; the newest one glides there (below).
+      for (; i < data.length - 1; i++) {
+        put(data[i])
+        vol.current.update(toVol(data[i]))
+      }
+      const last = data[data.length - 1]
+      vol.current.update(toVol(last))
+      const prev = glide.current.shown
+      // Axiom / GMGN feel: the live candle moves smoothly to its new price over most of the second instead of
+      // jumping once a tick. Its wick stretches as the price travels.
+      if (animations && prev && prev.time === last.time && prev.close !== last.close) {
+        const from = prev.close
+        const start = performance.now()
+        const ms = 800
+        const step = (now: number) => {
+          const e = 1 - Math.pow(1 - Math.min(1, (now - start) / ms), 3)
+          const close = from + (last.close - from) * e
+          const bar = { ...last, close, high: Math.max(prev.high, close, last.open), low: Math.min(prev.low, close, last.open) }
+          try {
+            put(e >= 1 ? last : bar)
+          } catch {
+            return
+          }
+          glide.current.shown = e >= 1 ? { ...last } : bar
+          if (e < 1) glide.current.raf = requestAnimationFrame(step)
+        }
+        glide.current.raf = requestAnimationFrame(step)
+      } else {
+        put(last)
+        glide.current.shown = { ...last }
       }
     } catch {
       /* out-of-order update after a reload — the next rebuild fixes it */

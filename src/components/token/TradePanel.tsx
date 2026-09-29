@@ -114,7 +114,7 @@ export function TradePanel({ className }: { className?: string }) {
           <TokenIcon token={t} size={16} />
           <span className="font-semibold text-muted">{t.ticker}</span>
           <ChainBadge chain={chain} />
-          <FlashNum value={t.price} className="text-[10px] text-muted">{fmtPrice(t.price)}</FlashNum>
+          <FlashNum value={t.price} format={fmtPrice} className="text-[10px] text-muted" />
         </div>
       </div>
 

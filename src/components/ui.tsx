@@ -1,8 +1,9 @@
 import clsx from 'clsx'
 import { ArrowDown, ArrowUp, X } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { isSafeImageSrc } from '../utils/image'
 import { useFlash } from '../hooks/useFlash'
+import { useTweenText } from '../hooks/useTween'
 import type { RiskLevel, Token } from '../types'
 import { fmtPct } from '../utils/format'
 
@@ -44,13 +45,36 @@ export function Pct({ v, className, arrow = false, digits = 1 }: { v: number; cl
 }
 
 /** A number that flashes green/red when it changes. */
-export function FlashNum({ value, children, className, bg = false }: { value: number; children: ReactNode; className?: string; bg?: boolean }) {
+/**
+ * A live number. With `format`, it glides to each new value (Axiom / GMGN feel) with a soft green / red tint;
+ * without it, `children` are shown as given (just the tint).
+ */
+export function FlashNum({ value, children, className, format }: { value: number; children?: ReactNode; className?: string; bg?: boolean; format?: (n: number) => string }) {
+  if (format) return <GlideNum value={value} format={format} className={className} />
+  return <TintNum value={value} className={className}>{children}</TintNum>
+}
+
+function TintNum({ value, children, className }: { value: number; children: ReactNode; className?: string }) {
   const [dir, key] = useFlash(value)
-  return (
-    <span key={key} className={clsx('num', dir && (bg ? `flash-${dir}` : `tflash-${dir}`), className)}>
-      {children}
-    </span>
-  )
+  return <span key={key} className={clsx('num', dir && `tflash-${dir}`, className)}>{children}</span>
+}
+
+/** Glides to each new value; the soft tint is restarted by toggling classes on the same element (no remount). */
+function GlideNum({ value, format, className }: { value: number; format: (n: number) => string; className?: string }) {
+  const ref = useTweenText<HTMLSpanElement>(value, format)
+  const prev = useRef(value)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || prev.current === value) return
+    const cls = value > prev.current ? 'tflash-up' : 'tflash-down'
+    prev.current = value
+    el.classList.remove('tflash-up', 'tflash-down')
+    void el.offsetWidth // restart the CSS animation
+    el.classList.add(cls)
+  }, [value, ref])
+  // React renders the first text only; after that the glide writes it, so a re-render can't snap it back mid-glide.
+  const [initial] = useState(() => format(value))
+  return <span ref={ref} className={clsx('num', className)}>{initial}</span>
 }
 
 const RISK_STYLE: Record<RiskLevel, string> = {

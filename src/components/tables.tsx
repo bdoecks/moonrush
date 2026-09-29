@@ -50,7 +50,7 @@ export function PositionsTable() {
               </td>
               <td className={clsx(td, 'text-right num')}>{fmtNum(p.qty)}</td>
               <td className={clsx(td, 'text-right num text-muted')}>{fmtPrice(p.avgEntry)}</td>
-              <td className={clsx(td, 'text-right')}><FlashNum value={price}>{fmtPrice(price)}</FlashNum></td>
+              <td className={clsx(td, 'text-right')}><FlashNum value={price} format={fmtPrice} /></td>
               <td className={clsx(td, 'text-right num font-semibold')}>{fmtUsd(value)}</td>
               <td className={clsx(td, 'text-right num', toneClass(pnl))}>{pnl >= 0 ? '+' : ''}{fmtUsd(pnl)}</td>
               <td className={clsx(td, 'text-right')}><span className={clsx('num rounded px-1 font-bold', pct >= 0 ? 'bg-up/10 text-up' : 'bg-down/10 text-down')}>{fmtPct(pct)}</span></td>
@@ -93,7 +93,7 @@ export function WatchlistTable() {
         {list.map((t) => (
           <tr key={t.id} onClick={() => select(t.id)} className="cursor-pointer hover:bg-panel2">
             <td className={td}><div className="flex items-center gap-2"><TokenIcon token={t} size={22} /><span className="font-bold">${t.ticker}</span>{t.status === 'rugged' && <span className="text-[9px] font-bold text-down">RUGGED</span>}</div></td>
-            <td className={clsx(td, 'text-right')}><FlashNum value={t.price}>{fmtPrice(t.price)}</FlashNum></td>
+            <td className={clsx(td, 'text-right')}><FlashNum value={t.price} format={fmtPrice} /></td>
             <td className={clsx(td, 'text-right')}><Pct v={t.change['5m']} /></td>
             <td className={clsx(td, 'text-right num')}>{fmtCompact(t.mcap)}</td>
             <td className={td}><div className="flex justify-end"><MomentumBar score={t.momentumScore} /></div></td>
