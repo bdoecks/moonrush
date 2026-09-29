@@ -1,6 +1,8 @@
 import clsx from 'clsx'
 import { ChevronDown, Search, X } from 'lucide-react'
 import { QuickSlotPicker } from '../components/chain'
+import { HiddenToggle } from '../components/HideButton'
+import { useVisible } from '../game/hidden'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { applyFilter, FILTERS, sortValue, type ChangeTf, type FilterId, type SortKey } from '../components/discover/filters'
 import { TokenTable } from '../components/discover/TokenTable'
@@ -111,6 +113,8 @@ export function DiscoverView() {
     return list
   }, [tokens, filter, tf, now, watchlist, q, sortKey, sortDir])
 
+  const visibleRows = useVisible(rows) // coins you hid drop out (unless "Hidden" is on)
+
   const counts = useMemo(() => {
     const c = {} as Record<FilterId, number>
     for (const f of FILTERS) c[f.id] = applyFilter(tokens, f.id, tf, now, watchlist).length
@@ -118,10 +122,10 @@ export function DiscoverView() {
   }, [tokens, tf, now, watchlist])
 
   // Arrow keys move the row cursor, Enter opens it.
-  const rowsRef = useRef(rows)
+  const rowsRef = useRef(visibleRows)
   const cursorRef = useRef(cursor)
   useEffect(() => {
-    rowsRef.current = rows
+    rowsRef.current = visibleRows
     cursorRef.current = cursor
   }, [rows, cursor])
   useEffect(() => {
@@ -195,7 +199,7 @@ export function DiscoverView() {
           </button>
         )}
         <Segmented value={tf} onChange={setTf} options={(['1m', '5m', '1h', '24h'] as ChangeTf[]).map((x) => ({ value: x, label: x }))} />
-        <div className="ml-auto"><QuickSlotPicker /></div>
+        <div className="ml-auto flex items-center gap-1.5"><HiddenToggle /><QuickSlotPicker /></div>
       </div>
 
       <div className="no-scrollbar flex gap-1 overflow-x-auto border-b border-line bg-panel px-2 py-1.5">
@@ -220,7 +224,7 @@ export function DiscoverView() {
       </div>
 
       <div className="min-h-0 flex-1">
-        <TokenTable tokens={rows} tf={tf} sortKey={sortKey} sortDir={sortDir} onSort={onSort} cursor={cursor} />
+        <TokenTable tokens={visibleRows} tf={tf} sortKey={sortKey} sortDir={sortDir} onSort={onSort} cursor={cursor} />
       </div>
     </div>
   )

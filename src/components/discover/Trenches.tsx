@@ -2,6 +2,8 @@ import clsx from 'clsx'
 import { fakeAddress } from '../../utils/address'
 import { CHAINS } from '../../data/chains'
 import { ChainBadge, QuickBuyButton, QuickSlotPicker } from '../chain'
+import { HideButton } from '../HideButton'
+import { useHidden, useVisible } from '../../game/hidden'
 import { PadBadge } from '../pad'
 import { LAUNCHPADS } from '../../data/launchpads'
 import { AtSign, Boxes, ChefHat, Crosshair, Eye, Ghost, Globe, GraduationCap, Search, Send, Star, UserRound, Users } from 'lucide-react'
@@ -48,7 +50,8 @@ export function Trenches({ tokens }: { tokens: Token[] }) {
   )
 }
 
-function Column({ col, list, now, visible }: { col: (typeof COLS)[number]; list: Token[]; now: number; visible: boolean }) {
+function Column({ col, list: all, now, visible }: { col: (typeof COLS)[number]; list: Token[]; now: number; visible: boolean }) {
+  const list = useVisible(all) // coins you hid drop out (unless "Hidden" is on)
   const [q, setQ] = useState('')
   const chain = useGame((s) => s.chainFilter)
   // Each chain view (ALL, SOL, BNB, ETH) keeps its own filters per column.
@@ -131,6 +134,7 @@ export const Card = memo(function Card({ t, now, preview }: { t: Token; now: num
   const toggleWatch = useGame((s) => s.toggleWatch)
   const watched = useGame((s) => s.watchlist.includes(t.id))
   const held = useGame((s) => !!s.portfolio.positions[t.id])
+  const hidden = useHidden((s) => s.ids.includes(t.id))
   const [dir, key] = useFlash(t.mcap)
   const dead = t.status === 'rugged' || t.status === 'dead'
   const age = now - t.createdAt
@@ -142,7 +146,7 @@ export const Card = memo(function Card({ t, now, preview }: { t: Token; now: num
   return (
     <div
       onClick={preview ? undefined : () => select(t.id)}
-      className={clsx('group relative border-b border-line/70 px-2.5 py-2 transition-colors', !preview && 'cursor-pointer hover:bg-panel2 slide-in', dead && 'opacity-50')}
+      className={clsx('group relative border-b border-line/70 px-2.5 py-2 transition-colors', !preview && 'cursor-pointer hover:bg-panel2 slide-in', (dead || hidden) && 'opacity-50')}
     >
       <div className="flex gap-2.5">
         {/* Avatar + address */}
@@ -152,6 +156,7 @@ export const Card = memo(function Card({ t, now, preview }: { t: Token; now: num
             <span className="absolute -bottom-1 -right-1 rounded-[5px] ring-2 ring-bg" title={`${LAUNCHPADS[t.pad]?.name} → ${LAUNCHPADS[t.pad]?.dex}`}>
               <PadBadge pad={t.pad} size={17} />
             </span>
+            {!preview && <HideButton id={t.id} ticker={t.ticker} className={clsx('absolute -left-2 -top-2 bg-panel p-0.5 ring-1 ring-line2', !hidden && 'md:opacity-0 md:group-hover:opacity-100')} />}
           </div>
           <span className="num max-w-full truncate text-[9px] text-dim">{fakeAddress(t.id, t.chain)}</span>
         </div>

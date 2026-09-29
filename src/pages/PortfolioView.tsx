@@ -1,6 +1,8 @@
 import clsx from 'clsx'
 import { Check as CheckIcon, Coins, Copy, Search, Share2, X } from 'lucide-react'
 import { FundWalletsModal } from '../components/FundWallets'
+import { HiddenToggle, HideButton } from '../components/HideButton'
+import { useHidden } from '../game/hidden'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ChainBadge, WalletChip } from '../components/chain'
@@ -646,15 +648,18 @@ function Holding({ rows, equity, m, positions, scope }: { rows: TokenPnl[]; equi
   const sort = useSort<HoldKey>('value')
   const [hideSmall, setHideSmall] = useState(() => load<boolean>('pfHideSmall') ?? false)
   const [hideDead, setHideDead] = useState(false)
+  const hiddenIds = useHidden((s) => s.ids)
+  const showHidden = useHidden((s) => s.show)
   if (!rows.length) return <EmptyState icon="🎒" title="No open positions" hint="Buy something from Discover or Trenches" />
   const held = (r: TokenPnl) => tick - (positions[r.tokenId]?.openedAt ?? r.firstTick)
-  const list = rows.filter((r) => f.pass(r.ticker, r.chain) && (!hideSmall || r.value >= 1) && (!hideDead || (r.t && r.t.status !== 'rugged' && r.t.status !== 'dead')))
+  const list = rows.filter((r) => f.pass(r.ticker, r.chain) && (!hideSmall || r.value >= 1) && (!hideDead || (r.t && r.t.status !== 'rugged' && r.t.status !== 'dead')) && (showHidden || !hiddenIds.includes(r.tokenId)))
   const sorted = sort.by(list, (r, k) => (k === 'value' || k === 'share' ? r.value : k === 'unrealized' ? r.unrealized : k === 'realized' ? r.realized : k === 'total' ? r.total : held(r)))
   return (
     <div>
       <TableTools f={f} id="pf-hold-search">
         <Check on={hideSmall} onChange={(v) => { setHideSmall(v); save('pfHideSmall', v) }} label="Hide small (<$1)" />
         <Check on={hideDead} onChange={setHideDead} label="Hide rugged" />
+        <HiddenToggle />
         <span className="ml-auto num text-[11px] text-dim">{sorted.length} of {rows.length}</span>
       </TableTools>
       {sorted.length === 0 ? <EmptyState icon="🔎" title="No holdings match these filters" /> : (
@@ -678,8 +683,8 @@ function Holding({ rows, equity, m, positions, scope }: { rows: TokenPnl[]; equi
           const pos = positions[r.tokenId]
           const share = equity > 0 ? r.value / equity : 0
           return (
-            <tr key={r.tokenId} className="hover:bg-panel2">
-              <td className={td}><TokenCell r={r} /></td>
+            <tr key={r.tokenId} className={clsx('group hover:bg-panel2', hiddenIds.includes(r.tokenId) && 'opacity-50')}>
+              <td className={td}><span className="flex items-center gap-1"><TokenCell r={r} /><HideButton id={r.tokenId} ticker={r.ticker} className={clsx(!hiddenIds.includes(r.tokenId) && 'opacity-0 group-hover:opacity-100')} /></span></td>
               <td className={clsx(td, 'text-right num')}><div className="font-semibold">{m(r.value, r.chain)}</div><div className="text-[10px] text-dim">{fmtNum(r.qty)} · {((r.qty / SUPPLY) * 100).toFixed(2)}% supply</div></td>
               <td className={clsx(td, 'text-right')}>
                 <div className="num">{(share * 100).toFixed(1)}%</div>
@@ -714,9 +719,11 @@ function RecentPnl({ rows, m }: { rows: TokenPnl[]; m: Money }) {
   const f = useTableFilter()
   const sort = useSort<PnlKey>('last')
   const [status, setStatus] = useState<'all' | 'open' | 'closed'>('all')
+  const hiddenIds = useHidden((s) => s.ids)
+  const showHidden = useHidden((s) => s.show)
   if (!rows.length) return <EmptyState icon="📊" title="No trades in this period" />
   const held = (r: TokenPnl) => (r.qty > 0 ? tick : r.lastTick) - r.firstTick
-  const list = rows.filter((r) => f.pass(r.ticker, r.chain) && (status === 'all' || (status === 'open' ? r.qty > 0 : r.qty <= 0)))
+  const list = rows.filter((r) => f.pass(r.ticker, r.chain) && (status === 'all' || (status === 'open' ? r.qty > 0 : r.qty <= 0)) && (showHidden || !hiddenIds.includes(r.tokenId)))
   const sorted = sort.by(list, (r, k) =>
     k === 'last' ? r.lastTick : k === 'unrealized' ? r.unrealized : k === 'realized' ? r.realized : k === 'total' ? r.total : k === 'pct' ? r.totalPct : k === 'bought' ? r.bought : k === 'txs' ? r.buys + r.sells : held(r),
   )
@@ -724,6 +731,7 @@ function RecentPnl({ rows, m }: { rows: TokenPnl[]; m: Money }) {
     <div>
       <TableTools f={f} id="pf-pnl-search">
         <Segmented value={status} onChange={setStatus} className="ml-1" options={[{ value: 'all', label: 'All' }, { value: 'open', label: 'Holding' }, { value: 'closed', label: 'Sold all' }]} />
+        <HiddenToggle />
         <span className="ml-auto num text-[11px] text-dim">{sorted.length} of {rows.length}</span>
       </TableTools>
       {sorted.length === 0 ? <EmptyState icon="🔎" title="No tokens match these filters" /> : (
@@ -745,8 +753,8 @@ function RecentPnl({ rows, m }: { rows: TokenPnl[]; m: Money }) {
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <tr key={r.tokenId} className="hover:bg-panel2">
-              <td className={td}><TokenCell r={r} /></td>
+            <tr key={r.tokenId} className={clsx('group hover:bg-panel2', hiddenIds.includes(r.tokenId) && 'opacity-50')}>
+              <td className={td}><span className="flex items-center gap-1"><TokenCell r={r} /><HideButton id={r.tokenId} ticker={r.ticker} className={clsx(!hiddenIds.includes(r.tokenId) && 'opacity-0 group-hover:opacity-100')} /></span></td>
               <td className={clsx(td, 'text-right num text-muted')}>{fmtAge((tick - r.lastTick) * SIM_SEC_PER_TICK)}</td>
               <td className={clsx(td, 'text-right num', toneClass(r.unrealized))}>{r.qty > 0 ? m(r.unrealized, r.chain, true) : '--'}</td>
               <td className={clsx(td, 'text-right num', toneClass(r.realized))}>{r.sells ? m(r.realized, r.chain, true, r.realizedN) : '--'}</td>

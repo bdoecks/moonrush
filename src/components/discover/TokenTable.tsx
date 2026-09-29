@@ -1,5 +1,7 @@
 import clsx from 'clsx'
 import { ChevronDown, ChevronUp, Star } from 'lucide-react'
+import { HideButton } from '../HideButton'
+import { useHidden } from '../../game/hidden'
 import { memo, useEffect, useRef } from 'react'
 import { useFlash } from '../../hooks/useFlash'
 import { useGame } from '../../game/store'
@@ -89,6 +91,7 @@ export function TokenTable({ tokens, tf, sortKey, sortDir, onSort, cursor }: Pro
 const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { t: Token; tf: ChangeTf; now: number; watched: boolean; held: boolean; active: boolean; compact: boolean }) {
   const select = useGame((s) => s.select)
   const toggleWatch = useGame((s) => s.toggleWatch)
+  const hidden = useHidden((s) => s.ids.includes(t.id))
   const [dir, key] = useFlash(t.price)
   const ref = useRef<HTMLTableRowElement>(null)
   const dead = t.status === 'rugged' || t.status === 'dead'
@@ -106,7 +109,7 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
     <tr
       ref={ref}
       onClick={() => select(t.id)}
-      className={clsx('group cursor-pointer transition-colors', active ? 'bg-raise' : 'hover:bg-panel2', dead && 'opacity-55')}
+      className={clsx('group cursor-pointer transition-colors', active ? 'bg-raise' : 'hover:bg-panel2', (dead || hidden) && 'opacity-55')}
     >
       <td className={clsx('sticky left-0 z-[1] border-b border-line/60 pl-2', active ? 'bg-raise' : 'bg-bg group-hover:bg-panel2')}>
         <button
@@ -134,6 +137,7 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
             </div>
             <div className="truncate text-[10px] text-dim max-w-[150px]">{t.name}</div>
           </div>
+          <HideButton id={t.id} ticker={t.ticker} className={clsx('ml-auto', !hidden && 'md:opacity-0 md:group-hover:opacity-100')} />
         </div>
       </td>
       <td className={clsx('border-b border-line/60 px-2 text-right', py)}>

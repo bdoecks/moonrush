@@ -115,6 +115,9 @@ export function Sidebar() {
 }
 
 // ─── Movers ticker strip ─────────────────────────────────────────────────────
+/** The scrolling "MOVERS 5M" coin % marquee: switched off for now (the chain switcher bar stays). */
+const SHOW_MOVERS = false
+
 export function TickerStrip() {
   const allTokens = useGame((s) => s.market.tokens)
   const chainFilter = useGame((s) => s.chainFilter)
@@ -137,8 +140,8 @@ export function TickerStrip() {
       </div>
       <div className="flex h-full shrink-0 items-center border-r border-line px-2"><ChainSwitcher /></div>
       <div className="flex h-full shrink-0 items-center border-r border-line px-1.5 xl:hidden"><GlobalSearch small className="w-40 transition-[width] focus-within:w-64 sm:w-48" /></div>
-      <div className="hidden h-full items-center border-r border-line px-2 text-[9px] font-bold tracking-[0.2em] text-dim lg:flex">MOVERS 5M</div>
-      <div className="relative min-w-0 flex-1 overflow-hidden">
+      {SHOW_MOVERS && <div className="hidden h-full items-center border-r border-line px-2 text-[9px] font-bold tracking-[0.2em] text-dim lg:flex">MOVERS 5M</div>}
+      {SHOW_MOVERS && <div className="relative min-w-0 flex-1 overflow-hidden">
         <div className="marquee flex w-max gap-5 px-3">
           {[...items, ...items].map((t, i) => (
             <button key={`${t.id}-${i}`} onClick={() => select(t.id)} className="flex items-center gap-1.5 text-[11px] hover:text-accent">
@@ -148,7 +151,7 @@ export function TickerStrip() {
             </button>
           ))}
         </div>
-      </div>
+      </div>}
     </div>
   )
 }
