@@ -3,6 +3,7 @@ import { Check as CheckIcon, Coins, Copy, Search, Share2, X } from 'lucide-react
 import { FundWalletsModal } from '../components/FundWallets'
 import { HiddenToggle, HideButton } from '../components/HideButton'
 import { useHidden } from '../game/hidden'
+import { tradePx } from '../game/chainPnl'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ChainBadge, WalletChip } from '../components/chain'
@@ -30,12 +31,6 @@ type Unit = 'usd' | 'native'
  *  themselves); without it the USD figure is converted at today's coin price. */
 type Money = (usd: number, chain?: Chain, signed?: boolean, nat?: number) => string
 
-/** The chain coin's USD price when a trade happened, from what it actually paid or received. */
-function tradePx(tr: Trade): number | undefined {
-  if (!tr.native) return undefined
-  const usd = tr.side === 'buy' ? tr.value + tr.fee + (tr.gas ?? 0) : tr.value - tr.fee - (tr.gas ?? 0)
-  return usd > 0 ? usd / tr.native : undefined
-}
 
 /** Per-token rollup of every fill in the round. */
 interface TokenPnl {

@@ -1,8 +1,8 @@
 import clsx from 'clsx'
 import { GripHorizontal, Palette, RotateCcw, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { CHAINS } from '../data/chains'
-import { useValuation } from '../hooks/useDerived'
+import { useTokenMap, useValuation } from '../hooks/useDerived'
+import { chainView } from '../game/chainPnl'
 import { useGame } from '../game/store'
 import { fmtPct, fmtUsd, toneClass } from '../utils/format'
 import { load, save } from '../utils/storage'
@@ -23,6 +23,10 @@ interface Baseline {
   realized: number
   tick: number
   trades: number
+  // In SOL, from your Solana trades' own coin amounts (so it doesn't drift with SOL's price).
+  solRealized?: number
+  solUnrealized?: number
+  solSpent?: number
 }
 
 const THEMES = [
@@ -43,7 +47,9 @@ function Card({ onClose }: { onClose: () => void }) {
   const v = useValuation()
   const p = v.portfolio
   const tick = useGame((s) => s.market.tick)
-  const sol = useGame((s) => s.market.native?.sol?.price ?? CHAINS.sol.basePrice)
+  const market = useGame((s) => s.market)
+  const map = useTokenMap()
+  const cv = chainView(p, market, 'sol', map)
   const [pos, setPos] = useState(() => clampPos(load<{ x: number; y: number }>('pnlPos') ?? { x: window.innerWidth - W - 24, y: 120 }))
   const [prefs, setPrefsState] = useState<Prefs>(() => ({ unit: 'usd', period: 'session', theme: 0, ...(load<Prefs>('pnlPrefs') ?? {}) }))
   const setPrefs = (patch: Partial<Prefs>) => {
@@ -55,14 +61,14 @@ function Card({ onClose }: { onClose: () => void }) {
   const [stored, setBase] = useState<Baseline>(() => {
     const saved = load<Baseline>('pnlSession')
     if (saved) return saved
-    const b = { equity: v.equity, realized: p.realized, tick, trades: p.trades.length }
+    const b = { equity: v.equity, realized: p.realized, tick, trades: p.trades.length, solRealized: cv.realized, solUnrealized: cv.unrealized, solSpent: cv.spent }
     save('pnlSession', b)
     return b
   })
   // A new round since the session started (ticks or trades went backwards): the session is the whole round.
-  const base: Baseline = stored.tick > tick || stored.trades > p.trades.length ? { equity: p.startBalance, realized: 0, tick: 0, trades: 0 } : stored
+  const base: Baseline = stored.tick > tick || stored.trades > p.trades.length ? { equity: p.startBalance, realized: 0, tick: 0, trades: 0, solRealized: 0, solUnrealized: 0, solSpent: 0 } : stored
   const reset = () => {
-    const b = { equity: v.equity, realized: p.realized, tick, trades: p.trades.length }
+    const b = { equity: v.equity, realized: p.realized, tick, trades: p.trades.length, solRealized: cv.realized, solUnrealized: cv.unrealized, solSpent: cv.spent }
     setBase(b)
     save('pnlSession', b)
   }
@@ -74,16 +80,22 @@ function Card({ onClose }: { onClose: () => void }) {
   }, [])
 
   const session = prefs.period === 'session'
-  const pnl = session ? v.equity - base.equity : v.stats.totalPnl
-  const pct = session ? (base.equity > 0 ? pnl / base.equity : 0) : v.stats.totalPnlPct
-  const realized = session ? p.realized - base.realized : p.realized
+  const inSol = prefs.unit === 'sol'
+  // SOL mode: your Solana wallet and trades in SOL (GMGN-style), not dollars divided by today's SOL price.
+  const solPnl = session ? cv.realized - (base.solRealized ?? 0) + cv.unrealized - (base.solUnrealized ?? 0) : cv.pnl
+  const solSpent = session ? cv.spent - (base.solSpent ?? 0) : cv.spent
+  const pnl = inSol ? solPnl : session ? v.equity - base.equity : v.stats.totalPnl
+  const pct = inSol ? (solSpent > 0 ? solPnl / solSpent : 0) : session ? (base.equity > 0 ? pnl / base.equity : 0) : v.stats.totalPnlPct
+  const realized = inSol ? (session ? cv.realized - (base.solRealized ?? 0) : cv.realized) : session ? p.realized - base.realized : p.realized
+  const unrealized = inSol ? cv.unrealized : v.unrealized
   const sinceTick = session ? base.tick : -Infinity
   const trades = session ? p.trades.slice(0, Math.max(0, p.trades.length - base.trades)) : p.trades
   const sells = trades.filter((t) => t.side === 'sell')
   const wins = sells.filter((t) => (t.pnl ?? 0) > 0).length
-  const money = (usd: number, signed = false) => {
-    const sign = signed ? (usd >= 0 ? '+' : '-') : ''
-    return prefs.unit === 'usd' ? `${sign}${fmtUsd(Math.abs(usd))}` : `${sign}${(Math.abs(usd) / sol).toFixed(Math.abs(usd) / sol >= 100 ? 1 : 3)} SOL`
+  // Amounts are USD, or SOL already (SOL mode never converts dollars at today's price).
+  const money = (n: number, signed = false) => {
+    const sign = signed ? (n >= 0 ? '+' : '-') : ''
+    return inSol ? `${sign}${Math.abs(n).toFixed(Math.abs(n) >= 100 ? 1 : 3)} SOL` : `${sign}${fmtUsd(Math.abs(n))}`
   }
   const points = useMemo(() => {
     const h = p.equityHistory.filter((e) => e.tick >= sinceTick)
@@ -134,9 +146,9 @@ function Card({ onClose }: { onClose: () => void }) {
           </svg>
         )}
         <div className="mt-2 grid grid-cols-3 gap-1 text-[10px]">
-          <div><div className="text-dim">Balance</div><div className="num text-ink">{money(v.equity)}</div></div>
+          <div><div className="text-dim">Balance</div><div className="num text-ink">{money(inSol ? cv.total : v.equity)}</div></div>
           <div><div className="text-dim">Realized</div><div className={clsx('num', toneClass(realized))}>{money(realized, true)}</div></div>
-          <div className="text-right"><div className="text-dim">Unrealized</div><div className={clsx('num', toneClass(v.unrealized))}>{money(v.unrealized, true)}</div></div>
+          <div className="text-right"><div className="text-dim">Unrealized</div><div className={clsx('num', toneClass(unrealized))}>{money(unrealized, true)}</div></div>
         </div>
         <div className="mt-1.5 flex items-center justify-between text-[10px] text-dim">
           <span className="num">{trades.length} txs · {sells.length ? `${Math.round((wins / sells.length) * 100)}% win` : 'no sells'}</span>

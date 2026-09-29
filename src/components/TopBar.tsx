@@ -5,10 +5,10 @@ import { cashbackOf, pendingUsd } from '../game/rewardsEngine'
 import type { Chain } from '../types'
 import { save } from '../utils/storage'
 import { useDockPrefs } from './tracker/TrackerDock'
-import { useValuation } from '../hooks/useDerived'
+import { useTokenMap, useValuation } from '../hooks/useDerived'
+import { chainView } from '../game/chainPnl'
 import { levelFromXp, MODES, titleFor } from '../game/progression'
 import { selectSpeed, useGame, type View } from '../game/store'
-import { nativePrice } from '../game/tradingEngine'
 import { fmtClock, fmtUsd, toneClass } from '../utils/format'
 import { FlashNum } from './ui'
 import { WalletChip } from './chain'
@@ -149,7 +149,8 @@ function CashbackChip() {
       <Gift size={13} className="text-up" />
       <span>
         <span className="block text-[9px] uppercase leading-none tracking-wider text-dim">{cb.auto === 'off' ? 'Cashback' : 'Cashback · auto'}</span>
-        <span className="num block text-[12px] font-semibold leading-tight text-up">{fmtUsd(usd, usd < 10 ? 4 : 2)}</span>
+        {/* Claimable cashback is shown in the coins you'll get (like GMGN / Axiom), so it only changes when you earn more. */}
+        <span className="num block text-[12px] font-semibold leading-tight text-up">{cb.auto !== 'off' ? fmtUsd(usd, usd < 10 ? 4 : 2) : has.length ? `${fmtNative(cb.pending[has[0]], has[0])}${has.length > 1 ? ` +${has.length - 1}` : ''}` : fmtNative(0, 'sol')}</span>
       </span>
       {has.length > 0 && (
         <span className="flex -space-x-1">
@@ -172,11 +173,14 @@ export function TopBar() {
   // Show the top-bar numbers in USD or in a chain coin (Settings, or tap "Portfolio" to cycle).
   const unit = useGame((s) => s.settings.portfolioUnit ?? 'usd')
   const market = useGame((s) => s.market)
-  const money = (usd: number, signed = false) => {
-    const sign = signed && usd >= 0 ? '+' : ''
-    if (unit === 'usd') return sign + fmtUsd(usd)
-    return sign + fmtNative(usd / nativePrice(market, unit), unit)
-  }
+  // In a chain coin (GMGN-style): your wallet on that chain, and P&L from the coin your trades actually paid and got
+  // back, so nothing moves with the coin's price unless you still hold a bag.
+  const map = useTokenMap()
+  const cv = unit === 'usd' ? null : chainView(v.portfolio, market, unit, map)
+  const coin = (n: number, signed = false) => (signed && n >= 0 ? '+' : '') + fmtNative(n, unit as Chain)
+  const money = (usd: number, signed = false) => (signed && usd >= 0 ? '+' : '') + fmtUsd(usd)
+  const pnlPct = cv ? (cv.spent > 0 ? cv.pnl / cv.spent : 0) : v.stats.totalPnlPct
+  const pnlTone = cv ? cv.pnl : pnl
   const cycleUnit = () => updateSettings({ portfolioUnit: UNITS[(UNITS.indexOf(unit) + 1) % UNITS.length] })
   const rewardReady = useGame((s) => s.rewards.commissionPending >= 0.01 || s.rewards.checkIn.lastDate !== new Date().toDateString())
 
@@ -194,15 +198,15 @@ export function TopBar() {
       <div className="ml-auto lg:ml-3 flex items-center gap-4 whitespace-nowrap">
         <div className="text-right">
           <button onClick={cycleUnit} className="block w-full text-right text-[9px] uppercase tracking-wider text-dim hover:text-ink" title="Show in USD / SOL / BNB / ETH">Portfolio · {unit === 'usd' ? 'USD' : CHAINS[unit].native}</button>
-          <FlashNum value={Math.round(v.equity)} className="text-[14px] font-bold">{money(v.equity)}</FlashNum>
-          <div className={clsx('num text-[10px] leading-none sm:hidden', toneClass(pnl))}>
-            {money(pnl, true)} ({pnl >= 0 ? '+' : ''}{(v.stats.totalPnlPct * 100).toFixed(2)}%)
+          <FlashNum value={cv ? Math.round(cv.total * 1000) : Math.round(v.equity)} className="text-[14px] font-bold"><span title={cv ? `Your ${CHAINS[unit as Chain].native} wallet plus your ${CHAINS[unit as Chain].name} coins. USD bank (${fmtUsd(v.portfolio.cash)}) not included.` : undefined}>{cv ? coin(cv.total) : money(v.equity)}</span></FlashNum>
+          <div className={clsx('num text-[10px] leading-none sm:hidden', toneClass(pnlTone))}>
+            {cv ? coin(cv.pnl, true) : money(pnl, true)} ({pnlTone >= 0 ? '+' : ''}{(pnlPct * 100).toFixed(2)}%)
           </div>
         </div>
         <div className="hidden sm:block text-right">
           <div className="text-[9px] uppercase tracking-wider text-dim">Total P&amp;L</div>
-          <div className={clsx('num text-[12px] font-semibold', toneClass(pnl))}>
-            {money(pnl, true)} <span className="text-[10px] opacity-80">({pnl >= 0 ? '+' : ''}{(v.stats.totalPnlPct * 100).toFixed(2)}%)</span>
+          <div className={clsx('num text-[12px] font-semibold', toneClass(pnlTone))}>
+            {cv ? coin(cv.pnl, true) : money(pnl, true)} <span className="text-[10px] opacity-80">({pnlTone >= 0 ? '+' : ''}{(pnlPct * 100).toFixed(2)}%)</span>
           </div>
         </div>
         <WalletSelector compact className="hidden sm:block" />
@@ -211,11 +215,11 @@ export function TopBar() {
         </div>
         <div className="hidden xl:block text-right">
           <div className="text-[9px] uppercase tracking-wider text-dim">Unrealized</div>
-          <div className={clsx('num text-[12px]', toneClass(v.unrealized))}>{money(v.unrealized, true)}</div>
+          <div className={clsx('num text-[12px]', toneClass(cv ? cv.unrealized : v.unrealized))}>{cv ? coin(cv.unrealized, true) : money(v.unrealized, true)}</div>
         </div>
         <div className="hidden xl:block text-right">
           <div className="text-[9px] uppercase tracking-wider text-dim">Realized</div>
-          <div className={clsx('num text-[12px]', toneClass(v.portfolio.realized))}>{money(v.portfolio.realized, true)}</div>
+          <div className={clsx('num text-[12px]', toneClass(cv ? cv.realized : v.portfolio.realized))}>{cv ? coin(cv.realized, true) : money(v.portfolio.realized, true)}</div>
         </div>
         <CashbackChip />
         <AdminButton />
