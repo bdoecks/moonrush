@@ -12,6 +12,7 @@ import { supabase } from '../net/supabase'
 import type { Archetype, Chain } from '../types'
 import { fmtAge, fmtCompact, fmtUsd } from '../utils/format'
 import { EmptyState, Toggle } from '../components/ui'
+import { GiveBox } from '../components/GiveBox'
 
 type Tab = 'rooms' | 'market' | 'accounts' | 'switches'
 /** Admin panel: only shows for accounts on the admin list (the server and database enforce it too). */
@@ -305,6 +306,10 @@ function Accounts() {
 
   const shown = list.filter((a) => !q || a.username.toLowerCase().includes(q.toLowerCase()))
   return (
+    <div className="space-y-3">
+    <Card title="🎁 Give currency">
+      <GiveBox />
+    </Card>
     <Card title={<>👤 {list.length} accounts</>} right={<button onClick={() => void load()} className={clsx(btn, 'flex items-center gap-1 border-line2 text-muted')}><RefreshCw size={10} /> Refresh</button>}>
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search username" className="mb-2 h-8 w-full rounded-md border border-line2 bg-bg px-2 text-[12px] outline-none focus:border-warn/60" />
       <div className="overflow-x-auto">
@@ -337,6 +342,7 @@ function Accounts() {
       </div>
       <p className="mt-2 text-[10px] text-dim">XP, level and resets reach the player's game within a minute (or next time they open it). Banned players can still play solo but can't join rooms.</p>
     </Card>
+    </div>
   )
 }
 

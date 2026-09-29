@@ -8,6 +8,7 @@ import { useGame } from '../game/store'
 import type { Profile, RewardsState, Settings } from '../types'
 import { load, save } from '../utils/storage'
 import { supabase } from './supabase'
+import { giveLocal, type GiftAsset } from '../game/gifts'
 import { USERNAME_RE } from './supabaseConfig'
 
 export interface AccountProfile {
@@ -222,7 +223,8 @@ function watchStore() {
   })
   window.addEventListener('pagehide', () => void flushSync())
   // Admin edits reach you mid-session too.
-  if (!revTimer) revTimer = setInterval(() => void pullAdminEdit(), 60_000)
+  if (!revTimer) revTimer = setInterval(() => void (pullAdminEdit(), pullGifts()), 60_000)
+  void pullGifts()
   document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && void flushSync())
 }
 
@@ -235,6 +237,15 @@ function scheduleSync() {
 }
 
 /** Upload your progress and refresh your public card (level, season points). */
+/** Claim currency an admin sent you (only while a round is running: it goes into the round). */
+export async function pullGifts() {
+  const a = useAccount.getState()
+  if (!supabase || !a.userId || useGame.getState().runStatus !== 'running') return
+  const { data, error } = await supabase.rpc('claim_gifts')
+  if (error || !Array.isArray(data)) return
+  for (const g of data as { asset: GiftAsset; amount: number | string }[]) giveLocal(g.asset, Number(g.amount))
+}
+
 /** Take an admin's edit of your save if there is one. Returns true if it did. */
 async function pullAdminEdit(): Promise<boolean> {
   const uid = useAccount.getState().userId

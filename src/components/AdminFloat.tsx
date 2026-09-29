@@ -13,6 +13,7 @@ import type { Archetype, Chain } from '../types'
 import { fmtCompact, fmtUsd } from '../utils/format'
 import { load, save } from '../utils/storage'
 import { Toggle } from './ui'
+import { GiveBox } from './GiveBox'
 
 const W = 320
 const clampPos = (p: { x: number; y: number }) => ({
@@ -20,7 +21,7 @@ const clampPos = (p: { x: number; y: number }) => ({
   y: Math.min(Math.max(56, p.y), Math.max(56, window.innerHeight - 200)),
 })
 
-type Tab = 'coin' | 'room' | 'switches'
+type Tab = 'coin' | 'give' | 'room' | 'switches'
 
 /** Whether the floating admin panel is open (remembered). The 🛠 button in the top bar toggles it. */
 export const useAdminFloat = create<{ open: boolean; toggle: (v?: boolean) => void }>((set, get) => ({
@@ -86,14 +87,15 @@ export function AdminFloat() {
         <button onClick={() => toggle(false)} className="rounded p-1 text-dim hover:text-ink" aria-label="Close admin panel"><X size={14} /></button>
       </div>
       <div className="flex gap-3 border-b border-line px-2.5">
-        {(['coin', 'room', 'switches'] as Tab[]).map((k) => (
+        {(['coin', 'give', 'room', 'switches'] as Tab[]).map((k) => (
           <button key={k} onClick={() => pick(k)} className={clsx('-mb-px border-b-2 py-1 text-[11px] font-bold', tab === k ? 'border-warn text-ink' : 'border-transparent text-dim hover:text-muted')}>
-            {k === 'coin' ? '📈 Coin' : k === 'room' ? '🏠 Room' : '🎛 Switches'}
+            {k === 'coin' ? '📈 Coin' : k === 'give' ? '🎁 Give' : k === 'room' ? '🏠 Room' : '🎛 Switches'}
           </button>
         ))}
       </div>
       <div className="max-h-[70vh] overflow-y-auto p-2.5">
         {tab === 'coin' && <CoinTab target={room ?? 'solo'} />}
+        {tab === 'give' && <GiveTab room={room} />}
         {tab === 'room' && <RoomTab room={room} />}
         {tab === 'switches' && <SwitchesTab />}
       </div>
@@ -160,6 +162,22 @@ function CoinTab({ target }: { target: string }) {
       <p className="text-[9px] text-dim">Hidden: looks like normal wallets trading. Acts on {target === 'solo' ? 'your solo game' : `room ${target}`}.</p>
     </div>
   )
+}
+
+// ─── Give: currency to you, a room player, or any account ────────────────────
+function GiveTab({ room }: { room?: string }) {
+  const [players, setPlayers] = useState<RoomSummary['players']>([])
+  useEffect(() => {
+    if (!room) return setPlayers([])
+    const get = async () => {
+      const r = await adminApi<{ rooms: RoomSummary[] }>('/admin/api/rooms')
+      if (r.ok) setPlayers(r.data!.rooms.find((x) => x.code === room)?.players ?? [])
+    }
+    void get()
+    const id = setInterval(() => void get(), 5000)
+    return () => clearInterval(id)
+  }, [room])
+  return <GiveBox room={room} players={players} compact />
 }
 
 // ─── Room: the players in the room you're in ─────────────────────────────────

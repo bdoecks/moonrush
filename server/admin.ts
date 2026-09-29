@@ -9,7 +9,7 @@ export type AdminAction =
   | { action: 'kick'; room: string; playerId: string; reason?: string }
   | { action: 'close'; room: string }
   | { action: 'notice'; room?: string; text: string } // no room = every room
-  | { action: 'grant'; room: string; playerId: string; usd: number }
+  | { action: 'grant'; room: string; playerId: string; usd?: number; asset?: 'usd' | 'sol' | 'bsc' | 'hood'; amount?: number }
   | { action: 'market'; room: string; market: AdminMarketAction }
 
 /** Guests banned from this server (until it restarts); accounts are banned in the database. */
@@ -68,8 +68,10 @@ export async function handleAdmin(req: IncomingMessage, res: ServerResponse, pat
         return json(res, 200, { ok: true })
       }
       case 'grant': {
-        const usd = Math.max(-1e9, Math.min(1e9, Number(a.usd) || 0))
-        return json(res, room.grant(a.playerId, usd) ? 200 : 404, { ok: true })
+        const asset = a.asset && ['usd', 'sol', 'bsc', 'hood'].includes(a.asset) ? a.asset : 'usd'
+        const amount = Math.max(0, Math.min(1e9, Number(a.amount ?? a.usd) || 0))
+        if (!amount) return json(res, 400, { error: 'Amount must be more than 0' })
+        return json(res, room.grant(a.playerId, amount, asset) ? 200 : 404, { ok: true })
       }
       case 'market': {
         const r = room.adminMarket(a.market)

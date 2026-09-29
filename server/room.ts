@@ -440,9 +440,9 @@ export class Room {
     this.broadcast({ t: 'notice', text: text.slice(0, 200) })
   }
 
-  grant(playerId: string, usd: number) {
+  grant(playerId: string, amount: number, asset: 'usd' | 'sol' | 'bsc' | 'hood' = 'usd') {
     if (!this.members.has(playerId)) return false
-    this.sendTo(playerId, { t: 'grant', usd })
+    this.sendTo(playerId, { t: 'grant', usd: asset === 'usd' ? amount : 0, asset, amount })
     return true
   }
 

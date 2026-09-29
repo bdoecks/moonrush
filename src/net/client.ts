@@ -14,6 +14,7 @@ import { CHAINS } from '../data/chains'
 import { load, remove, save } from '../utils/storage'
 import { myAddresses, recordPlayerTrades, useFriends } from './friends'
 import { accessToken, accountPlayerId } from './account'
+import { giveLocal } from '../game/gifts'
 import { MP_PATH, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TransferMsg } from './protocol'
 
 const STATUS_MS = 2000
@@ -270,11 +271,10 @@ function onMessage(msg: ServerMsg) {
       save('mpNotice', msg.reason)
       remove('mpRoom')
       return leaveRoom()
-    case 'grant': {
-      // Admin gift: straight into your USD bank (quietly).
-      if (st.runStatus !== 'running') return
-      return st.patchState({ portfolio: { ...st.portfolio, cash: Math.max(0, st.portfolio.cash + msg.usd) } })
-    }
+    case 'grant':
+      // Currency from an admin: into your round.
+      giveLocal(msg.asset ?? 'usd', msg.amount ?? msg.usd)
+      return
     case 'error':
       if (pending) {
         pending.reject(new Error(msg.message))
