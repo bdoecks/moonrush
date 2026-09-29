@@ -624,7 +624,7 @@ export interface Settings {
   chartStyle: ChartStyle
   notifications: boolean
   portfolioUnit?: 'usd' | Chain // what the top bar shows your portfolio / PnL in
-  markerStyle?: 'tags' | 'bubbles' // chart trade markers: GMGN/Axiom tags beside the candle, or bubbles on it
+  markerStyle?: 'avatars' | 'tags' | 'bubbles' // chart trade markers: GMGN/Axiom tags beside the candle, or bubbles on it
   quickBuyOpen?: boolean // GMGN: open the coin's page after a quick buy (off: stay on the list)
   eventToasts?: boolean // market-event pop-ups (parabolic, whales, market moves…); off still warns when your own bag rugs
   practiceBalance: number

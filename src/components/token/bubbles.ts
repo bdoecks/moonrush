@@ -2,11 +2,12 @@
 // pictures inside a shape). Two looks:
 //  - 'tags' (GMGN / Axiom): a small labelled tag under the candle for a buy (pointer up) and over it for a sell
 //    (pointer down), so the candles stay visible. Dev = amber DB/DS; tracked wallets and friends = their avatar.
+//  - 'avatars' (Axiom): each trade is the trader's round avatar on the price, ringed green (buy) or red (sell).
 //  - 'bubbles': a round badge sitting on the candle at the exact fill price.
 import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesPrimitive, SeriesAttachedParameter, Time } from 'lightweight-charts'
 import type { MarkerKind } from './markers'
 
-export type MarkerStyle = 'tags' | 'bubbles'
+export type MarkerStyle = 'avatars' | 'tags' | 'bubbles'
 
 export interface Bubble {
   time: number // bar time (already bucketed to the timeframe)
@@ -20,6 +21,8 @@ export interface Bubble {
   color: string // fill
   ink: string // text colour
   ring?: string // outline for avatar markers (their side colour)
+  face?: string // avatar style: the trader's avatar (emoji) or initials
+  bg?: string // avatar style: circle colour behind the face
 }
 
 type Target = Parameters<IPrimitivePaneRenderer['draw']>[0]
@@ -34,7 +37,7 @@ const DOWN = '#ff4d6a'
 
 export class TradeBubbles implements ISeriesPrimitive<Time> {
   private bubbles: Bubble[] = []
-  private style: MarkerStyle = 'tags'
+  private style: MarkerStyle = 'avatars'
   private p: SeriesAttachedParameter<Time> | null = null
   private readonly view: IPrimitivePaneView
   private readonly views: readonly IPrimitivePaneView[]
@@ -76,7 +79,11 @@ export class TradeBubbles implements ISeriesPrimitive<Time> {
         const key = `${b.time}|${b.side}`
         const i = stack.get(key) ?? 0
         stack.set(key, i + 1)
-        if (this.style === 'bubbles') {
+        if (this.style === 'avatars') {
+          const y0 = p.series.priceToCoordinate(b.price)
+          // Clusters on one bar fan out a little, like Axiom's piles of avatars.
+          if (y0 !== null) drawAvatar(ctx, b, x + (i % 2 ? 7 : 0) * (i ? 1 : 0), y0 + (b.side === 'buy' ? 1 : -1) * i * 9)
+        } else if (this.style === 'bubbles') {
           const y0 = p.series.priceToCoordinate(b.price)
           if (y0 !== null) drawBubble(ctx, b, x, y0 + (b.side === 'buy' ? 1 : -1) * i * (R * 2 + 2))
         } else {
@@ -137,6 +144,46 @@ function drawTag(ctx: Ctx, b: Bubble, x: number, edge: number, i: number) {
   }
 
   if (b.n > 1) countBadge(ctx, b.n, x - w / 2 + 1, top + (buy ? TAG_H - 1 : 1), avatar ? side : b.color)
+  ctx.font = FONT
+}
+
+/** Axiom: the trader's avatar in a circle on the fill price, ringed green (buy) or red (sell), with a side dot. */
+function drawAvatar(ctx: Ctx, b: Bubble, x: number, y: number) {
+  const buy = b.side === 'buy'
+  const side = buy ? UP : DOWN
+  const r = 10
+  ctx.save()
+  ctx.shadowColor = 'rgba(0,0,0,0.55)'
+  ctx.shadowBlur = 4
+  ctx.beginPath()
+  ctx.arc(x, y, r, 0, Math.PI * 2)
+  ctx.fillStyle = b.bg ?? '#1a1f29'
+  ctx.fill()
+  ctx.restore()
+  ctx.lineWidth = 2
+  ctx.strokeStyle = side
+  ctx.beginPath()
+  ctx.arc(x, y, r, 0, Math.PI * 2)
+  ctx.stroke()
+  const face = b.face ?? b.text
+  const emoji = /\p{Extended_Pictographic}/u.test(face)
+  ctx.font = emoji ? '12px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif' : '800 8px "JetBrains Mono", monospace'
+  ctx.fillStyle = '#fff'
+  ctx.fillText(face, x, y + (emoji ? 1 : 0.5))
+  // Side dot (bottom-right), like Axiom's small badge.
+  const bx = x + r * 0.72
+  const by = y + r * 0.72
+  ctx.beginPath()
+  ctx.arc(bx, by, 4.5, 0, Math.PI * 2)
+  ctx.fillStyle = side
+  ctx.fill()
+  ctx.lineWidth = 1.2
+  ctx.strokeStyle = '#0b0d12'
+  ctx.stroke()
+  ctx.font = '800 6px "JetBrains Mono", monospace'
+  ctx.fillStyle = buy ? '#06140d' : '#fff'
+  ctx.fillText(buy ? 'B' : 'S', bx, by + 0.5)
+  if (b.n > 1) countBadge(ctx, b.n, x - r * 0.75, y - r * 0.75, side)
   ctx.font = FONT
 }
 

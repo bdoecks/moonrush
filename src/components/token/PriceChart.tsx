@@ -26,6 +26,9 @@ import type { Candle, ChartStyle, Timeframe } from '../../types'
 import { TF_SECONDS } from '../../types'
 import { TradeBubbles, type Bubble } from './bubbles'
 import { pickFor, useTradePick } from './tradePick'
+import { useAccount } from '../../net/account'
+import { bookOf } from '../../game/ledger'
+import { load } from '../../utils/storage'
 import { useFriends } from '../../net/friends'
 import { MARKER_KINDS, type MarkerKind, type MarkerKinds } from './markers'
 import { fmtCompact, fmtPrice } from '../../utils/format'
@@ -83,7 +86,10 @@ export function PriceChart(o: ChartOptions) {
   const creatorIsYou = useGame((s) => s.market.tokens.find((t) => t.id === tokenId)?.creator === 'you')
   const wallets = useGame((s) => s.wallets)
   const tracked = useGame((s) => s.trackedWallets)
-  const markerStyle = useGame((s) => s.settings.markerStyle ?? 'tags')
+  const markerStyle = useGame((s) => s.settings.markerStyle ?? 'avatars')
+  // Your face on the chart: your account avatar, else your room avatar.
+  const accountFace = useAccount((s) => s.profile?.avatar)
+  const myFace = accountFace ?? load<string>('mpAvatar') ?? '🫵'
   const online = useGame((s) => s.online)
   const friendTrades = useFriends((s) => s.trades)
   const friendWatch = useFriends((s) => s.watch)
@@ -288,6 +294,29 @@ export function PriceChart(o: ChartOptions) {
     else migLine.current = s.createPriceLine(opts)
   }, [migMcap, migDex, unit, tokenId, tf, style, accent])
 
+  // Top 10 holders' average buy and sell (Axiom's dotted lines), refreshed every ~10 ticks.
+  const top10On = showMarkers && markerKinds.top10 !== false
+  const top10Tick = useGame((s) => Math.floor(s.market.tick / 10))
+  const top10Lines = useRef<IPriceLine[]>([])
+  useEffect(() => {
+    const s = main.current
+    for (const l of top10Lines.current) s?.removePriceLine(l)
+    top10Lines.current = []
+    const st = useGame.getState()
+    const t = st.market.tokens.find((x) => x.id === tokenId)
+    if (!s || !top10On || !t) return
+    const book = bookOf(t, st.market.time)
+    const top = [...book.holders.values()].filter((h) => h.wallet !== 'YOU').sort((a, b) => b.boughtQty - b.soldQty - (a.boughtQty - a.soldQty)).slice(0, 10)
+    const bq = top.reduce((a, h) => a + h.boughtQty, 0)
+    const sq = top.reduce((a, h) => a + h.soldQty, 0)
+    const avgBuy = bq > 0 ? top.reduce((a, h) => a + h.boughtUsd, 0) / bq : 0
+    const avgSell = sq > 0 ? top.reduce((a, h) => a + h.soldUsd, 0) / sq : 0
+    const line = (px: number, color: string, title: string) => s.createPriceLine({ price: px * k, color, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title })
+    if (avgBuy > 0) top10Lines.current.push(line(avgBuy, 'rgba(25,217,137,0.8)', 'Top 10 Holders Avg Buy'))
+    if (avgSell > 0) top10Lines.current.push(line(avgSell, 'rgba(255,77,106,0.8)', 'Top 10 Holders Avg Sell'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [top10On, top10Tick, tokenId, tf, style, unit, accent])
+
   // Your average entry (cost basis per token, fees included) while you hold a position. Green while you're above
   // it, red while you're under. Shown with the "My trades" markers.
   const showEntry = showMarkers && markerKinds.me && !!avgEntry
@@ -377,6 +406,13 @@ export function PriceChart(o: ChartOptions) {
         for (const tr of w.trades) if (tr.tokenId === tokenId) add(tr.time, tr.side, 'tracked', w.avatar, tr.price)
       }
     }
+    // KOLs and smart money trading this coin (Axiom shows them with their avatars).
+    if (markerKinds.kol !== false) {
+      for (const w of wallets) {
+        if (tracked.includes(w.id) || (w.style !== 'kol' && w.style !== 'smart')) continue
+        for (const tr of w.trades) if (tr.tokenId === tokenId) add(tr.time, tr.side, 'kol', w.avatar, tr.price)
+      }
+    }
     // Friends in your room: every main-wallet trade is public (their avatar); side wallets only if you track the address.
     if (markerKinds.friends !== false && online) {
       const avatar = new Map(online.players.map((p) => [p.id, p.avatar]))
@@ -392,14 +428,15 @@ export function PriceChart(o: ChartOptions) {
         const sideColor = buy ? UP : DOWN
         const bar = barAt.get(g.time)
         const base = { time: g.time, price: g.px * k, low: (bar ? Math.min(bar.low, g.px) : g.px) * k, high: (bar ? Math.max(bar.high, g.px) : g.px) * k, side: g.side, kind: g.kind, n: g.n }
-        if (g.kind === 'tracked') return { ...base, text: g.label, color: '#161a22', ink: '#fff', ring: sideColor }
-        if (g.kind === 'friends') return { ...base, text: g.label, color: '#2a1840', ink: '#fff', ring: sideColor }
-        if (g.kind === 'dev') return { ...base, text: `D${buy ? 'B' : 'S'}`, color: MARKER_KINDS.find((m) => m.id === 'dev')!.color, ink: '#1a1204', ring: sideColor }
-        return { ...base, text: buy ? 'B' : 'S', color: sideColor, ink: buy ? '#06140d' : '#fff' }
+        if (g.kind === 'kol') return { ...base, text: g.label, color: '#2a1f08', ink: '#fff', ring: sideColor, face: g.label, bg: '#3a2a0c' }
+        if (g.kind === 'tracked') return { ...base, text: g.label, color: '#161a22', ink: '#fff', ring: sideColor, face: g.label, bg: '#10263a' }
+        if (g.kind === 'friends') return { ...base, text: g.label, color: '#2a1840', ink: '#fff', ring: sideColor, face: g.label, bg: '#2a1840' }
+        if (g.kind === 'dev') return { ...base, text: `D${buy ? 'B' : 'S'}`, color: MARKER_KINDS.find((m) => m.id === 'dev')!.color, ink: '#1a1204', ring: sideColor, face: '🧑‍💻', bg: '#3a2a08' }
+        return { ...base, text: buy ? 'B' : 'S', color: sideColor, ink: buy ? '#06140d' : '#fff', face: myFace, bg: '#16301f' }
       })
       .sort((a, b) => a.time - b.time)
     markers.current.set(b, markerStyle)
-  }, [trades, devTrades, wallets, tracked, friendTrades, friendWatch, online, creatorIsYou, launch, firstWallet, markerKinds, tokenId, tf, style, unit, k, accent, showMarkers, markerStyle])
+  }, [trades, devTrades, wallets, tracked, friendTrades, friendWatch, online, creatorIsYou, launch, firstWallet, markerKinds, tokenId, tf, style, unit, k, accent, showMarkers, markerStyle, myFace])
 
   const chg = legend && legend.o ? legend.c / legend.o - 1 : 0
   const tone = chg >= 0 ? 'text-up' : 'text-down'
