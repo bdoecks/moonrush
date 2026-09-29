@@ -7,7 +7,8 @@ import { useHidden, useVisible } from '../../game/hidden'
 import { PadBadge } from '../pad'
 import { LAUNCHPADS } from '../../data/launchpads'
 import { AtSign, Boxes, ChefHat, Crosshair, Eye, Ghost, Globe, GraduationCap, Search, Send, Star, UserRound, Users } from 'lucide-react'
-import { memo, useMemo, useState, type ReactNode } from 'react'
+import { memo, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useTokenMap } from '../../hooks/useDerived'
 import { useFlash } from '../../hooks/useFlash'
 import { useGame } from '../../game/store'
 import { publicBundlePct } from '../../game/devTools'
@@ -73,6 +74,19 @@ function Column({ col, list: all, now, visible }: { col: (typeof COLS)[number]; 
   const filtered = countActive(f) ? list.filter((t) => matchesFilter(t, f, now)) : list
   const shown = needle ? filtered.filter((t) => t.ticker.toLowerCase().includes(needle) || t.name.toLowerCase().includes(needle)) : filtered
   const hidden = list.length - filtered.length
+  // Pause on hover (GMGN / Axiom): while your mouse is over the list, its order freezes so coins don't jump away
+  // from under your cursor. Numbers keep updating; new coins wait until you move off.
+  const [paused, setPaused] = useState(false)
+  const frozen = useRef<string[] | null>(null)
+  const tokenMap = useTokenMap()
+  const hiddenIds = useHidden((s) => s.ids)
+  const showHidden = useHidden((s) => s.show)
+  if (paused && !frozen.current) frozen.current = shown.map((t) => t.id)
+  if (!paused) frozen.current = null
+  const display = frozen.current
+    ? frozen.current.map((id) => tokenMap.get(id)).filter((t): t is Token => !!t && (showHidden || !hiddenIds.includes(t.id)))
+    : shown
+  const waiting = frozen.current ? shown.filter((t) => !frozen.current!.includes(t.id)).length : 0
   const presets = useFilterPresets(chain)
   const activePreset = presetFor(filter, presets)
   return (
@@ -103,9 +117,14 @@ function Column({ col, list: all, now, visible }: { col: (typeof COLS)[number]; 
         <TrenchFilterButton title={col.title} value={filter} onApply={setFilter} chain={chain} counts={counts} scope={col.id} />
         <QuickSlotPicker />
       </header>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {shown.length ? (
-          shown.map((t) => <Card key={t.id} t={t} now={now} />)
+      {paused && (
+        <div className="pointer-events-none absolute left-1/2 top-[42px] z-10 -translate-x-1/2 rounded-full border border-warn/50 bg-panel/95 px-2 py-0.5 text-[10px] font-bold text-warn shadow-lg">
+          ⏸ Paused{waiting > 0 ? ` · ${waiting} new` : ''}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-auto" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+        {display.length ? (
+          display.map((t) => <Card key={t.id} t={t} now={now} />)
         ) : (
           <EmptyState
             icon="🕳️"

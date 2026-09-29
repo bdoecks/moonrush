@@ -8,7 +8,7 @@ import { applyFilter, FILTERS, sortValue, type ChangeTf, type FilterId, type Sor
 import { TokenTable } from '../components/discover/TokenTable'
 import { Segmented } from '../components/ui'
 import { useGame } from '../game/store'
-import type { PadId } from '../types'
+import type { PadId, Token } from '../types'
 import { LAUNCHPADS, PAD_IDS } from '../data/launchpads'
 import { PadBadge } from '../components/pad'
 import { PadGrid, TrenchFilterButton } from '../components/discover/TrenchFilterPanel'
@@ -113,7 +113,15 @@ export function DiscoverView() {
     return list
   }, [tokens, filter, tf, now, watchlist, q, sortKey, sortDir])
 
-  const visibleRows = useVisible(rows) // coins you hid drop out (unless "Hidden" is on)
+  const liveRows = useVisible(rows) // coins you hid drop out (unless "Hidden" is on)
+  // Pause on hover (GMGN / Axiom): the row order freezes while your mouse is over the table, so rows don't jump.
+  const [paused, setPaused] = useState(false)
+  const frozen = useRef<string[] | null>(null)
+  if (paused && !frozen.current) frozen.current = liveRows.map((t) => t.id)
+  if (!paused) frozen.current = null
+  const liveMap = new Map(tokens.map((t) => [t.id, t]))
+  const visibleRows = frozen.current ? frozen.current.map((id) => liveMap.get(id)).filter((t): t is Token => !!t) : liveRows
+  const waiting = frozen.current ? liveRows.filter((t) => !frozen.current!.includes(t.id)).length : 0
 
   const counts = useMemo(() => {
     const c = {} as Record<FilterId, number>
@@ -223,7 +231,12 @@ export function DiscoverView() {
           ))}
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+        {paused && (
+          <div className="pointer-events-none absolute left-1/2 top-9 z-10 -translate-x-1/2 rounded-full border border-warn/50 bg-panel/95 px-2 py-0.5 text-[10px] font-bold text-warn shadow-lg">
+            ⏸ Paused{waiting > 0 ? ` · ${waiting} new` : ''}
+          </div>
+        )}
         <TokenTable tokens={visibleRows} tf={tf} sortKey={sortKey} sortDir={sortDir} onSort={onSort} cursor={cursor} />
       </div>
     </div>
