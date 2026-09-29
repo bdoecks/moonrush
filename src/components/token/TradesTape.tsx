@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { ArrowDownUp, Bell, Eye, Filter, List as ListIcon, X, Zap } from 'lucide-react'
 import { inPick, pickFor, useTradePick } from './tradePick'
+import { useTrickle } from '../../hooks/useTrickle'
 import { addrKey, playerKey, useFriends } from '../../net/friends'
 import { useMemo, useState, type ReactNode } from 'react'
 import { CHAINS, fmtNative } from '../../data/chains'
@@ -203,6 +204,7 @@ function TradesTab({ token, walletFilter, setWalletFilter }: { token: Token; wal
       (!tag || (tag === 'you' ? t.wallet === 'YOU' : t.tag === tag || book.holders.get(t.wallet)?.tags.includes(tag))),
   )
   const filtered = walletFilter ? book.holders.get(walletFilter) : undefined
+  const live = useTrickle(rows) // new trades flow in across the second, like Axiom's live feed
   return (
     <>
       <Toolbar>
@@ -258,7 +260,7 @@ function TradesTab({ token, walletFilter, setWalletFilter }: { token: Token; wal
             </tr>
           </thead>
           <tbody>
-            {rows.map((tr) => {
+            {live.map((tr) => {
               const buy = tr.side === 'buy'
               const h = book.holders.get(tr.wallet)
               // Size bar behind the total: log scale, $1 → 0%, $100K → 100%.

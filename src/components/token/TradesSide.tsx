@@ -9,6 +9,7 @@ import { nativePrice } from '../../game/tradingEngine'
 import type { Token } from '../../types'
 import { fmtAge, fmtCompact, fmtNum, fmtTime, fmtUsd, toneClass } from '../../utils/format'
 import { inPick, pickFor, useTradePick } from './tradePick'
+import { useTrickle } from '../../hooks/useTrickle'
 
 const TAG_ICON: Partial<Record<HolderTag, string>> = { dev: '🧑‍💻', you: '⭐', whale: '🐋', smart: '🧠', kol: '📣', sniper: '🎯', insider: '🐀', fresh: '🌱', agent: '🌀' }
 type Who = 'all' | 'dev' | 'you' | 'tracked'
@@ -41,6 +42,7 @@ export function TradesSide({ token, className }: { token: Token; className?: str
       (!wallet || tr.wallet === wallet) &&
       (who === 'all' || (who === 'you' ? tr.wallet === 'YOU' : who === 'dev' ? tr.wallet === book.devWallet || tagsOf(tr).includes('dev') : trackedNames.has(tr.wallet) || !!tr.walletId && tracked.includes(tr.walletId))),
   )
+  const live = useTrickle(rows) // new trades flow in across the second
   // Candle summary (Axiom shows what happened inside the candle you clicked).
   const buys = inCandle.filter((t) => t.side === 'buy')
   const sells = inCandle.filter((t) => t.side === 'sell')
@@ -96,7 +98,7 @@ export function TradesSide({ token, className }: { token: Token; className?: str
         {!rows.length ? (
           <div className="px-3 py-6 text-center text-[11px] text-dim">{pick ? 'No trades in this candle' : 'No trades yet'}{pick && <div><button onClick={() => setPick(null)} className="mt-1 text-accent underline">Show all trades</button></div>}</div>
         ) : (
-          rows.slice(0, 400).map((tr) => {
+          live.slice(0, 400).map((tr) => {
             const buy = tr.side === 'buy'
             const tags = tagsOf(tr)
             const open = openId === tr.id
