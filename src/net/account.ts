@@ -246,6 +246,16 @@ export async function pullGifts() {
   for (const g of data as { asset: GiftAsset; amount: number | string }[]) giveLocal(g.asset, Number(g.amount))
 }
 
+/** Update your public card; works before the `season` column exists (older database). */
+async function updateCard(uid: string, row: Record<string, unknown>) {
+  const r = await supabase!.from('profiles').update(row).eq('id', uid)
+  if (r.error && /season/.test(r.error.message)) {
+    const { season: _s, ...rest } = row
+    return supabase!.from('profiles').update(rest).eq('id', uid)
+  }
+  return r
+}
+
 /** Take an admin's edit of your save if there is one. Returns true if it did. */
 async function pullAdminEdit(): Promise<boolean> {
   const uid = useAccount.getState().userId
@@ -272,7 +282,7 @@ export async function flushSync() {
   const points = g.profile.season?.id === seasonNumber() ? g.profile.season.points : 0
   const [r1, r2] = await Promise.all([
     supabase.from('saves').upsert({ user_id: a.userId, profile: g.profile, rewards: g.rewards, settings: g.settings, updated_at: now }),
-    supabase.from('profiles').update({ level: levelFromXp(g.profile.xp).level, season_points: points, updated_at: now }).eq('id', a.userId),
+    updateCard(a.userId, { level: levelFromXp(g.profile.xp).level, season_points: points, season: seasonNumber(), updated_at: now }),
   ])
   const err = r1.error?.message ?? r2.error?.message ?? null
   useAccount.setState(err ? { syncError: err } : { syncedAt: Date.now(), syncError: null })

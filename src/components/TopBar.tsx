@@ -16,6 +16,7 @@ import { WalletSelector } from './wallets'
 import { GlobalSearch } from './GlobalSearch'
 import { RoomChip } from './Multiplayer'
 import { AccountButton, AdminButton } from './Account'
+import { FriendsButton } from './Friends'
 
 const UNITS = ['usd', 'sol', 'bsc', 'hood'] as const
 
@@ -223,6 +224,7 @@ export function TopBar() {
         </div>
         <CashbackChip />
         <AdminButton />
+        <FriendsButton />
         <AccountButton />
       </div>
 

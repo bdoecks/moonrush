@@ -16,6 +16,7 @@ import { isRanked } from './game/season'
 import { valuePortfolio } from './game/portfolioEngine'
 import { resumeRoom } from './net/client'
 import { initAccount, whenAccountReady } from './net/account'
+import { initSocial } from './net/social'
 import { CookingView } from './pages/CookingView'
 import { CopyTradeView } from './pages/CopyTradeView'
 import { SniperView } from './pages/SniperView'
@@ -87,6 +88,7 @@ export default function App() {
   useEffect(() => {
     watchFlags() // live game switches the admin sets
     initAccount()
+    initSocial() // friends list, presence and invites while signed in
     return whenAccountReady(resumeRoom)
   }, [])
 
