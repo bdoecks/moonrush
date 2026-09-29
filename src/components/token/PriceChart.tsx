@@ -109,7 +109,7 @@ export function PriceChart(o: ChartOptions) {
       grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#4a5260', labelBackgroundColor: '#262c36' }, horzLine: { color: '#4a5260', labelBackgroundColor: '#262c36' } },
       rightPriceScale: { borderColor: '#1b1f27', scaleMargins: { top: 0.12, bottom: 0.2 } },
-      timeScale: { borderColor: '#1b1f27', timeVisible: true, secondsVisible: TF_SECONDS[tf] < 60, rightOffset: 6, barSpacing: TF_SECONDS[tf] < 60 ? 6 : 8 },
+      timeScale: { borderColor: '#1b1f27', timeVisible: true, secondsVisible: TF_SECONDS[tf] < 60, rightOffset: 4, barSpacing: 10, minBarSpacing: 2 },
       localization: { priceFormatter: (v: number) => (unit === 'mcap' ? fmtCompact(v) : fmtPrice(v).replace('$', '')) },
     })
     const priceFormat = { type: 'custom' as const, formatter: (v: number) => fmt(v), minMove: unit === 'mcap' ? 0.01 : 1e-13 }
@@ -144,6 +144,11 @@ export function PriceChart(o: ChartOptions) {
     else (s as ISeriesApi<'Area'>).setData(data.map((d) => ({ time: d.time as UTCTimestamp, value: d.close * k })))
     v.setData(data.map(toVol))
     lastTime.current = data[data.length - 1]?.time ?? 0
+    // Open zoomed in like GMGN / Axiom: the last ~60-90 candles fill the chart (big, readable candles), newest
+    // near the right edge. Brand-new coins with only a few candles don't get stretched into giant bars.
+    const width = el.current.clientWidth || 600
+    const slots = Math.max(45, Math.min(data.length + 4, 80))
+    c.timeScale().applyOptions({ barSpacing: Math.max(6, Math.min(16, (width - 70) / slots)) })
     c.timeScale().scrollToRealTime()
     setLegend(lastLegend())
 
