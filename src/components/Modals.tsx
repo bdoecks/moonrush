@@ -238,6 +238,9 @@ function SettingsModal() {
         <Row label="Show portfolio in" hint="Top bar: portfolio, P&L, realized / unrealized">
           <Segmented value={settings.portfolioUnit ?? 'usd'} onChange={(v) => update({ portfolioUnit: v })} options={[{ value: 'usd', label: 'USD' }, { value: 'sol', label: 'SOL' }, { value: 'bsc', label: 'BNB' }, { value: 'hood', label: 'ETH' }]} />
         </Row>
+        <Row label="Chart trade markers" hint="Tags sit under/over the candle like GMGN & Axiom; bubbles sit on the price">
+          <Segmented value={settings.markerStyle ?? 'tags'} onChange={(v) => update({ markerStyle: v })} options={[{ value: 'tags', label: 'Tags' }, { value: 'bubbles', label: 'Bubbles' }]} />
+        </Row>
         <Row label="Chart style">
           <Segmented value={settings.chartStyle} onChange={(v) => update({ chartStyle: v })} options={[{ value: 'candles', label: 'Candles' }, { value: 'line', label: 'Line' }]} />
         </Row>

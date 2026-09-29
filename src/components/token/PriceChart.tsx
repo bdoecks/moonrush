@@ -83,6 +83,7 @@ export function PriceChart(o: ChartOptions) {
   const creatorIsYou = useGame((s) => s.market.tokens.find((t) => t.id === tokenId)?.creator === 'you')
   const wallets = useGame((s) => s.wallets)
   const tracked = useGame((s) => s.trackedWallets)
+  const markerStyle = useGame((s) => s.settings.markerStyle ?? 'tags')
   const online = useGame((s) => s.online)
   const friendTrades = useFriends((s) => s.trades)
   const friendWatch = useFriends((s) => s.watch)
@@ -346,6 +347,7 @@ export function PriceChart(o: ChartOptions) {
     const tfs = TF_SECONDS[tf]
     const bucket = (time: number) => Math.floor(time / tfs) * tfs
     const closeAt = new Map((data ?? []).map((c) => [c.time, c.close]))
+    const barAt = new Map((data ?? []).map((c) => [c.time, c]))
     const groups = new Map<string, { time: number; side: 'buy' | 'sell'; kind: MarkerKind; label: string; n: number; px: number }>()
     // price: the fill price per token, or undefined to pin the bubble at the candle's close (dev trades carry no price).
     const add = (time: number, side: 'buy' | 'sell', kind: MarkerKind, label: string, price?: number) => {
@@ -388,15 +390,16 @@ export function PriceChart(o: ChartOptions) {
       .map((g): Bubble => {
         const buy = g.side === 'buy'
         const sideColor = buy ? UP : DOWN
-        const base = { time: g.time, price: g.px * k, side: g.side, kind: g.kind, n: g.n }
+        const bar = barAt.get(g.time)
+        const base = { time: g.time, price: g.px * k, low: (bar ? Math.min(bar.low, g.px) : g.px) * k, high: (bar ? Math.max(bar.high, g.px) : g.px) * k, side: g.side, kind: g.kind, n: g.n }
         if (g.kind === 'tracked') return { ...base, text: g.label, color: '#161a22', ink: '#fff', ring: sideColor }
         if (g.kind === 'friends') return { ...base, text: g.label, color: '#2a1840', ink: '#fff', ring: sideColor }
         if (g.kind === 'dev') return { ...base, text: `D${buy ? 'B' : 'S'}`, color: MARKER_KINDS.find((m) => m.id === 'dev')!.color, ink: '#1a1204', ring: sideColor }
         return { ...base, text: buy ? 'B' : 'S', color: sideColor, ink: buy ? '#06140d' : '#fff' }
       })
       .sort((a, b) => a.time - b.time)
-    markers.current.set(b)
-  }, [trades, devTrades, wallets, tracked, friendTrades, friendWatch, online, creatorIsYou, launch, firstWallet, markerKinds, tokenId, tf, style, unit, k, accent, showMarkers])
+    markers.current.set(b, markerStyle)
+  }, [trades, devTrades, wallets, tracked, friendTrades, friendWatch, online, creatorIsYou, launch, firstWallet, markerKinds, tokenId, tf, style, unit, k, accent, showMarkers, markerStyle])
 
   const chg = legend && legend.o ? legend.c / legend.o - 1 : 0
   const tone = chg >= 0 ? 'text-up' : 'text-down'
