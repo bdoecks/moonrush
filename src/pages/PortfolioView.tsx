@@ -24,7 +24,16 @@ const PERIOD_SEC: Record<Period, number> = { '1H': 3600, '24H': 86400, ALL: Infi
 
 type Unit = 'usd' | 'native'
 /** Money formatter: USD, or the amount in a chain's coin (signed = always show +/-). */
-type Money = (usd: number, chain?: Chain, signed?: boolean) => string
+/** Money formatter: USD, or the amount in a chain's coin. `nat` = the exact coin amount (from the trades
+ *  themselves); without it the USD figure is converted at today's coin price. */
+type Money = (usd: number, chain?: Chain, signed?: boolean, nat?: number) => string
+
+/** The chain coin's USD price when a trade happened, from what it actually paid or received. */
+function tradePx(tr: Trade): number | undefined {
+  if (!tr.native) return undefined
+  const usd = tr.side === 'buy' ? tr.value + tr.fee + (tr.gas ?? 0) : tr.value - tr.fee - (tr.gas ?? 0)
+  return usd > 0 ? usd / tr.native : undefined
+}
 
 /** Per-token rollup of every fill in the round. */
 interface TokenPnl {
@@ -43,6 +52,13 @@ interface TokenPnl {
   soldQty: number
   realized: number
   realizedInWindow: number
+  // The same in the chain coin, at the price when each trade happened (NaN if an old trade didn't record it).
+  boughtN: number
+  soldN: number
+  realizedN: number
+  realizedInWindowN: number
+  unrealizedN: number // open bag: live, at today's coin price
+  totalN: number
   qty: number
   cost: number
   value: number
@@ -55,12 +71,12 @@ interface TokenPnl {
   vias: Set<string>
 }
 
-function rollup(trades: Trade[], positions: Record<string, { qty: number; costBasis: number; openedAt: number }>, map: Map<string, Token>, fromTick: number): TokenPnl[] {
+function rollup(trades: Trade[], positions: Record<string, { qty: number; costBasis: number; openedAt: number }>, map: Map<string, Token>, fromTick: number, px: (c: Chain) => number): TokenPnl[] {
   const by = new Map<string, TokenPnl>()
   for (const tr of [...trades].reverse()) {
     let r = by.get(tr.tokenId)
     if (!r) {
-      r = { tokenId: tr.tokenId, chain: map.get(tr.tokenId)?.chain ?? tr.chain ?? 'sol', ticker: tr.ticker, emoji: tr.emoji, hue: tr.hue, t: map.get(tr.tokenId), buys: 0, sells: 0, bought: 0, boughtQty: 0, sold: 0, soldGross: 0, soldQty: 0, realized: 0, realizedInWindow: 0, qty: 0, cost: 0, value: 0, unrealized: 0, total: 0, totalPct: 0, firstTick: tr.tick, lastTick: tr.tick, firstSellTick: null, vias: new Set() }
+      r = { tokenId: tr.tokenId, chain: map.get(tr.tokenId)?.chain ?? tr.chain ?? 'sol', ticker: tr.ticker, emoji: tr.emoji, hue: tr.hue, t: map.get(tr.tokenId), buys: 0, sells: 0, bought: 0, boughtQty: 0, sold: 0, soldGross: 0, soldQty: 0, realized: 0, realizedInWindow: 0, boughtN: 0, soldN: 0, realizedN: 0, realizedInWindowN: 0, unrealizedN: 0, totalN: 0, qty: 0, cost: 0, value: 0, unrealized: 0, total: 0, totalPct: 0, firstTick: tr.tick, lastTick: tr.tick, firstSellTick: null, vias: new Set() }
       by.set(tr.tokenId, r)
     }
     if (tr.via) r.vias.add(tr.via)
@@ -69,6 +85,7 @@ function rollup(trades: Trade[], positions: Record<string, { qty: number; costBa
       r.buys++
       r.bought += tr.value
       r.boughtQty += tr.qty
+      r.boughtN += tr.native ?? NaN
     } else {
       r.sells++
       if (r.firstSellTick === null) r.firstSellTick = tr.tick
@@ -77,6 +94,10 @@ function rollup(trades: Trade[], positions: Record<string, { qty: number; costBa
       r.soldQty += tr.qty
       r.realized += tr.pnl ?? 0
       if (tr.tick >= fromTick) r.realizedInWindow += tr.pnl ?? 0
+      const p = tradePx(tr)
+      r.soldN += tr.native ?? NaN
+      r.realizedN += p ? (tr.pnl ?? 0) / p : NaN
+      if (tr.tick >= fromTick) r.realizedInWindowN += p ? (tr.pnl ?? 0) / p : NaN
     }
   }
   for (const r of by.values()) {
@@ -89,6 +110,14 @@ function rollup(trades: Trade[], positions: Record<string, { qty: number; costBa
     }
     r.total = r.realized + r.unrealized
     r.totalPct = r.bought > 0 ? r.total / r.bought : 0
+    // Old trades without a recorded coin amount fall back to today's price.
+    const live = px(r.chain)
+    if (!Number.isFinite(r.boughtN)) r.boughtN = r.bought / live
+    if (!Number.isFinite(r.soldN)) r.soldN = r.sold / live
+    if (!Number.isFinite(r.realizedN)) r.realizedN = r.realized / live
+    if (!Number.isFinite(r.realizedInWindowN)) r.realizedInWindowN = r.realizedInWindow / live
+    r.unrealizedN = r.unrealized / live
+    r.totalN = r.realizedN + r.unrealizedN
   }
   return [...by.values()]
 }
@@ -136,25 +165,27 @@ export function PortfolioView() {
   const scopePositions = useMemo(() => (acc ? acc.positions : group ? mergePositions(groupAccs) : p.positions), [acc, group, groupAccs, p.positions])
   const fromTick = period === 'ALL' ? -Infinity : tick - PERIOD_SEC[period] / SIM_SEC_PER_TICK
   const px = (c: Chain) => native?.[c]?.price ?? CHAINS[c].basePrice
-  const m: Money = (usd, chain, signed) => {
-    const sign = signed ? (usd >= 0 ? '+' : '-') : usd < 0 ? '-' : ''
-    return unit === 'usd' || !chain ? `${sign}${fmtUsd(Math.abs(usd))}` : `${sign}${fmtNative(Math.abs(usd) / px(chain), chain)}`
+  const m: Money = (usd, chain, signed, nat) => {
+    if (unit === 'usd' || !chain) return `${signed ? (usd >= 0 ? '+' : '-') : usd < 0 ? '-' : ''}${fmtUsd(Math.abs(usd))}`
+    const n = nat !== undefined && Number.isFinite(nat) ? nat : usd / px(chain)
+    return `${signed ? (n >= 0 ? '+' : '-') : n < 0 ? '-' : ''}${fmtNative(Math.abs(n), chain)}`
   }
 
-  const rows = useMemo(() => rollup(scopeTrades, scopePositions, map, fromTick), [scopeTrades, scopePositions, map, fromTick])
+  const rows = useMemo(() => rollup(scopeTrades, scopePositions, map, fromTick, px), [scopeTrades, scopePositions, map, fromTick, native])
   const inWindow = rows.filter((r) => r.lastTick >= fromTick)
   const traded = inWindow.filter((r) => r.sells > 0)
   const realizedWin = inWindow.reduce((a, r) => a + r.realizedInWindow, 0)
   const unrealized = rows.reduce((a, r) => a + r.unrealized, 0)
   const totalPnl = acc || group ? rows.reduce((a, r) => a + r.total, 0) : v.stats.totalPnl
   // Multi-chain totals in coin mode: one figure per chain coin.
-  const byChain = (pick: (r: TokenPnl) => number, list = rows) => {
+  // `pickN` gives each row's figure in its chain coin.
+  const byChain = (pickN: (r: TokenPnl) => number, list = rows) => {
     const sums: Partial<Record<Chain, number>> = {}
-    for (const r of list) sums[r.chain] = (sums[r.chain] ?? 0) + pick(r)
-    const parts = (Object.entries(sums) as [Chain, number][]).filter(([, usd]) => Math.abs(usd) > 0.005)
-    return parts.length ? parts.map(([c, usd]) => m(usd, c, true)).join(' · ') : m(0, 'sol', true)
+    for (const r of list) sums[r.chain] = (sums[r.chain] ?? 0) + pickN(r)
+    const parts = (Object.entries(sums) as [Chain, number][]).filter(([c, n]) => Math.abs(n * px(c)) > 0.005)
+    return parts.length ? parts.map(([c, n]) => m(0, c, true, n)).join(' · ') : m(0, 'sol', true, 0)
   }
-  const total = (usd: number, pick: (r: TokenPnl) => number, list?: TokenPnl[]) => (unit === 'usd' ? m(usd, undefined, true) : byChain(pick, list))
+  const total = (usd: number, pickN: (r: TokenPnl) => number, list?: TokenPnl[]) => (unit === 'usd' ? m(usd, undefined, true) : byChain(pickN, list))
   const wins = traded.filter((r) => r.total > 0).length
   const winRate = traded.length ? wins / traded.length : 0
   const windowTrades = scopeTrades.filter((t) => t.tick >= fromTick)
@@ -269,7 +300,7 @@ export function PortfolioView() {
             label={`${period === 'ALL' ? 'Round' : period} Realized PnL`}
             headline={
               <div className={clsx('num font-bold leading-tight', toneClass(realizedWin), unit === 'native' ? 'text-[20px]' : 'text-[28px]')}>
-                {total(realizedWin, (r) => r.realizedInWindow, inWindow)}
+                {total(realizedWin, (r) => r.realizedInWindowN, inWindow)}
                 {unit === 'usd' && !acc && !group && <span className="ml-2 text-[14px]">{fmtPct(realizedWin / p.startBalance, 2)}</span>}
               </div>
             }
@@ -280,8 +311,8 @@ export function PortfolioView() {
           <div className="rounded-md border border-line bg-panel p-3">
             <div className="mb-2 text-[12px] font-bold">Analysis</div>
             <div className="space-y-2 text-[12px]">
-              <Line label="Total PnL"><span className={toneClass(totalPnl)}>{total(totalPnl, (r) => r.total)}{unit === 'usd' && !acc && !group && ` (${fmtPct(v.stats.totalPnlPct)})`}</span></Line>
-              <Line label="Unrealized PnL"><span className={toneClass(unrealized)}>{total(unrealized, (r) => r.unrealized)}</span></Line>
+              <Line label="Total PnL"><span className={toneClass(totalPnl)}>{total(totalPnl, (r) => r.totalN)}{unit === 'usd' && !acc && !group && ` (${fmtPct(v.stats.totalPnlPct)})`}</span></Line>
+              <Line label="Unrealized PnL"><span className={toneClass(unrealized)}>{total(unrealized, (r) => r.unrealizedN)}</span></Line>
               <Line label="Win rate"><span className={winRate >= 0.5 ? 'text-up' : 'text-ink'}>{traded.length ? `${(winRate * 100).toFixed(1)}%` : '--'}</span></Line>
               <Line label="TXs"><span className="text-up">{buysN}</span>/<span className="text-down">{sellsN}</span></Line>
               <Line label="Total bought">{fmtUsd(boughtUsd)}</Line>
@@ -290,8 +321,8 @@ export function PortfolioView() {
               <Line label="Tokens traded">{inWindow.length}</Line>
               <Line label="Avg duration">{holdTicks.length ? fmtAge(avgHold * SIM_SEC_PER_TICK) : '--'}</Line>
               <Line label="Fees paid">{fmtUsd(fees)}</Line>
-              <Line label="Best">{best && best.total > 0 ? <span className="text-up">{best.ticker} {m(best.total, best.chain, true)}</span> : '--'}</Line>
-              <Line label="Worst">{worst && worst.total < 0 ? <span className="text-down">{worst.ticker} {m(worst.total, worst.chain, true)}</span> : '--'}</Line>
+              <Line label="Best">{best && best.total > 0 ? <span className="text-up">{best.ticker} {m(best.total, best.chain, true, best.totalN)}</span> : '--'}</Line>
+              <Line label="Worst">{worst && worst.total < 0 ? <span className="text-down">{worst.ticker} {m(worst.total, worst.chain, true, worst.totalN)}</span> : '--'}</Line>
             </div>
           </div>
 
@@ -656,8 +687,8 @@ function Holding({ rows, equity, m, positions, scope }: { rows: TokenPnl[]; equi
               </td>
               <td className={clsx(td, 'text-right num')}><span className="text-muted">{fmtPrice(pos?.avgEntry ?? 0)}</span><span className="text-dim"> → </span><span>{fmtPrice(r.t?.price ?? 0)}</span></td>
               <td className={clsx(td, 'text-right num', toneClass(r.unrealized))}><div>{m(r.unrealized, r.chain, true)}</div><div className="text-[10px]">{fmtPct(r.cost > 0 ? r.unrealized / r.cost : 0)}</div></td>
-              <td className={clsx(td, 'text-right num', toneClass(r.realized))}>{r.sells ? m(r.realized, r.chain, true) : '--'}</td>
-              <td className={clsx(td, 'text-right num font-bold', toneClass(r.total))}><div>{m(r.total, r.chain, true)}</div><div className="text-[10px] font-normal">{fmtPct(r.totalPct)}</div></td>
+              <td className={clsx(td, 'text-right num', toneClass(r.realized))}>{r.sells ? m(r.realized, r.chain, true, r.realizedN) : '--'}</td>
+              <td className={clsx(td, 'text-right num font-bold', toneClass(r.total))}><div>{m(r.total, r.chain, true, r.totalN)}</div><div className="text-[10px] font-normal">{fmtPct(r.totalPct)}</div></td>
               <td className={clsx(td, 'text-right num text-muted')}>{fmtAge((tick - (pos?.openedAt ?? r.firstTick)) * SIM_SEC_PER_TICK)}</td>
               <td className={clsx(td, 'text-right')}>
                 <div className="flex justify-end gap-1">
@@ -718,11 +749,11 @@ function RecentPnl({ rows, m }: { rows: TokenPnl[]; m: Money }) {
               <td className={td}><TokenCell r={r} /></td>
               <td className={clsx(td, 'text-right num text-muted')}>{fmtAge((tick - r.lastTick) * SIM_SEC_PER_TICK)}</td>
               <td className={clsx(td, 'text-right num', toneClass(r.unrealized))}>{r.qty > 0 ? m(r.unrealized, r.chain, true) : '--'}</td>
-              <td className={clsx(td, 'text-right num', toneClass(r.realized))}>{r.sells ? m(r.realized, r.chain, true) : '--'}</td>
-              <td className={clsx(td, 'text-right num font-bold', toneClass(r.total))}><div>{m(r.total, r.chain, true)}</div><div className="text-[10px] font-normal">{fmtPct(r.totalPct)}</div></td>
+              <td className={clsx(td, 'text-right num', toneClass(r.realized))}>{r.sells ? m(r.realized, r.chain, true, r.realizedN) : '--'}</td>
+              <td className={clsx(td, 'text-right num font-bold', toneClass(r.total))}><div>{m(r.total, r.chain, true, r.totalN)}</div><div className="text-[10px] font-normal">{fmtPct(r.totalPct)}</div></td>
               <td className={clsx(td, 'text-right num')}>{r.qty > 0 ? m(r.value, r.chain) : <span className="text-dim">Sold all</span>}</td>
-              <td className={clsx(td, 'text-right num')}><div className="text-up">{m(r.bought, r.chain)}</div><div className="text-[10px] text-dim">{fmtPrice(r.boughtQty ? r.bought / r.boughtQty : 0)}</div></td>
-              <td className={clsx(td, 'text-right num')}>{r.sells ? <><div className="text-down">{m(r.sold, r.chain)}</div><div className="text-[10px] text-dim">{fmtPrice(r.soldQty ? r.soldGross / r.soldQty : 0)}</div></> : '--'}</td>
+              <td className={clsx(td, 'text-right num')}><div className="text-up">{m(r.bought, r.chain, false, r.boughtN)}</div><div className="text-[10px] text-dim">{fmtPrice(r.boughtQty ? r.bought / r.boughtQty : 0)}</div></td>
+              <td className={clsx(td, 'text-right num')}>{r.sells ? <><div className="text-down">{m(r.sold, r.chain, false, r.soldN)}</div><div className="text-[10px] text-dim">{fmtPrice(r.soldQty ? r.soldGross / r.soldQty : 0)}</div></> : '--'}</td>
               <td className={clsx(td, 'text-right num')}><span className="text-up">{r.buys}</span>/<span className="text-down">{r.sells}</span></td>
               <td className={clsx(td, 'text-right num text-muted')}>{fmtAge(held(r) * SIM_SEC_PER_TICK)}</td>
             </tr>
@@ -790,12 +821,12 @@ function Activity({ trades, m, showWallet }: { trades: Trade[]; m: Money; showWa
                         <ChainBadge chain={chain} />
                       </button>
                     </td>
-                    <td className={clsx(td, 'text-right num', buy ? 'text-up' : 'text-down')}>{m(t.value, chain)}</td>
+                    <td className={clsx(td, 'text-right num', buy ? 'text-up' : 'text-down')}>{m(t.value, chain, false, t.native)}</td>
                     <td className={clsx(td, 'text-right num text-muted')}>{fmtNum(t.qty)}</td>
                     <td className={clsx(td, 'text-right num')}>{fmtPrice(t.price)}</td>
                     <td className={clsx(td, 'text-right num text-muted')}>{fmtCompact(t.price * SUPPLY)}</td>
                     <td className={clsx(td, 'text-right num', t.pnl !== undefined ? toneClass(t.pnl) : 'text-dim')}>
-                      {t.pnl !== undefined ? <>{m(t.pnl, chain, true)}{t.pnlPct !== undefined && <span className="ml-1 text-[10px]">{fmtPct(t.pnlPct)}</span>}</> : '--'}
+                      {t.pnl !== undefined ? <>{m(t.pnl, chain, true, tradePx(t) ? t.pnl / tradePx(t)! : undefined)}{t.pnlPct !== undefined && <span className="ml-1 text-[10px]">{fmtPct(t.pnlPct)}</span>}</> : '--'}
                     </td>
                     {showWallet && <td className={clsx(td, 'text-muted')}>{walletName(t.walletId)}</td>}
                   </tr>
