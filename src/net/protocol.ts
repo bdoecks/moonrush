@@ -101,6 +101,10 @@ export type ServerMsg =
   | { t: 'candles'; tokenId: string; candles: Record<Timeframe, Candle[]> | null }
   | { t: 'chat'; from: string; name: string; avatar: string; text: string; time: number }
   | { t: 'error'; message: string }
+  // Admin: a message for everyone, being removed from the room, or money added to your round.
+  | { t: 'notice'; text: string }
+  | { t: 'kicked'; reason: string }
+  | { t: 'grant'; usd: number }
   | { t: 'sendResult'; ref: number; ok: boolean; error?: string; toName?: string }
   | TransferMsg
 

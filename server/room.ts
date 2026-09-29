@@ -1,7 +1,7 @@
 // One multiplayer room: a shared market ticking once a second, the players in it, and the current round.
 // The market code is the same the single-player game runs; browsers keep their own wallets and send trades here.
 import type { WebSocket } from 'ws'
-import { createMarket, candleStore, applyPlayerTrade, quoteBuy, quoteSell, secPerTickOf, setCandleLog, setClock, tickMarket, type CandlePoint } from '../src/game/marketEngine'
+import { adminMarket, type AdminMarketAction, createMarket, candleStore, applyPlayerTrade, quoteBuy, quoteSell, secPerTickOf, setCandleLog, setClock, tickMarket, type CandlePoint } from '../src/game/marketEngine'
 import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
 import { POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
@@ -408,6 +408,52 @@ export class Room {
     }
     this.lastWalletTradeId = max
     return out
+  }
+
+  // ─── Admin ─────────────────────────────────────────────────────────────────
+  summary() {
+    return {
+      code: this.code, hostId: this.hostId, round: { state: this.round.state, mode: this.round.mode, engine: this.round.engine ?? 'classic', tick: this.market.tick },
+      players: this.playerList(), emptySince: this.emptySince,
+      coins: this.market.tokens.filter((t) => t.status === 'bonding' || t.status === 'graduated').sort((a, b) => b.mcap - a.mcap).slice(0, 60)
+        .map((t) => ({ id: t.id, ticker: t.ticker, emoji: t.emoji, chain: t.chain, mcap: t.mcap, status: t.status, creator: (t as NetToken).creatorName ?? null })),
+      sentiment: this.market.sentiment,
+    }
+  }
+
+  /** Remove a player (they're told why). */
+  kick(playerId: string, reason: string) {
+    const m = this.members.get(playerId)
+    if (!m) return false
+    if (m.ws) {
+      this.send(m.ws, { t: 'kicked', reason })
+      m.ws.close(4003, 'kicked')
+    }
+    this.members.delete(playerId)
+    if (this.hostId === playerId) this.hostId = [...this.members.keys()][0] ?? ''
+    this.playersDirty = true
+    this.broadcastPlayers()
+    return true
+  }
+
+  notice(text: string) {
+    this.broadcast({ t: 'notice', text: text.slice(0, 200) })
+  }
+
+  grant(playerId: string, usd: number) {
+    if (!this.members.has(playerId)) return false
+    this.sendTo(playerId, { t: 'grant', usd })
+    return true
+  }
+
+  /** God mode on this room's market (hidden: it looks like normal trading). */
+  adminMarket(a: AdminMarketAction) {
+    setClock(secPerTickOf(this.market))
+    setCandleLog(this.pending)
+    const res = adminMarket(this.market, a, new Rng((Date.now() ^ this.market.seed) >>> 0))
+    this.market = res.market
+    if (res.tokenId) this.freshIds.add(res.tokenId)
+    return res
   }
 
   private playerList(): RoomPlayer[] {

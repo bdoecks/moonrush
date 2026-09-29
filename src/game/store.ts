@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { SocialProfile, CashbackState, SniperTask, Trade, VolumeBot, Chain, Challenge, CookSpec, CopyConfig, GameMode, LaunchRecord, MarketEvent, MarketState, Player, Portfolio, Profile, RunStatus, Settings, PriceAlert, RewardClaim, RewardsState, SimWallet, SocialPost, Toast, Token, TrackerSettings, WalletAction, WalletActionKind, WalletLabel } from '../types'
 import { clamp, Rng } from '../utils/rng'
-import { EVENTS_DISABLED } from './flags'
+import { useFlags } from './flags'
 import { fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { fakeAddress } from '../utils/address'
 import { playSfx, type Sfx } from '../utils/sound'
@@ -24,7 +24,7 @@ import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import type { ClientMsg, RoomPlayer, RoundInfo } from '../net/protocol'
 import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
 
-export type View = 'discover' | 'trenches' | 'token' | 'portfolio' | 'missions' | 'leaderboard' | 'cooking' | 'copytrade' | 'sniper' | 'monitor' | 'track' | 'rewards'
+export type View = 'discover' | 'trenches' | 'token' | 'portfolio' | 'missions' | 'leaderboard' | 'cooking' | 'copytrade' | 'sniper' | 'monitor' | 'track' | 'rewards' | 'admin'
 export type DockTab = 'positions' | 'watchlist' | 'history' | 'feed' | 'tracker' | 'social'
 export type Modal = null | 'settings' | 'help' | 'mode' | 'results' | 'lobby'
 
@@ -1044,7 +1044,7 @@ export const useGame = create<GameState>()((set, get) => {
       })
 
       // Notifications: anything touching your bags or watchlist, market-wide moves, and a throttled sample of the rest.
-      const eventToasts = s.settings.eventToasts !== false && !EVENTS_DISABLED
+      const eventToasts = s.settings.eventToasts !== false && useFlags.getState().eventPopups
       for (const e of newEvents) {
         const mine = e.tokenId && (held.includes(e.tokenId) || s.watchlist.includes(e.tokenId))
         const ev = { kind: 'event' as const, tokenId: e.tokenId }

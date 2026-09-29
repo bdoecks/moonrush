@@ -22,6 +22,9 @@ import { SniperView } from './pages/SniperView'
 import { PnlCard } from './components/PnlCard'
 import { MonitorView } from './pages/MonitorView'
 import { TrackView } from './pages/TrackView'
+import { AdminView } from './pages/AdminView'
+import { NoticeBanner } from './components/NoticeBanner'
+import { watchFlags } from './game/flags'
 import { DiscoverView } from './pages/DiscoverView'
 import { TrenchesView } from './pages/TrenchesView'
 import { LeaderboardView } from './pages/LeaderboardView'
@@ -81,6 +84,7 @@ export default function App() {
 
   // Your account (if signed in) first, so rejoining a room uses it; then back into the room you were in.
   useEffect(() => {
+    watchFlags() // live game switches the admin sets
     initAccount()
     return whenAccountReady(resumeRoom)
   }, [])
@@ -95,6 +99,7 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <TopBar />
+      <NoticeBanner />
       <TickerStrip />
       <div className="flex min-h-0 flex-1">
         {/* Wallet + social trackers; places itself on the left or right edge. */}
@@ -121,6 +126,7 @@ export default function App() {
               </Suspense>
             )}
             {view === 'leaderboard' && <LeaderboardView />}
+            {view === 'admin' && <AdminView />}
           </div>
           {(view === 'discover' || view === 'trenches') && <Dock />}
         </main>

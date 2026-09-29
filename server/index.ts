@@ -6,14 +6,16 @@ import { extname, join, normalize } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { MP_PATH, type ClientMsg, type ServerMsg } from '../src/net/protocol'
 import { Room } from './room'
-import { nameTaken, verifyToken } from './auth'
+import { isBanned, nameTaken, verifyToken } from './auth'
+import { bannedGuests, handleAdmin } from './admin'
 
 /**
  * Who's joining: signed in (token checks out) → their account id and name; otherwise a guest, who can't use an
  * account's id (u-…) or a registered name.
  */
-async function identify(msg: Extract<ClientMsg, { t: 'hello' }>): Promise<{ playerId: string; name: string; avatar: string; verified: boolean }> {
+async function identify(msg: Extract<ClientMsg, { t: 'hello' }>): Promise<{ playerId: string; name: string; avatar: string; verified: boolean; banned?: boolean }> {
   const v = await verifyToken(msg.token)
+  if (v && (await isBanned(v.id))) return { playerId: `u-${v.id}`, name: v.username, avatar: '', verified: true, banned: true }
   if (v) return { playerId: `u-${v.id}`, name: v.username, avatar: String(msg.avatar || v.avatar).slice(0, 8), verified: true }
   const pid = String(msg.playerId).startsWith('u-') ? `g-${String(msg.playerId).slice(2, 14)}` : String(msg.playerId).slice(0, 64)
   let name = String(msg.name ?? '').trim().slice(0, 16) || 'Anon'
@@ -40,6 +42,10 @@ const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javas
 
 const http = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')
+  if (url.pathname.startsWith('/admin/api/')) {
+    void handleAdmin(req, res, url.pathname, rooms)
+    return
+  }
   if (url.pathname === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ ok: true, rooms: rooms.size, players: [...rooms.values()].reduce((a, r) => a + [...r.members.values()].filter((m) => m.info.online).length, 0) }))
@@ -88,6 +94,7 @@ wss.on('connection', (ws: WebSocket) => {
         const queued = joining ?? []
         joining = null
         if (ws.readyState !== ws.OPEN) return
+        if (who.banned || bannedGuests.has(who.playerId)) return fail('You are banned from MOONRUSH rooms')
         enter({ ...msg, ...who })
         for (const m of queued) if (room) room.handle(playerId, m)
       })

@@ -1100,3 +1100,50 @@ export function cookToken(prev: MarketState, rng: Rng, spec: CookSpec): { market
   }
   return { market: { ...prev, tokens: [t, ...prev.tokens] }, token: t, event }
 }
+
+// ─── Admin tools (god mode) ──────────────────────────────────────────────────
+// Hidden on purpose: pumps and dumps are split across made-up wallets, a rug plays out like any other rug, and a
+// spawned coin launches like any other. Used by the room server and, in solo, by the admin's own browser.
+export type AdminMarketAction =
+  | { kind: 'pump' | 'dump'; tokenId: string; usd: number }
+  | { kind: 'rug'; tokenId: string }
+  | { kind: 'spawn'; chain: Chain; archetype: Archetype }
+  | { kind: 'mood'; sentiment: number }
+
+export function adminMarket(prev: MarketState, a: AdminMarketAction, rng: Rng): { market: MarketState; error?: string; tokenId?: string } {
+  let m = prev
+  if (a.kind === 'mood') {
+    const s = Math.max(-1, Math.min(1, a.sentiment))
+    return { market: { ...m, sentiment: s, sentimentTrend: s >= m.sentiment ? 1 : -1 } }
+  }
+  if (a.kind === 'spawn') {
+    const base = generatedLaunch(m.launched)
+    let ticker = base.ticker
+    for (let k = 2; k < 9 && m.tokens.some((t) => t.ticker === ticker); k++) ticker = `${base.ticker}${k}`
+    const t = makeToken(rng, { ...base, ticker, chain: a.chain, archetype: a.archetype }, m.time, true, m.native)
+    pushCandles(t, m.time, t.price, 0)
+    return { market: { ...m, launched: m.launched + 1, tokens: [t, ...m.tokens] }, tokenId: t.id }
+  }
+  const t = m.tokens.find((x) => x.id === a.tokenId)
+  if (!t || (t.status !== 'bonding' && t.status !== 'graduated')) return { market: m, error: 'That coin is not trading' }
+  if (a.kind === 'rug') {
+    // The dev pulls on the next tick, exactly like a natural rug (same event, same chart).
+    return { market: { ...m, tokens: m.tokens.map((x) => (x.id === t.id ? { ...x, sim: { ...x.sim, rugAt: m.tick } } : x)) } }
+  }
+  const usd = Math.max(1, Math.min(5_000_000, a.usd))
+  // Split into a few trades from different wallets so it reads like a crowd, not one whale.
+  const parts = Math.max(1, Math.min(8, Math.round(Math.log10(usd))))
+  for (let i = 0; i < parts; i++) {
+    const cur = m.tokens.find((x) => x.id === t.id)!
+    if (cur.status !== 'bonding' && cur.status !== 'graduated') break
+    const slice = (usd / parts) * (0.6 + rng.next() * 0.8)
+    if (a.kind === 'pump') {
+      m = applyPlayerTrade(m, cur.id, 'buy', slice, quoteBuy(cur, slice).newPrice, { name: walletName(rng) })
+    } else {
+      const qty = Math.min(slice / cur.price, SUPPLY * 0.2)
+      const q = quoteSell(cur, qty)
+      m = applyPlayerTrade(m, cur.id, 'sell', qty * cur.price, Math.max(1e-13, q.newPrice), { name: walletName(rng) })
+    }
+  }
+  return { market: m }
+}

@@ -43,3 +43,34 @@ export async function nameTaken(name: string): Promise<boolean> {
   const rows = await get<unknown[]>(`/rest/v1/profiles?username=ilike.${encodeURIComponent(name.replace(/_/g, '\_'))}&select=id&limit=1`)
   return !!rows?.length
 }
+
+/** Is this login on the admin list? (Asks the database, which only says yes for the admin's own token.) */
+const adminCache = new Map<string, { ok: boolean; until: number }>()
+export async function isAdmin(token: string | undefined): Promise<boolean> {
+  if (!token) return false
+  const hit = adminCache.get(token)
+  if (hit && hit.until > Date.now()) return hit.ok
+  const v = await verifyToken(token)
+  let ok = false
+  if (v) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/is_admin`, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(TIMEOUT),
+      })
+      ok = res.ok && (await res.json()) === true
+    } catch {
+      ok = false
+    }
+  }
+  adminCache.set(token, { ok, until: Date.now() + 5 * 60_000 })
+  return ok
+}
+
+/** Banned accounts can't join rooms. */
+export async function isBanned(userId: string): Promise<boolean> {
+  const rows = await get<unknown[]>(`/rest/v1/bans?user_id=eq.${userId}&select=user_id`)
+  return !!rows?.length
+}

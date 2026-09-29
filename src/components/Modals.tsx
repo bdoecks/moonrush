@@ -8,6 +8,8 @@ import { fmtClock, fmtPct, fmtUsd, toneClass } from '../utils/format'
 import { Logo } from './TopBar'
 import { Kbd, Modal, Segmented, Toggle } from './ui'
 import { LobbyModal } from './Multiplayer'
+import { useFlags } from '../game/flags'
+import { useAccount } from '../net/account'
 
 const MODE_ICON: Record<GameMode, string> = { practice: '🧪', challenge: '🎯', arena: '⚔️', hardcore: '☠️' }
 
@@ -37,6 +39,8 @@ function ModeModal() {
   const [confirmEnd, setConfirmEnd] = useState(false)
   const closable = runStatus !== 'select'
 
+  const mpOn = useFlags((s) => s.multiplayer)
+  const isAdmin = useAccount((s) => s.admin)
   const choose = (m: GameMode) => {
     if (runStatus === 'running' && !confirm) return setConfirm(m)
     startRun(m)
@@ -64,7 +68,7 @@ function ModeModal() {
         ))}
       </div>
       {/* The shared claude.ai copy has no game server behind it, so it's solo only (built with VITE_NO_MP=1). */}
-      {!import.meta.env.VITE_NO_MP && <button onClick={() => setModal('lobby')} className="mb-3 flex w-full items-center gap-3 rounded-lg border border-accent/40 bg-accent/5 p-3 text-left transition-all hover:-translate-y-0.5 hover:bg-accent/10">
+      {!import.meta.env.VITE_NO_MP && (mpOn || isAdmin) && <button onClick={() => setModal('lobby')} className="mb-3 flex w-full items-center gap-3 rounded-lg border border-accent/40 bg-accent/5 p-3 text-left transition-all hover:-translate-y-0.5 hover:bg-accent/10">
         <span className="text-[22px]">👥</span>
         <span>
           <span className="block font-display text-[15px] font-bold text-accent">Play with friends</span>

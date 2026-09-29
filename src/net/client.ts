@@ -263,12 +263,28 @@ function onMessage(msg: ServerMsg) {
     }
     case 'recv':
       return onRecv(msg)
+    case 'notice':
+      return st.notify({ title: 'ANNOUNCEMENT', body: msg.text, tone: 'info', icon: '📢' }, 'alert')
+    case 'kicked':
+      // Removed by an admin: back to single-player, and don't try to reconnect.
+      save('mpNotice', msg.reason)
+      remove('mpRoom')
+      return leaveRoom()
+    case 'grant': {
+      // Admin gift: straight into your USD bank (quietly).
+      if (st.runStatus !== 'running') return
+      return st.patchState({ portfolio: { ...st.portfolio, cash: Math.max(0, st.portfolio.cash + msg.usd) } })
+    }
     case 'error':
       if (pending) {
         pending.reject(new Error(msg.message))
         pending = null
         leaving = true
         ws?.close()
+      } else if (/banned/i.test(msg.message)) {
+        save('mpNotice', msg.message)
+        remove('mpRoom')
+        leaveRoom()
       } else if (/no room/i.test(msg.message)) {
         // The room closed (server restarted or everyone left long ago): stop retrying and go back to solo.
         save('mpNotice', `Room ${st.online?.code ?? ''} closed. You're back in single-player.`)

@@ -22,6 +22,7 @@ interface AccountState {
   profile: AccountProfile | null
   syncedAt: number | null
   syncError: string | null
+  admin: boolean // on the admin list (the server and database check this too)
 }
 
 export const useAccount = create<AccountState>(() => ({
@@ -31,6 +32,7 @@ export const useAccount = create<AccountState>(() => ({
   profile: null,
   syncedAt: null,
   syncError: null,
+  admin: false,
 }))
 
 interface CloudSave {
@@ -38,11 +40,17 @@ interface CloudSave {
   rewards: RewardsState | null
   settings: Partial<Settings> | null
   updated_at: string
+  admin_rev?: number // bumped when an admin edits this save: the player's game must take it
 }
+
+const BLANK_PROFILE: Profile = { xp: 0, bestReturnPct: 0, runsPlayed: 0, lifetimeTrades: 0 }
+const revKey = (uid: string) => `adminRev:${uid}`
+const knownRev = (uid: string) => load<number>(revKey(uid)) ?? 0
 
 const SYNC_MS = 15_000
 let syncTimer: ReturnType<typeof setTimeout> | null = null
 let unsubStore: (() => void) | null = null
+let revTimer: ReturnType<typeof setInterval> | null = null
 let applying = false // while we write cloud data into the game, don't echo it back
 
 /** Your multiplayer id while signed in: the same on every device. */
@@ -162,18 +170,23 @@ async function onSignedIn(session: Session) {
   save('mpAvatar', prof.avatar)
 
   // Progress: this device's progress vs the cloud's.
-  const { data: cloud } = await supabase.from('saves').select('profile, rewards, settings, updated_at').eq('user_id', uid).maybeSingle<CloudSave>()
+  // select('*') so this still works before the admin column exists.
+  const { data: cloud } = await supabase.from('saves').select('*').eq('user_id', uid).maybeSingle<CloudSave>()
   const owner = load<string>('accountOwner') // whose progress is on this device
   const local = useGame.getState().profile
   const foreign = !!owner && owner !== uid // another account's progress is on this device
   let push = !cloud
   if (cloud) {
     // Take the cloud save if it's further along (or this device holds someone else's); otherwise this device wins.
-    if (foreign || (cloud.profile?.xp ?? 0) >= (local.xp ?? 0)) applyCloud(cloud)
+    // An admin edit (reset, XP gift) always wins.
+    const adminEdit = (cloud.admin_rev ?? 0) > knownRev(uid)
+    if (adminEdit || foreign || (cloud.profile?.xp ?? 0) >= (local.xp ?? 0)) applyCloud(cloud, adminEdit)
     else push = true
+    save(revKey(uid), cloud.admin_rev ?? 0)
   }
   save('accountOwner', uid)
-  useAccount.setState({ status: 'signedIn', profile: prof, syncError: null })
+  const { data: adminRow } = await supabase.from('admins').select('user_id').eq('user_id', uid).maybeSingle()
+  useAccount.setState({ status: 'signedIn', profile: prof, syncError: null, admin: !!adminRow })
   if (push) await flushSync()
   else useAccount.setState({ syncedAt: Date.now() })
   watchStore()
@@ -183,14 +196,15 @@ function onSignedOut() {
   unsubStore?.()
   unsubStore = null
   if (syncTimer) clearTimeout(syncTimer)
-  useAccount.setState({ status: 'guest', userId: null, email: null, profile: null, syncedAt: null, syncError: null })
+  useAccount.setState({ status: 'guest', userId: null, email: null, profile: null, syncedAt: null, syncError: null, admin: false })
 }
 
-function applyCloud(c: CloudSave) {
+/** `replace`: an admin edit (a reset must really reset), not a merge onto what this device had. */
+function applyCloud(c: CloudSave, replace = false) {
   applying = true
   const g = useGame.getState()
-  const profile = { ...g.profile, ...c.profile }
-  const rewards = c.rewards ? { ...g.rewards, ...c.rewards } : g.rewards
+  const profile = replace ? ({ ...BLANK_PROFILE, ...(c.profile as Partial<Profile>) } as Profile) : { ...g.profile, ...c.profile }
+  const rewards = c.rewards ? (replace ? c.rewards : { ...g.rewards, ...c.rewards }) : g.rewards
   // Device-only settings (window layout) stay; game settings come from the cloud.
   const settings = c.settings ? { ...g.settings, ...c.settings, trackerDock: g.settings.trackerDock } : g.settings
   useGame.setState({ profile, rewards, settings })
@@ -207,6 +221,8 @@ function watchStore() {
     if (s.profile !== prev.profile || s.rewards !== prev.rewards || s.settings !== prev.settings) scheduleSync()
   })
   window.addEventListener('pagehide', () => void flushSync())
+  // Admin edits reach you mid-session too.
+  if (!revTimer) revTimer = setInterval(() => void pullAdminEdit(), 60_000)
   document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && void flushSync())
 }
 
@@ -219,6 +235,18 @@ function scheduleSync() {
 }
 
 /** Upload your progress and refresh your public card (level, season points). */
+/** Take an admin's edit of your save if there is one. Returns true if it did. */
+async function pullAdminEdit(): Promise<boolean> {
+  const uid = useAccount.getState().userId
+  if (!supabase || !uid) return false
+  const { data } = await supabase.from('saves').select('*').eq('user_id', uid).maybeSingle<CloudSave>()
+  if (!data || (data.admin_rev ?? 0) <= knownRev(uid)) return false
+  applyCloud(data, true)
+  save(revKey(uid), data.admin_rev ?? 0)
+  useAccount.setState({ syncedAt: Date.now(), syncError: null })
+  return true
+}
+
 export async function flushSync() {
   const a = useAccount.getState()
   if (!supabase || !a.userId || a.status === 'loading') return
@@ -226,6 +254,8 @@ export async function flushSync() {
     clearTimeout(syncTimer)
     syncTimer = null
   }
+  // If an admin changed your save since we last looked, take theirs instead of overwriting it.
+  if (await pullAdminEdit()) return
   const g = useGame.getState()
   const now = new Date().toISOString()
   const points = g.profile.season?.id === seasonNumber() ? g.profile.season.points : 0

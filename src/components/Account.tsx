@@ -10,6 +10,19 @@ import { Modal } from './ui'
 
 export const AVATARS = ['🐸', '🐶', '🐱', '🦊', '🐼', '🐵', '🦍', '🐳', '🦄', '🤖', '👽', '🧙', '🥷', '🤠', '🦈', '🐙']
 
+/** Top-bar 🛠 button to the admin panel: only for admins. */
+export function AdminButton() {
+  const admin = useAccount((s) => s.admin)
+  const view = useGame((s) => s.view)
+  const setView = useGame((s) => s.setView)
+  if (!admin) return null
+  return (
+    <button onClick={() => setView('admin')} title="Admin panel" className={clsx('flex h-7 items-center gap-1 rounded-md border px-1.5 text-[11px] font-bold', view === 'admin' ? 'border-warn bg-warn/15 text-warn' : 'border-warn/50 text-warn hover:bg-warn/10')}>
+      🛠<span className="hidden sm:inline">Admin</span>
+    </button>
+  )
+}
+
 /** Top-bar button: your account (or "Sign in"). */
 export function AccountButton() {
   const status = useAccount((s) => s.status)

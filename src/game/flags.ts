@@ -1,8 +1,38 @@
-// Feature switches.
+// Game switches the admin flips live from the admin panel (stored in Supabase `app_flags`, read by every game and
+// refreshed every minute). Until they load, the safe defaults below apply.
+import { create } from 'zustand'
+import { supabase } from '../net/supabase'
 
-/**
- * Market events feed and event pop-ups are switched off for now: announcing pumps ("+38% in 1m", trending, going
- * parabolic) and then buying them looked like free money. The Events tab stays visible but shows a notice.
- * Warnings about coins you hold getting rugged still show.
- */
-export const EVENTS_DISABLED = true
+export interface GameFlags {
+  events: boolean // market events feed (off: showing announced pumps looked like free money)
+  eventPopups: boolean // market event pop-ups (rug warnings for your own bags always show)
+  multiplayer: boolean // "Play with friends"
+  notice: string // banner at the top for everyone ('' = none)
+}
+
+export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, notice: '' }
+
+export const useFlags = create<GameFlags & { loaded: boolean }>(() => ({ ...DEFAULT_FLAGS, loaded: false }))
+
+export async function loadFlags() {
+  if (!supabase) return
+  const { data } = await supabase.from('app_flags').select('key, value')
+  if (!data) return
+  const next: Partial<GameFlags> = {}
+  for (const row of data as { key: keyof GameFlags; value: never }[]) if (row.key in DEFAULT_FLAGS) next[row.key] = row.value
+  useFlags.setState({ ...next, loaded: true })
+}
+
+let timer: ReturnType<typeof setInterval> | null = null
+export function watchFlags() {
+  void loadFlags()
+  if (!timer) timer = setInterval(() => void loadFlags(), 60_000)
+}
+
+/** Admin only (the database refuses anyone else). */
+export async function setFlag<K extends keyof GameFlags>(key: K, value: GameFlags[K]) {
+  if (!supabase) return 'Accounts are off'
+  const { error } = await supabase.from('app_flags').upsert({ key, value, updated_at: new Date().toISOString() })
+  if (!error) useFlags.setState({ [key]: value } as Partial<GameFlags>)
+  return error?.message ?? null
+}
