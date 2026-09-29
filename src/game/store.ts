@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { SocialProfile, CashbackState, SniperTask, Trade, VolumeBot, Chain, Challenge, CookSpec, CopyConfig, GameMode, LaunchRecord, MarketEvent, MarketState, Player, Portfolio, Profile, RunStatus, Settings, PriceAlert, RewardClaim, RewardsState, SimWallet, SocialPost, Toast, Token, TrackerSettings, WalletAction, WalletActionKind, WalletLabel } from '../types'
 import { clamp, Rng } from '../utils/rng'
 import { useFlags } from './flags'
+import { restoreCharts, saveCharts } from './chartSave'
 import { fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { fakeAddress } from '../utils/address'
 import { playSfx, type Sfx } from '../utils/sound'
@@ -458,6 +459,7 @@ function initialState() {
     setClock(secPerTickOf(saved.market)) // before rebuilding charts: their spacing depends on the clock
     migrateMarket(saved.market)
     rebuildCandles(saved.market)
+    restoreCharts(saved.market) // the real history of coins you traded, so your trade markers still line up
     const portfolio = ensureAccounts({ ...saved.portfolio, balances: saved.portfolio.balances ?? emptyBalances() })
     if (saved.dayKey !== dayKey()) {
       const v = valuePortfolio(portfolio, new Map(saved.market.tokens.map((t) => [t.id, t])), saved.market)
@@ -492,6 +494,7 @@ function initialState() {
 export const useGame = create<GameState>()((set, get) => {
   const init = initialState()
 
+  let lastChartSave = 0
   function persist() {
     const s = get()
     if (s.online) {
@@ -517,6 +520,12 @@ export const useGame = create<GameState>()((set, get) => {
     save('run', data)
     save('profile', s.profile)
     save('rewards', s.rewards)
+    // Charts of the coins you're in or traded (throttled: they're bigger than the rest of the save).
+    if (Date.now() - lastChartSave > 15_000) {
+      lastChartSave = Date.now()
+      const traded = s.portfolio.trades.slice(0, 60).map((t) => t.tokenId)
+      saveCharts([...Object.keys(s.portfolio.positions), ...(s.selectedId ? [s.selectedId] : []), ...traded])
+    }
   }
 
   /** A failed on-chain order (slippage) still burns its priority fee, from the wallet that sent it. */
@@ -2100,3 +2109,14 @@ useGame.subscribe((s, prev) => {
 
 export const TICK_REAL_SECONDS = 1
 export const simSecondsToTicks = (sec: number) => sec / SIM_SEC_PER_TICK
+
+// Leaving or reloading the page: save the latest charts of your coins too (solo rounds only; rooms get theirs from
+// the server).
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    const s = useGame.getState()
+    if (s.online || s.runStatus === 'select') return
+    const traded = s.portfolio.trades.slice(0, 60).map((t) => t.tokenId)
+    saveCharts([...Object.keys(s.portfolio.positions), ...(s.selectedId ? [s.selectedId] : []), ...traded])
+  })
+}
