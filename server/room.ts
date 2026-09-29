@@ -1,7 +1,7 @@
 // One multiplayer room: a shared market ticking once a second, the players in it, and the current round.
 // The market code is the same the single-player game runs; browsers keep their own wallets and send trades here.
 import type { WebSocket } from 'ws'
-import { adminMarket, type AdminMarketAction, createMarket, candleStore, applyPlayerTrade, quoteBuy, quoteSell, secPerTickOf, setCandleLog, setClock, tickMarket, type CandlePoint } from '../src/game/marketEngine'
+import { adminMarket, type AdminMarketAction, rebuildCandlesFor, createMarket, candleStore, applyPlayerTrade, quoteBuy, quoteSell, secPerTickOf, setCandleLog, setClock, tickMarket, type CandlePoint } from '../src/game/marketEngine'
 import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
 import { POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
@@ -10,7 +10,7 @@ import { walletAddress } from '../src/utils/address'
 import { flagBundle, runBotTick, sleuthBundle } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
-import type { GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Trade, VolumeBot } from '../src/types'
+import type { Candle, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
 import type { BotRun, ClientMsg, NetMarket, NetToken, RoomPlayer, RoundInfo, ServerMsg, TickMsg, TokenDiff, TransferMsg, WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
@@ -46,6 +46,26 @@ interface Member {
   ack: number
 }
 
+/** A chart candle as saved: [time, open, high, low, close, volume]. */
+type PackedCandle = [number, number, number, number, number, number]
+/** The chart timeframes saved with a room (the short ones are re-drawn on restore). */
+const SAVED_TFS: Timeframe[] = ['1m', '5m', '15m', '1h', '4h']
+
+export interface RoomSnapshot {
+  v: 1
+  code: string
+  hostId: string
+  round: RoundInfo
+  market: MarketState
+  wallets: SimWallet[]
+  posts: SocialPost[]
+  events: MarketEvent[]
+  bots: [string, VolumeBot][]
+  lastTapeId: number
+  lastWalletTradeId: number
+  members: Omit<Member, 'ws' | 'ack'>[]
+}
+
 export class Room {
   readonly code: string
   hostId = ''
@@ -78,6 +98,61 @@ export class Room {
   dispose() {
     clearInterval(this.timer)
     for (const t of this.market.tokens) candleStore.delete(t.id)
+  }
+
+  // ─── Saving (Phase 2): a room survives server restarts / updates ─────────────
+  /** Everything needed to bring this room back after a restart (players reconnect to it). */
+  snapshot(): RoomSnapshot {
+    return {
+      v: 1, code: this.code, hostId: this.hostId, round: this.round, market: this.market, wallets: this.wallets,
+      posts: this.posts.slice(0, 80), events: this.events.slice(0, 80), bots: [...this.bots.entries()],
+      lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId,
+      members: [...this.members.values()].map((m) => ({ info: { ...m.info, online: false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick })),
+    }
+  }
+
+  /** The longer chart timeframes (1m and up) of this room's live coins; the short ones are re-drawn on restore. */
+  chartSnapshot(): Record<string, Partial<Record<Timeframe, PackedCandle[]>>> {
+    const out: Record<string, Partial<Record<Timeframe, PackedCandle[]>>> = {}
+    const sig = (n: number) => (n === 0 ? 0 : Number(n.toPrecision(6)))
+    for (const t of this.market.tokens) {
+      if (!live(t)) continue
+      const c = candleStore.get(t.id)
+      if (!c) continue
+      const tfs: Partial<Record<Timeframe, PackedCandle[]>> = {}
+      for (const tf of SAVED_TFS) tfs[tf] = (c[tf] ?? []).map((k) => [k.time, sig(k.open), sig(k.high), sig(k.low), sig(k.close), sig(k.volume)])
+      out[t.id] = tfs
+    }
+    return out
+  }
+
+  /** Bring a saved room back: its market, round, players (offline until they reconnect) and their wallets. */
+  static restore(s: RoomSnapshot, charts?: Record<string, Partial<Record<Timeframe, PackedCandle[]>>> | null): Room {
+    const r = new Room(s.code)
+    r.hostId = s.hostId
+    r.round = s.round
+    r.market = s.market
+    r.wallets = s.wallets ?? []
+    r.posts = s.posts ?? []
+    r.events = s.events ?? []
+    r.bots = new Map(s.bots ?? [])
+    r.lastTapeId = s.lastTapeId ?? r.market.nextTradeId - 1
+    r.lastWalletTradeId = s.lastWalletTradeId ?? r.market.nextTradeId - 1
+    for (const m of s.members ?? []) r.members.set(m.info.id, { ...m, ws: null, ack: 0, info: { ...m.info, online: false } })
+    r.emptySince = Date.now()
+    // Charts: re-draw every coin to end at its price, then put back the real longer timeframes we saved.
+    setClock(secPerTickOf(r.market))
+    rebuildCandlesFor(r.market)
+    for (const [id, tfs] of Object.entries(charts ?? {})) {
+      const c = candleStore.get(id)
+      if (!c) continue
+      for (const [tf, arr] of Object.entries(tfs) as [Timeframe, PackedCandle[]][]) {
+        if (Array.isArray(arr) && arr.length) c[tf] = arr.map(([time, open, high, low, close, volume]): Candle => ({ time, open, high, low, close, volume }))
+      }
+    }
+    r.sentTokens.clear() // first tick after restore sends every coin in full
+    r.sentWallets.clear()
+    return r
   }
 
   // ─── Players ───────────────────────────────────────────────────────────────

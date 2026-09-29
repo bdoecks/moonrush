@@ -355,6 +355,17 @@ export function createMarket(seed: number, startTime = Math.floor(Date.now() / 1
   return { tick: 0, time: startTime, sentiment: 0.1, sentimentTrend: 0, tokens, seed: rng.s, nextTradeId: 1, launched: 6, native: initNative(), engine }
 }
 
+/** Server: rebuild the charts of one room's coins without touching other rooms' (the candle store is shared). */
+export function rebuildCandlesFor(m: MarketState) {
+  const rng = new Rng(m.seed ^ 0x9e3779b9)
+  for (const t of m.tokens) {
+    candleStore.delete(t.id)
+    const ath = t.ath
+    buildHistory(t, m.time, rng)
+    t.ath = Math.max(ath, t.ath)
+  }
+}
+
 /** After loading a saved market, candles are regenerated to end at each token's current price. */
 export function rebuildCandles(m: MarketState) {
   const rng = new Rng(m.seed ^ 0x9e3779b9)

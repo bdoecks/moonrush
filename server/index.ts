@@ -5,9 +5,10 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { MP_PATH, type ClientMsg, type ServerMsg } from '../src/net/protocol'
-import { Room } from './room'
+import { Room, type RoomSnapshot } from './room'
 import { isBanned, nameTaken, verifyToken } from './auth'
 import { bannedGuests, handleAdmin } from './admin'
+import { deleteRoom, loadRoom, persistOn, saveRoom } from './persist'
 
 /**
  * Who's joining: signed in (token checks out) → their account id and name; otherwise a guest, who can't use an
@@ -48,7 +49,7 @@ const http = createServer((req, res) => {
   }
   if (url.pathname === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ ok: true, rooms: rooms.size, players: [...rooms.values()].reduce((a, r) => a + [...r.members.values()].filter((m) => m.info.online).length, 0) }))
+    res.end(JSON.stringify({ ok: true, saving: persistOn, rooms: rooms.size, players: [...rooms.values()].reduce((a, r) => a + [...r.members.values()].filter((m) => m.info.online).length, 0) }))
     return
   }
   // Serve the built game if there is one (production); otherwise a small status page.
@@ -90,7 +91,7 @@ wss.on('connection', (ws: WebSocket) => {
     if (!room) {
       if (msg.t !== 'hello' || !msg.playerId) return fail('Say hello first')
       joining = []
-      void identify(msg).then((who) => {
+      void Promise.all([identify(msg), msg.create ? null : revive(String(msg.room ?? '').toUpperCase())]).then(([who]) => {
         const queued = joining ?? []
         joining = null
         if (ws.readyState !== ws.OPEN) return
@@ -119,14 +120,61 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('close', () => room?.leave(playerId, ws))
 })
 
+// ─── Saving rooms (Phase 2) ──────────────────────────────────────────────────
+/** A room that isn't running here (e.g. after an update restarted the server): bring it back from the database. */
+const reviving = new Map<string, Promise<void>>()
+function revive(code: string): Promise<void> {
+  if (!persistOn || rooms.has(code) || !/^[A-Z0-9]{5}$/.test(code)) return Promise.resolve()
+  let p = reviving.get(code)
+  if (!p) {
+    p = loadRoom(code).then((saved) => {
+      if (saved && !rooms.has(code)) {
+        try {
+          rooms.set(code, Room.restore(saved.state as RoomSnapshot, saved.charts as never))
+          console.log(`[persist] room ${code} restored`)
+        } catch (e) {
+          console.warn(`[persist] couldn't restore ${code}:`, e instanceof Error ? e.message : e)
+        }
+      }
+    }).finally(() => reviving.delete(code))
+    reviving.set(code, p)
+  }
+  return p
+}
+
+/** Save every room (charts too when asked; they're bigger, so only every few minutes and at shutdown). */
+async function saveAll(withCharts: boolean) {
+  await Promise.all([...rooms.values()].map((r) => saveRoom(r.code, r.snapshot(), withCharts ? r.chartSnapshot() : undefined)))
+}
+let lastCharts = 0
+setInterval(() => {
+  const charts = Date.now() - lastCharts > 3 * 60_000
+  if (charts) lastCharts = Date.now()
+  void saveAll(charts)
+}, 20_000)
+
+// An update or restart: save everything (with charts) before the server stops, so everyone picks up where they were.
+let stopping = false
+for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(sig, () => {
+    if (stopping) return
+    stopping = true
+    console.log(`[persist] ${sig}: saving ${rooms.size} room(s)…`)
+    const done = () => process.exit(0)
+    setTimeout(done, 20_000).unref() // don't hang forever
+    void saveAll(true).then(done, done)
+  })
+}
+
 // Close rooms nobody has been in for a while.
 setInterval(() => {
   for (const [code, r] of rooms) {
     if (r.emptySince && Date.now() - r.emptySince > ROOM_IDLE_MS) {
       r.dispose()
       rooms.delete(code)
+      void deleteRoom(code)
     }
   }
 }, 60_000)
 
-http.listen(PORT, () => console.log(`MOONRUSH multiplayer server on http://localhost:${PORT} (ws path ${MP_PATH})`))
+http.listen(PORT, () => console.log(`MOONRUSH multiplayer server on http://localhost:${PORT} (ws path ${MP_PATH}) · saving rooms: ${persistOn ? 'on' : 'off (no SUPABASE_SECRET_KEY)'}`))
