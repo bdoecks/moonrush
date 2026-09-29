@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ArrowDownUp, Wallet, Zap } from 'lucide-react'
+import { ArrowDownUp, ExternalLink, Wallet, Zap } from 'lucide-react'
 import { useState } from 'react'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
 import { useGame } from '../game/store'
@@ -26,6 +26,8 @@ export function ChainBadge({ chain, className, withName }: { chain: Chain; class
 export function QuickBuyButton({ t, className, label }: { t?: Token; className?: string; label?: string }) {
   const slot = useGame((s) => s.settings.quickSlot)
   const buyNative = useGame((s) => s.buyNative)
+  const openAfter = useGame((s) => !!s.settings.quickBuyOpen)
+  const select = useGame((s) => s.select)
   const dead = !t || t.status === 'rugged' || t.status === 'dead'
   const chain = t?.chain ?? 'sol'
   const amt = CHAINS[chain].quick[slot] ?? CHAINS[chain].quick[1]
@@ -34,9 +36,10 @@ export function QuickBuyButton({ t, className, label }: { t?: Token; className?:
       disabled={dead}
       onClick={(e) => {
         e.stopPropagation()
-        if (t) buyNative(amt, t.id, slot)
+        // Optionally jump to the coin's page once the buy goes through (GMGN's "open after buy").
+        if (t && buyNative(amt, t.id, slot) && openAfter) select(t.id)
       }}
-      title={`Quick buy ${fmtNative(amt, chain)} (P${slot + 1} trade settings)`}
+      title={`Quick buy ${fmtNative(amt, chain)} (P${slot + 1} trade settings)${openAfter ? ', then open the coin' : ''}`}
       className={clsx('inline-flex items-center gap-0.5 whitespace-nowrap rounded-md border border-up/30 bg-up/10 px-2 py-1 text-[11px] font-bold text-up transition-all hover:bg-up hover:text-black disabled:pointer-events-none disabled:opacity-30', className)}
     >
       <Zap size={11} fill="currentColor" />
@@ -50,6 +53,7 @@ export function QuickBuyButton({ t, className, label }: { t?: Token; className?:
 /** P1/P2/P3 quick-buy slot picker. Shows the amount for the filtered chain (or all three on hover). */
 export function QuickSlotPicker() {
   const slot = useGame((s) => s.settings.quickSlot)
+  const openAfter = useGame((s) => !!s.settings.quickBuyOpen)
   const filter = useGame((s) => s.chainFilter)
   const updateSettings = useGame((s) => s.updateSettings)
   const show: Chain = filter === 'all' ? 'sol' : filter
@@ -71,6 +75,14 @@ export function QuickSlotPicker() {
           </button>
         ))}
       </div>
+      <button
+        onClick={() => updateSettings({ quickBuyOpen: !openAfter })}
+        aria-pressed={openAfter}
+        title={openAfter ? 'Quick buy opens the coin page (click to stay on the list instead)' : 'Quick buy keeps you on the list (click to open the coin page after buying)'}
+        className={clsx('flex h-6 items-center gap-0.5 rounded border px-1.5 text-[10px] font-bold', openAfter ? 'border-up/50 bg-up/10 text-up' : 'border-line2 text-dim hover:text-ink')}
+      >
+        <ExternalLink size={10} /> <span className="hidden sm:inline">{openAfter ? 'Open' : 'Stay'}</span>
+      </button>
     </div>
   )
 }
