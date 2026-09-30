@@ -229,7 +229,8 @@ function RoomTab({ room }: { room?: string }) {
             <div className="mt-1 flex items-center gap-1">
               <input value={gift[p.id] ?? ''} onChange={(e) => setGift({ ...gift, [p.id]: e.target.value.replace(/[^0-9.-]/g, '') })} placeholder="$" className="num h-6 w-16 rounded border border-line2 bg-panel px-1 outline-none" />
               <button disabled={!Number(gift[p.id])} onClick={() => adminAct({ action: 'grant', room, playerId: p.id, usd: Number(gift[p.id]) }, `Gave ${p.name} ${fmtUsd(Number(gift[p.id]))}`)} className={clsx(btn, 'border-up/50 text-up')}>Give $</button>
-              <button onClick={() => adminAct({ action: 'kick', room, playerId: p.id, reason: 'You were removed from the room by an admin' }, `Kicked ${p.name}`)} className={clsx(btn, 'ml-auto flex items-center gap-0.5 border-warn/50 text-warn')}><UserX size={10} /> Kick</button>
+              <button onClick={() => confirm(`Reset ${p.name}'s wallet back to the start? This can't be undone.`) && adminAct({ action: 'reset', room, playerId: p.id }, `Reset ${p.name}'s wallet`)} className={clsx(btn, 'ml-auto border-down/50 text-down')} title="Reset wallet to the start">Reset</button>
+              <button onClick={() => adminAct({ action: 'kick', room, playerId: p.id, reason: 'You were removed from the room by an admin' }, `Kicked ${p.name}`)} className={clsx(btn, 'flex items-center gap-0.5 border-warn/50 text-warn')}><UserX size={10} /> Kick</button>
               <button onClick={() => confirm(`Ban ${p.name}?`) && adminBan(p, room)} className={clsx(btn, 'flex items-center gap-0.5 border-down/50 text-down')}><Ban size={10} /> Ban</button>
             </div>
           </div>

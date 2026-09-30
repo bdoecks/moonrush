@@ -826,6 +826,26 @@ export class Room {
     this.broadcast({ t: 'notice', text: text.slice(0, 200) })
   }
 
+  /**
+   * Admin: wipe a player's wallet back to a fresh start (or everyone's, with no id). Their coins and cash are gone,
+   * cashback too; coins they cooked stay on the market. Returns how many wallets were reset.
+   */
+  resetWallets(playerId?: string): number {
+    if (this.round.state !== 'running') return 0
+    let n = 0
+    for (const m of this.members.values()) {
+      if (m.info.spectator || (playerId && m.info.id !== playerId)) continue
+      m.wallet = freshWallet(this.startBalance(), m.layout)
+      m.cashback = undefined
+      for (const c of this.cooked.values()) if (c.pid === m.info.id) c.vault = 0
+      m.info = { ...m.info, equity: this.startBalance(), startEquity: this.startBalance(), trades: 0, wins: 0 }
+      this.sendTo(m.info.id, { t: 'wallet', ack: m.ack, state: { ...walletStateOf(m.wallet), cashback: { sol: 0, bsc: 0, hood: 0 } }, reset: true })
+      n++
+    }
+    if (n) this.playersDirty = true
+    return n
+  }
+
   grant(playerId: string, amount: number, asset: 'usd' | 'sol' | 'bsc' | 'hood' = 'usd') {
     const m = this.members.get(playerId)
     if (!m) return false

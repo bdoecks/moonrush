@@ -1,7 +1,7 @@
 ﻿// Browser side of multiplayer: connects to a room, turns the server's market updates into ticks for the local
 // store, and sends your orders / status. The server runs your wallets (it's the judge); this shows results instantly.
 import { applyCandlePoints, candleStore, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock } from '../game/marketEngine'
-import { portfolioStats, valuePortfolio } from '../game/portfolioEngine'
+import { newPortfolio, portfolioStats, valuePortfolio } from '../game/portfolioEngine'
 import { levelFromXp } from '../game/progression'
 import { seasonNumber } from '../game/season'
 import { nativePrice } from '../game/tradingEngine'
@@ -238,6 +238,12 @@ function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
   if (import.meta.env.DEV) (window as unknown as { __srvWallet: unknown }).__srvWallet = msg // test copies only: inspect the server's answer
   const s = useGame.getState()
   if (!s.online || s.runStatus === 'select') return
+  if (msg.reset) {
+    const fresh = newPortfolio(msg.state.startBalance ?? s.portfolio.startBalance)
+    quietly(() => s.patchState({ portfolio: mergeWalletState({ ...fresh, accounts: msg.state.accounts, active: msg.state.active }, msg.state), launches: [], copies: [], sideQueue: [], rewards: { ...s.rewards, cashback: { ...cashbackOf(s.rewards), pending: { sol: 0, bsc: 0, hood: 0 } } } }))
+    s.notify({ title: 'WALLET RESET', body: `An admin reset your wallet. You're starting fresh with ${fmtUsd(msg.state.cash, 0)}.`, tone: 'warn', icon: '🔄' }, 'alert')
+    return
+  }
   let p = s.portfolio
   if (msg.ref !== undefined) {
     const mine = p.trades.filter((t) => t.ref === msg.ref)

@@ -140,7 +140,8 @@ export type ServerMsg =
   // Admin: a message for everyone, being removed from the room, or money added to your round.
   | { t: 'notice'; text: string }
   // Your wallets as the server has them, after it handled your message number `ack` (and the order `ref`'s fills).
-  | { t: 'wallet'; ack: number; state: WalletState; ref?: number; fills?: import('../types').Trade[]; failures?: string[] }
+  // `reset`: an admin wiped your wallet back to the start (applied right away, trade history cleared).
+  | { t: 'wallet'; ack: number; state: WalletState; ref?: number; fills?: import('../types').Trade[]; failures?: string[]; reset?: boolean }
   | { t: 'kicked'; reason: string }
   | { t: 'grant'; usd: number; asset?: 'usd' | 'sol' | 'bsc' | 'hood'; amount?: number }
   | { t: 'sendResult'; ref: number; ok: boolean; error?: string; toName?: string }

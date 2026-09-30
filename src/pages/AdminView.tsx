@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { Ban, Crown, DoorClosed, Megaphone, RefreshCw, ShieldCheck, UserX } from 'lucide-react'
+import { Ban, Crown, DoorClosed, Megaphone, RefreshCw, RotateCcw, ShieldCheck, UserX } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { CHAIN_IDS, CHAINS } from '../data/chains'
 import { setFlag, useFlags, type GameFlags } from '../game/flags'
@@ -96,12 +96,18 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
         </form>
         <p className="mt-1 text-[10px] text-dim">Pops up for everyone in a room right now. For a banner everyone sees (solo too), use Switches → Notice banner.</p>
       </Card>
+      <ResetByName act={act} />
       {!rooms.length && <EmptyState icon="🏠" title="No rooms open right now" />}
       {rooms.map((r) => (
         <Card
           key={r.code}
           title={<><span className="num tracking-wider text-accent">{r.code}</span><span className="font-normal text-dim">· {r.round.state} · {r.round.mode} · {r.round.engine} · tick {r.round.tick}{r.emptySince ? ` · empty ${fmtAge((Date.now() - r.emptySince) / 1000)}` : ''}</span></>}
-          right={<button onClick={() => confirm(`Close room ${r.code}? Everyone in it is sent back to solo.`) && act({ action: 'close', room: r.code }, `Closed ${r.code}`)} className={clsx(btn, 'flex items-center gap-1 border-down/50 text-down hover:bg-down/10')}><DoorClosed size={11} /> Close room</button>}
+          right={
+            <span className="flex items-center gap-1">
+              <button onClick={() => confirm(`Reset EVERY wallet in ${r.code === 'WORLD' ? 'the World' : `room ${r.code}`}? Everyone (online or not) goes back to the starting balance and loses their coins. This can't be undone.`) && act({ action: 'reset', room: r.code }, 'All wallets reset')} className={clsx(btn, 'flex items-center gap-1 border-down/50 text-down hover:bg-down/10')}><RotateCcw size={11} /> Reset all wallets</button>
+              {r.code !== 'WORLD' && <button onClick={() => confirm(`Close room ${r.code}? Everyone in it is sent back to solo.`) && act({ action: 'close', room: r.code }, `Closed ${r.code}`)} className={clsx(btn, 'flex items-center gap-1 border-down/50 text-down hover:bg-down/10')}><DoorClosed size={11} /> Close room</button>}
+            </span>
+          }
         >
           {!r.players.length ? <div className="text-[11px] text-dim">Nobody here.</div> : (
             <table className="w-full text-[12px]">
@@ -125,6 +131,7 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
                         <span className="inline-flex flex-wrap items-center justify-end gap-1">
                           <input value={gift[p.id] ?? ''} onChange={(e) => setGift({ ...gift, [p.id]: e.target.value.replace(/[^0-9.-]/g, '') })} placeholder="$" className="num h-6 w-16 rounded border border-line2 bg-bg px-1 text-[11px] outline-none" />
                           <button disabled={!Number(gift[p.id])} onClick={() => act({ action: 'grant', room: r.code, playerId: p.id, usd: Number(gift[p.id]) }, `Gave ${p.name} ${fmtUsd(Number(gift[p.id]))}`)} className={clsx(btn, 'border-up/50 text-up hover:bg-up/10')}>Give $</button>
+                          <button onClick={() => confirm(`Reset ${p.name}'s wallet back to the start? Their coins and cash are gone. This can't be undone.`) && act({ action: 'reset', room: r.code, playerId: p.id }, `Reset ${p.name}'s wallet`)} className={clsx(btn, 'flex items-center gap-0.5 border-down/50 text-down hover:bg-down/10')}><RotateCcw size={10} /> Reset</button>
                           <button onClick={() => act({ action: 'kick', room: r.code, playerId: p.id, reason: 'You were removed from the room by an admin' }, `Kicked ${p.name}`)} className={clsx(btn, 'flex items-center gap-0.5 border-warn/50 text-warn hover:bg-warn/10')}><UserX size={10} /> Kick</button>
                           <button onClick={() => confirm(`Ban ${p.name}?${p.verified ? ' Their account can\'t join any room until you unban it (Accounts tab).' : ' (Guest: banned until the server restarts.)'}`) && adminBan(p, r.code)} className={clsx(btn, 'flex items-center gap-0.5 border-down/50 text-down hover:bg-down/10')}><Ban size={10} /> Ban</button>
                         </span>
@@ -138,6 +145,34 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
         </Card>
       ))}
     </div>
+  )
+}
+
+/** Reset a World wallet by account name (works when they're offline too). */
+function ResetByName({ act }: { act: (b: unknown, done?: string) => Promise<boolean> }) {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const notify = useGame((s) => s.notify)
+  const go = async () => {
+    if (!supabase || !name.trim()) return
+    setBusy(true)
+    try {
+      const { data } = await supabase.from('profiles').select('id, username').ilike('username', name.trim().replace(/_/g, '\\_')).maybeSingle()
+      if (!data) return notify({ title: 'ADMIN FAILED', body: `No account called "${name.trim()}"`, tone: 'warn', icon: '⚠️' })
+      if (!confirm(`Reset ${data.username}'s World wallet back to the start? Their coins and cash are gone. This can't be undone.`)) return
+      if (await act({ action: 'reset', room: 'WORLD', playerId: `u-${data.id}` }, `Reset ${data.username}'s World wallet`)) setName('')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Card title={<><RotateCcw size={13} /> Reset a World wallet by name</>}>
+      <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void go() }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Username" className="h-8 flex-1 rounded-md border border-line2 bg-bg px-2 text-[12px] outline-none focus:border-warn/60" />
+        <button disabled={busy || !name.trim()} className={clsx(btn, 'border-down/50 text-down hover:bg-down/10')}>Reset wallet</button>
+      </form>
+      <p className="mt-1 text-[10px] text-dim">Sends them back to the starting balance, even if they're offline. Per-player and "Reset all" buttons are on each room below.</p>
+    </Card>
   )
 }
 

@@ -56,6 +56,14 @@ back.join(sock(back2), { t: 'hello', name: 'Player', avatar: '🐸', level: 1, p
 const wal = back2.find((m) => m.t === 'wallet') as Extract<ServerMsg, { t: 'wallet' }>
 ok(wal?.state.cash === cashAfter && wal.state.startBalance === WORLD_START_BALANCE, 'rejoining gets the same wallet and start balance')
 
+// Admin reset: the player's wallet goes back to the start, and they're told right away.
+back2.length = 0
+ok(back.resetWallets('u-aaa') === 1, 'admin reset finds the player')
+const rw = back2.find((m) => m.t === 'wallet') as Extract<ServerMsg, { t: 'wallet' }>
+const bw = b.members.get('u-aaa')!.wallet!
+ok(!!rw?.reset && rw.state.cash === WORLD_START_BALANCE && bw.cash === WORLD_START_BALANCE && bw.trades.length === 0 && !Object.keys((bw as unknown as { positions: object }).positions).length, 'reset wallet is fresh, player told')
+ok(back.resetWallets('nobody') === 0, 'resetting an unknown player does nothing')
+
 // Run the World for a simulated while: the market stays a sensible size.
 const t1 = Date.now()
 for (let i = 0; i < 3000; i++) b.tick()
