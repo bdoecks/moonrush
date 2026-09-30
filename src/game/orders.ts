@@ -9,6 +9,7 @@ export interface Who {
   name: string
   pid?: string
   addr?: string
+  walletId?: string // World bots: their public trader wallet (track / copy it from the tape)
 }
 
 export interface OrderResult {

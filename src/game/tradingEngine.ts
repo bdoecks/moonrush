@@ -104,7 +104,7 @@ export interface ExecOpts {
   autoSwap?: boolean
   setting?: TradeSetting // GMGN-style slippage / fees / anti-MEV; omitted for copy trades, bundles and bots
   rand?: () => number
-  who?: { name: string; pid?: string; addr?: string } // rooms: the server tags the tape with who traded
+  who?: { name: string; pid?: string; addr?: string; walletId?: string } // rooms: the server tags the tape with who traded
 }
 
 // ─── Execution frictions ─────────────────────────────────────────────────────

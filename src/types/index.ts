@@ -258,6 +258,7 @@ export interface SimWallet {
   live: WalletHistory // accrued this session (pnl24h/pnl7d both hold realized)
   lastActive: number // tick
   rival?: string // leaderboard player id whose on-chain wallet this is
+  bot?: boolean // a World bot's public wallet (mirrors its real trades; never trades on its own)
 }
 
 /** One wallet trade in a tick, used to trigger copies. */

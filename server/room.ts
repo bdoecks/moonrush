@@ -2,7 +2,10 @@
 // The market code is the same the single-player game runs. The server is the judge of every player's wallets: orders,
 // cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
-import { adminMarket, type AdminMarketAction, rebuildCandlesFor, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, GRAD_BONUS, MAX_COOKS_PER_ROUND, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
+import { adminMarket, type AdminMarketAction, rebuildCandlesFor, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookToken, GRAD_BONUS, MAX_COOKS_PER_ROUND, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
+import { BOT_BUST_USD, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, mirrorWallet, pickCoin, STYLE, type BotBrain } from './bots'
+import { generatedLaunch } from '../src/data/tokens'
+import { valuePortfolio } from '../src/game/portfolioEngine'
 import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
 import { POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
@@ -16,7 +19,7 @@ import { walletAddress } from '../src/utils/address'
 import { airdropFeePerWallet, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
-import type { Candle, Chain, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
+import type { Candle, Chain, CookSpec, Narrative, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
 import { WORLD_START_BALANCE, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
@@ -60,6 +63,7 @@ interface Member {
   cbAuto?: 'off' | 'coin' | 'usdc'
   cooks?: number // coins cooked this round
   lastCookTick?: number
+  brain?: BotBrain // World bots only
 }
 
 /** A coin a player cooked: who, the dev wallet that pays its bot and earns its fees, and its creator-fee vault. */
@@ -127,6 +131,7 @@ export class Room {
     this.newMarket(world
       ? { id: 1, state: 'running', mode: 'practice', durationTicks: null, startTick: 0, seed: 0, startTime: 0, engine: 'realistic', world: true }
       : { id: 0, state: 'lobby', mode: 'practice', durationTicks: null, startTick: 0, seed: 0, startTime: 0 })
+    this.ensureBots()
     this.timer = setInterval(() => this.tick(), 1000)
   }
 
@@ -144,7 +149,7 @@ export class Room {
       lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()],
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
-        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick,
+        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, brain: m.brain,
       })),
     }
   }
@@ -178,7 +183,10 @@ export class Room {
     r.cooked = new Map(s.cooked ?? [])
     r.lastTapeId = s.lastTapeId ?? r.market.nextTradeId - 1
     r.lastWalletTradeId = s.lastWalletTradeId ?? r.market.nextTradeId - 1
-    for (const m of s.members ?? []) r.members.set(m.info.id, { ...m, ws: null, ack: 0, info: { ...m.info, online: false } })
+    r.members.clear() // the placeholder World's bots; the saved ones come back below
+    r.wallets = s.wallets ?? []
+    for (const m of s.members ?? []) r.members.set(m.info.id, { ...m, ws: null, ack: 0, info: { ...m.info, online: m.info.bot ? m.info.online : false } })
+    r.ensureBots()
     r.emptySince = Date.now()
     // Charts: re-draw every coin to end at its price, then put back the real longer timeframes we saved.
     setClock(secPerTickOf(r.market))
@@ -603,7 +611,7 @@ export class Room {
     for (const id of this.bots.keys()) protectedIds.add(id)
     const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds })
     const e2 = rollEvents(market, rng)
-    const wr = tickWallets(this.wallets, market, rng)
+    const wr = tickWallets(this.wallets.filter((w) => !w.bot), market, rng)
     const posts = [...tickSocial(market, rng, wr.actions, [...e1, ...e2]), ...this.playerPosts]
     this.playerPosts = []
 
@@ -682,7 +690,8 @@ export class Room {
       for (const [id, c] of this.cooked) if (c.vault < 1e-12 && !market.tokens.some((t) => t.id === id)) this.cooked.delete(id)
     }
     this.market = market
-    this.wallets = wr.wallets
+    this.wallets = [...wr.wallets, ...this.wallets.filter((w) => w.bot)]
+    this.botTick(rng, wr.actions)
     for (const m of billed) this.sendWallet(m)
 
     // Coins that appeared this tick: send their whole chart instead of points.
@@ -787,6 +796,261 @@ export class Room {
     return out
   }
 
+
+  // ─── World bots ──────────────────────────────────────────────────────────────
+  /** Make sure every World bot exists (as a player with a real wallet, plus its public mirror wallet). */
+  private ensureBots() {
+    if (!this.world) return
+    const rng = new Rng((Math.random() * 2 ** 32) >>> 0)
+    for (const spec of BOT_ROSTER) {
+      if (!this.members.has(spec.id)) {
+        this.members.set(spec.id, {
+          info: { id: spec.id, name: spec.name, avatar: spec.avatar, level: rng.int(8, 40), online: spec.always, equity: WORLD_START_BALANCE, startEquity: WORLD_START_BALANCE, trades: 0, wins: 0, bot: true },
+          ws: null, protect: [], ack: 0, wallet: freshWallet(WORLD_START_BALANCE), brain: freshBrain(spec, this.market.tick, rng),
+        })
+      }
+      const m = this.members.get(spec.id)!
+      m.brain ??= freshBrain(spec, this.market.tick, rng)
+      if (!this.wallets.some((w) => w.id === spec.id)) this.wallets = [...this.wallets, mirrorWallet(spec, m.wallet?.startBalance ?? WORLD_START_BALANCE)]
+    }
+  }
+
+  /** How a bot shows on the tape: its name, id and address, linked to its public wallet (track / copy it). */
+  private botWho(m: Member) {
+    const main = m.wallet?.accounts?.[0]?.id ?? 'w-main'
+    return () => ({ name: m.info.name, pid: m.info.id, addr: walletAddress(m.info.id, main, 'sol'), walletId: m.info.id })
+  }
+
+  /** Keep a bot's public wallet in step with a fill (what trackers, copy traders and its wallet page see). */
+  private mirrorFill(m: Member, t: Token, f: Trade, kind: WalletActionKind, actions: WalletAction[]) {
+    const i = this.wallets.findIndex((w) => w.id === m.info.id)
+    if (i < 0 || !m.wallet) return
+    const w0 = this.wallets[i]
+    const w: SimWallet = { ...w0, positions: { ...w0.positions }, live: { ...w0.live } }
+    const pos = w.positions[t.id]
+    let fraction = 1
+    let pnl: number | undefined
+    if (f.side === 'buy') {
+      w.positions[t.id] = { qty: (pos?.qty ?? 0) + f.qty, cost: (pos?.cost ?? 0) + f.value, openedTick: pos?.openedTick ?? this.market.tick }
+      w.live.buys++
+      w.live.inflow -= f.value
+    } else if (pos) {
+      fraction = Math.min(1, f.qty / pos.qty)
+      const costPart = pos.cost * fraction
+      pnl = f.value - costPart
+      if (fraction >= 0.999) delete w.positions[t.id]
+      else w.positions[t.id] = { ...pos, qty: pos.qty - f.qty, cost: pos.cost - costPart, tookProfit: true }
+      w.live.sells++
+      w.live.inflow += f.value
+      w.live.pnl24h += pnl
+      if (pnl > 0) w.live.wins++
+      else w.live.losses++
+    }
+    w.live.volume += f.value
+    w.cash = m.wallet.cash + Object.entries(m.wallet.balances).reduce((a, [c, n]) => a + n * nativePrice(this.market, c as Chain), 0)
+    w.lastActive = this.market.tick
+    w.trades = [{ id: this.market.nextTradeId++, tick: this.market.tick, time: this.market.time, tokenId: t.id, ticker: t.ticker, emoji: t.emoji, hue: t.hue, side: f.side, usd: f.value, qty: f.qty, price: f.price, mcap: t.mcap, action: kind, ...(pnl !== undefined ? { pnl, pnlPct: pnl / Math.max(1e-9, f.value - pnl) } : {}) }, ...w.trades].slice(0, 60)
+    this.wallets = this.wallets.map((x, k) => (k === i ? w : x))
+    actions.push({ walletId: m.info.id, tokenId: t.id, side: f.side, usd: f.value, fraction, kind, mcap: t.mcap })
+  }
+
+  private botBuy(m: Member, t: Token, usd: number, actions: WalletAction[]): Trade | null {
+    const w = this.walletOf(m)
+    if (!w) return null
+    const main = w.accounts?.[0]?.id ?? 'w-main'
+    const had = !!w.accounts?.[0]?.positions[t.id]
+    const r = runBuy(w, this.market, [main], usd, t.id, { autoSwap: true, who: this.botWho(m) })
+    if (!r.fills.length) return null
+    m.wallet = r.portfolio
+    this.market = r.market
+    const nt = this.market.tokens.find((x) => x.id === t.id) ?? t
+    this.mirrorFill(m, nt, r.fills[0], had ? 'more' : 'first', actions)
+    m.brain!.entries[t.id] ??= { tick: this.market.tick, peak: nt.price }
+    return r.fills[0]
+  }
+
+  private botSell(m: Member, t: Token, qty: number, actions: WalletAction[]): Trade | null {
+    const w = this.walletOf(m)
+    if (!w) return null
+    const main = w.accounts?.[0]?.id ?? 'w-main'
+    const held = w.accounts?.[0]?.positions[t.id]?.qty ?? 0
+    const r = runSell(w, this.market, [{ walletId: main, qty: Math.min(qty, held) }], t.id, { who: this.botWho(m) })
+    if (!r.fills.length) return null
+    m.wallet = r.portfolio
+    this.market = r.market
+    const nt = this.market.tokens.find((x) => x.id === t.id) ?? t
+    const all = !m.wallet.accounts?.[0]?.positions[t.id]
+    this.mirrorFill(m, nt, r.fills[0], all ? 'all' : 'partial', actions)
+    if (all) delete m.brain!.entries[t.id]
+    return r.fills[0]
+  }
+
+  private botChat(m: Member, text: string) {
+    if (this.market.tick - (m.brain?.lastChat ?? -999) < 90) return
+    m.brain!.lastChat = this.market.tick
+    this.broadcast({ t: 'chat', from: m.info.id, name: m.info.name, avatar: m.info.avatar, text, time: Date.now() })
+  }
+
+  private botPost(m: Member, t: Token, text: string) {
+    const b = m.brain!
+    if (this.market.tick - b.lastPost < 900) return
+    b.lastPost = this.market.tick
+    this.post(m, { t: 'post', text, tokenId: t.id, followers: b.followers, rep: b.rep, repeats: 0 })
+  }
+
+  /** One second of the bots' lives: come and go, take profits / cut losses, find new coins, cook, chat, go broke. */
+  private botTick(rng: Rng, actions: WalletAction[]) {
+    if (!this.world) return
+    const tick = this.market.tick
+    for (const spec of BOT_ROSTER) {
+      const m = this.members.get(spec.id)
+      const b = m?.brain
+      if (!m || !b) continue
+      // People come and go (a few bots are always around so the World never feels empty).
+      if (!spec.always && tick >= b.switchAt) {
+        m.info = { ...m.info, online: !m.info.online }
+        b.switchAt = tick + (m.info.online ? rng.int(1200, 3600) : rng.int(600, 2400))
+        this.playersDirty = true
+      }
+      if (!m.info.online) continue
+      const w = this.walletOf(m)
+      if (!w) continue
+      const st = STYLE[b.style]
+      const byId = new Map(this.market.tokens.map((t) => [t.id, t]))
+      const bags = Object.values(w.accounts?.[0]?.positions ?? {})
+
+      // Exits (the chef handles its own coins below).
+      for (const pos of bags) {
+        const t = byId.get(pos.tokenId)
+        if (!t || b.cooked[pos.tokenId]) continue
+        if (t.status !== 'bonding' && t.status !== 'graduated') {
+          if (b.entries[t.id]) {
+            delete b.entries[t.id]
+            if (rng.chance(0.4)) this.botChat(m, chatLine('loss', rng, t.ticker, -0.9))
+          }
+          continue
+        }
+        const e = (b.entries[t.id] ??= { tick, peak: t.price })
+        e.peak = Math.max(e.peak, t.price)
+        const pnl = t.price / Math.max(1e-18, pos.avgEntry) - 1
+        const exit = pnl >= st.tp || (st.sl !== null && pnl <= -st.sl) || (st.hold !== null && tick - e.tick > st.hold)
+        if (!exit || !rng.chance(0.5)) continue
+        const f = this.botSell(m, t, pos.qty, actions)
+        if (f && rng.chance(0.3)) this.botChat(m, chatLine(pnl >= 0 ? 'win' : 'loss', rng, t.ticker, pnl))
+      }
+
+      if (b.style === 'chef') this.chefTick(m, rng, actions)
+      else if (tick >= b.nextAct) {
+        b.nextAct = tick + rng.int(st.every[0], st.every[1])
+        if (bags.length < st.maxBags) {
+          const t = pickCoin(b.style, this.market.tokens, this.market.time, new Set(bags.map((p) => p.tokenId)), rng)
+          const cashLike = w.cash + Object.entries(w.balances).reduce((a, [c, n]) => a + n * nativePrice(this.market, c as Chain), 0)
+          const usd = b.style === 'degen' ? cashLike * rng.range(0.2, st.share) : Math.min(rng.range(st.size[0], st.size[1]), cashLike * st.share)
+          if (t && usd >= 20) {
+            const f = this.botBuy(m, t, Math.min(usd, t.liquidity * 0.03), actions)
+            if (f) {
+              if (rng.chance(0.25)) this.botChat(m, chatLine(b.style === 'sniper' ? 'snipe' : b.style === 'whale' ? 'whale' : 'buy', rng, t.ticker))
+              if (rng.chance(0.12)) this.botPost(m, t, `${t.ticker} ${rng.chance(0.5) ? 'looks ready 🚀' : 'is the play today'}`)
+            }
+          }
+        }
+      }
+      if (tick - b.lastChat > 600 && rng.chance(0.002)) this.botChat(m, chatLine('idle', rng))
+
+      // Scoreboard, public bags, coins to keep listed, and going broke.
+      if (tick % 5 === 0) {
+        const v = valuePortfolio(m.wallet!, byId, this.market)
+        const trades = m.wallet!.trades
+        m.info = {
+          ...m.info, equity: v.equity, startEquity: m.wallet!.startBalance, trades: trades.length, wins: trades.filter((x) => x.side === 'sell' && (x.pnl ?? 0) > 0).length,
+          holdings: Object.values(m.wallet!.accounts?.[0]?.positions ?? {}).slice(0, 30).map((p) => ({ tokenId: p.tokenId, qty: p.qty, cost: p.costBasis, openedAt: p.openedAt })),
+        }
+        m.protect = Object.keys(m.wallet!.positions)
+        if (m.wallet!.trades.length > WORLD_TRADES_KEPT) m.wallet = { ...m.wallet!, trades: m.wallet!.trades.slice(0, WORLD_TRADES_KEPT) }
+        this.playersDirty = true
+        const liveBags = Object.keys(m.wallet!.positions).filter((id) => { const t = byId.get(id); return t && (t.status === 'bonding' || t.status === 'graduated') })
+        if (!liveBags.length && v.equity < BOT_BUST_USD) {
+          // Broke: start over small, like a real player would.
+          m.wallet = freshWallet(BOT_RESTART_USD, m.layout)
+          b.entries = {}
+          b.cooked = {}
+          b.busts++
+          const i = this.wallets.findIndex((x) => x.id === spec.id)
+          if (i >= 0) this.wallets = this.wallets.map((x, k) => (k === i ? { ...x, cash: BOT_RESTART_USD, positions: {} } : x))
+          this.botChat(m, chatLine('bust', rng))
+        }
+      }
+    }
+  }
+
+  /** ChefCarl: launches a coin every so often, shills it, dumps part of the dev bag when it runs, claims fees. */
+  private chefTick(m: Member, rng: Rng, actions: WalletAction[]) {
+    const b = m.brain!
+    const tick = this.market.tick
+    const w = this.walletOf(m)!
+    const main = w.accounts?.[0]?.id ?? 'w-main'
+    // Their coins: take some off when it's running, dump the rest when it's old.
+    for (const [id, c] of Object.entries(b.cooked)) {
+      const t = this.market.tokens.find((x) => x.id === id)
+      const held = w.accounts?.[0]?.positions[id]?.qty ?? 0
+      if (!t || t.status === 'dead' || t.status === 'rugged' || held <= 0) {
+        delete b.cooked[id]
+        continue
+      }
+      const ran = t.mcap >= c.mcap * 2.5 && rng.chance(0.02)
+      const old = tick - c.tick > 1800
+      if (!ran && !old) continue
+      const frac = old ? 1 : rng.range(0.3, 0.6)
+      const f = this.botSell(m, t, held * frac, actions)
+      if (!f) continue
+      if (old) delete b.cooked[id]
+      else c.mcap = t.mcap // next dump only after another run
+      this.playerEvents.push({ by: m.info.id, id: tick * 100 + 96, tick, time: this.market.time, kind: 'devsell', tokenId: t.id, ticker: t.ticker, text: `Dev (${m.info.name}) sold ${Math.round(frac * 100)}% of their ${t.ticker} bag`, icon: '🧑‍💻', tone: 'down' })
+      if (rng.chance(0.5)) this.botChat(m, chatLine('devsell', rng, t.ticker))
+    }
+    // Creator fees: claimed now and then.
+    if (tick % 300 === 0) {
+      let p = w
+      for (const c of this.cooked.values()) {
+        if (c.pid !== m.info.id || !(c.vault > 1e-12)) continue
+        p = payNative(p, this.market, [[c.chain, c.vault]], 'coin', c.walletId).portfolio
+        c.vault = 0
+      }
+      m.wallet = p
+    }
+    // A new launch.
+    if (tick < b.nextAct) return
+    b.nextAct = tick + rng.int(STYLE.chef.every[0], STYLE.chef.every[1])
+    const px = nativePrice(this.market, 'sol')
+    const cashLike = w.cash + (w.balances.sol ?? 0) * px
+    if (cashLike < 300) return
+    const base = generatedLaunch(this.market.launched + rng.int(50, 5000))
+    let ticker = base.ticker
+    for (let k = 2; k < 9 && this.market.tokens.some((t) => t.ticker === ticker); k++) ticker = `${base.ticker}${k}`
+    const narratives: Narrative[] = ['dogs', 'cats', 'frogs', 'ai', 'food', 'space', 'absurd', 'retro']
+    const marketing = rng.int(0, 150)
+    const spec: CookSpec = {
+      chain: 'sol', pad: 'pump', tax: { buy: 0, sell: 0 }, name: base.name, ticker, emoji: base.emoji, hue: rng.int(0, 359), description: '',
+      narrative: narratives[rng.int(0, narratives.length - 1)], socials: { x: true, tg: rng.chance(0.5), web: rng.chance(0.3) }, style: 'fair',
+      marketing, devBuy: Math.min(rng.range(0.5, 2), (cashLike * 0.4) / px), bundle: { wallets: 0, perWallet: 0, stagger: false },
+    }
+    const cooked = cookToken(this.market, rng, spec)
+    const id = cooked.token.id
+    this.market = { ...cooked.market, tokens: cooked.market.tokens.map((t) => (t.id === id ? ({ ...t, creator: 'you', creatorId: m.info.id, creatorName: m.info.name } as NetToken) : t)) }
+    m.wallet = { ...w, cash: Math.max(0, w.cash - COOK_FEE - marketing), feesPaid: w.feesPaid + COOK_FEE }
+    this.freshIds.add(id)
+    this.cooked.set(id, { pid: m.info.id, walletId: main, chain: 'sol', vault: 0, feeMark: 0, grad: false })
+    const t = this.market.tokens.find((x) => x.id === id)!
+    this.botBuy(m, t, spec.devBuy * px, actions)
+    const after = this.market.tokens.find((x) => x.id === id)!
+    this.cooked.get(id)!.feeMark = after.creatorFees ?? 0
+    b.cooked[id] = { mcap: after.mcap, tick }
+    this.playerEvents.push({ by: m.info.id, id: tick * 100 + 97, tick, time: this.market.time, kind: 'cook', tokenId: id, ticker, text: `${m.info.avatar} ${m.info.name} cooked ${ticker}`, icon: '🍳', tone: 'info' })
+    this.botChat(m, chatLine('cook', rng, ticker))
+    b.lastPost = tick - 900 // always shills its own launch
+    this.botPost(m, after, `${ticker} just launched on pump 🍳 early`)
+  }
+
   // ─── Admin ─────────────────────────────────────────────────────────────────
   summary() {
     return {
@@ -838,6 +1102,12 @@ export class Room {
       m.wallet = freshWallet(this.startBalance(), m.layout)
       m.cashback = undefined
       for (const c of this.cooked.values()) if (c.pid === m.info.id) c.vault = 0
+      if (m.brain) {
+        // A bot starts over too: fresh memory, and its public wallet shows the reset.
+        m.brain.entries = {}
+        m.brain.cooked = {}
+        this.wallets = this.wallets.map((w) => (w.id === m.info.id ? { ...w, cash: this.startBalance(), startValue: this.startBalance(), positions: {} } : w))
+      }
       m.info = { ...m.info, equity: this.startBalance(), startEquity: this.startBalance(), trades: 0, wins: 0 }
       this.sendTo(m.info.id, { t: 'wallet', ack: m.ack, state: { ...walletStateOf(m.wallet), cashback: { sol: 0, bsc: 0, hood: 0 } }, reset: true })
       n++

@@ -29,6 +29,7 @@ export interface RoomPlayer {
   holdings?: MainHolding[] // what their public main wallet holds (side wallets stay hidden)
   verified?: boolean // signed in: the server confirmed this is their account
   spectator?: boolean // World guests: watching only (not listed, can't trade or chat)
+  bot?: boolean // a World bot (labeled 🤖): trades by the same rules, with its own wallet
 }
 
 /** A coin in a player's main wallet, as everyone in the room can see it on-chain. */

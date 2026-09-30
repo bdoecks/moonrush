@@ -28,7 +28,7 @@ w.handle('g-bbb', { t: 'order', seq: 1, ref: 1, order: { side: 'buy', tokenId: c
 w.handle('g-bbb', { t: 'chat', text: 'spam' })
 ok(!gBox.some((m) => m.t === 'wallet') && !pBox.some((m) => m.t === 'chat'), 'guest orders and chat are ignored')
 const players = [...pBox].reverse().find((m) => m.t === 'players') as Extract<ServerMsg, { t: 'players' }>
-ok(players.players.length === 1 && players.players[0].id === 'u-aaa', 'player list shows only players, not guests')
+ok(players.players.some((p) => p.id === 'u-aaa') && !players.players.some((p) => p.id === 'g-bbb') && players.players.filter((p) => !p.bot).length === 1, 'player list shows players (and online bots), not guests')
 w.handle('u-aaa', { t: 'start', mode: 'arena', durationTicks: 60 })
 ok(world.round.state === 'running' && world.round.durationTicks === null, 'nobody can end or restart the World')
 
