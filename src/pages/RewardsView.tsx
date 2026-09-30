@@ -6,7 +6,7 @@ import { ChainBadge } from '../components/chain'
 import { EmptyState, Segmented } from '../components/ui'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
 import type { Chain } from '../types'
-import { cashbackOf, CASHBACK_TIERS, CHECKIN_REWARDS, pendingUsd, REF_TIERS, referralVolume, SHARE_COOLDOWN_TICKS, tierFor, todayKey, yesterdayKey } from '../game/rewardsEngine'
+import { cashbackOf, CASHBACK_TIERS, CHECKIN_REWARDS, pendingUsd, REF_TIERS, REFERRALS_ENABLED, referralVolume, SHARE_COOLDOWN_TICKS, tierFor, todayKey, yesterdayKey } from '../game/rewardsEngine'
 import { MODES } from '../game/progression'
 import { selectSpeed, useGame } from '../game/store'
 import { fmtCompact, fmtUsd } from '../utils/format'
@@ -16,7 +16,8 @@ type Tab = 'referral' | 'cashback' | 'daily' | 'history'
 const tierLabel = (v: number) => (v === 0 ? 'Start' : `Vol.${fmtCompact(v, '')}`)
 
 export function RewardsView() {
-  const [tab, setTab0] = useState<Tab>(() => load<Tab>('rewardsTab') ?? 'cashback')
+  const [tab0, setTab0] = useState<Tab>(() => load<Tab>('rewardsTab') ?? 'cashback')
+  const tab: Tab = tab0 === 'referral' && !REFERRALS_ENABLED ? 'cashback' : tab0
   const setTab = (t: Tab) => {
     setTab0(t)
     save('rewardsTab', t)
@@ -28,7 +29,7 @@ export function RewardsView() {
   const canCheckIn = r.checkIn.lastDate !== todayKey()
   const tabs: { id: Tab; label: string; dot?: boolean }[] = [
     { id: 'cashback', label: 'Cashback', dot: cbPending >= 0.0001 },
-    { id: 'referral', label: 'Referral', dot: r.commissionPending >= 0.01 },
+    ...(REFERRALS_ENABLED ? [{ id: 'referral' as Tab, label: 'Referral', dot: r.commissionPending >= 0.01 }] : []),
     { id: 'daily', label: 'Daily', dot: canCheckIn },
     { id: 'history', label: 'History' },
   ]
@@ -43,7 +44,7 @@ export function RewardsView() {
         ))}
         <span className="ml-auto flex items-center gap-1 text-[11px] text-dim">
           <Info size={12} />
-          {mode === 'practice' ? 'Practice: rewards pay out as cash' : `${MODES[mode].name}: cashback pays coins; referral and check-in pay XP`}
+          {mode === 'practice' ? 'Practice: rewards pay out as cash' : `${MODES[mode].name}: cashback pays coins; check-in pays XP`}
         </span>
       </div>
       <div className="p-3">

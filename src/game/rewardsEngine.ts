@@ -25,6 +25,10 @@ export const cashbackUsd = (tr: Trade, lifetimeVolume: number) => Math.min(tr.fe
 
 export const pendingUsd = (cb: CashbackState, price: (c: Chain) => number) => (Object.keys(cb.pending) as Chain[]).reduce((a, c) => a + cb.pending[c] * price(c), 0)
 export const SHARE_COOLDOWN_TICKS = 45
+/**
+ * Referrals are off: they used made-up sign-ups. They come back when inviting real people (with accounts) is built.
+ */
+export const REFERRALS_ENABLED = false
 export const MAX_FRIENDS = 20
 export const CHECKIN_REWARDS = [50, 75, 100, 150, 200, 300, 500] // day 1..7 (cash in practice, XP elsewhere)
 

@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { CircleHelp, Gift, PanelLeft, PanelRight, Pause, Play, Settings as SettingsIcon, Timer, Volume2, VolumeX } from 'lucide-react'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
-import { cashbackOf, pendingUsd } from '../game/rewardsEngine'
+import { cashbackOf, pendingUsd, REFERRALS_ENABLED } from '../game/rewardsEngine'
 import type { Chain } from '../types'
 import { save } from '../utils/storage'
 import { useDockPrefs } from './tracker/TrackerDock'
@@ -81,9 +81,10 @@ export function RunClock() {
   const world = useGame((s) => !!s.online?.round.world)
   const cfg = MODES[mode]
   const remaining = runDuration ? (runDuration - runTicks) / speed : null
+  if (world) return null
   return (
     <button onClick={() => setModal(online ? 'lobby' : 'mode')} className="flex items-center gap-1.5 rounded-md border border-line bg-panel2 px-2 py-1 hover:border-line2" title="Game mode">
-      <span className="text-[10px] font-bold tracking-wider text-accent">{world ? '🌍 WORLD' : cfg.name.toUpperCase()}</span>
+      <span className="text-[10px] font-bold tracking-wider text-accent">{cfg.name.toUpperCase()}</span>
       {status === 'running' && remaining !== null && (
         <span className={clsx('num flex items-center gap-1 text-[11px]', remaining < 60 ? 'text-down' : 'text-ink')}>
           <Timer size={11} />
@@ -104,7 +105,7 @@ function LevelChip() {
   return (
     <button onClick={() => setView('missions')} className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-panel2" title={`${l.into}/${l.span} XP to next level`}>
       <div className="grid size-7 place-items-center rounded-md bg-accent text-accent-ink font-display text-[12px] font-bold">{l.level}</div>
-      <div className="hidden 2xl:block w-24 text-left">
+      <div className="hidden min-[1800px]:block w-24 text-left">
         <div className="text-[10px] font-semibold leading-none">{titleFor(l.level)}</div>
         <div className="mt-1 h-1 overflow-hidden rounded-full bg-line2">
           <div className="h-full bg-accent transition-all duration-500" style={{ width: `${l.progress * 100}%` }} />
@@ -184,20 +185,20 @@ export function TopBar() {
   const pnlPct = cv ? (cv.spent > 0 ? cv.pnl / cv.spent : 0) : v.stats.totalPnlPct
   const pnlTone = cv ? cv.pnl : pnl
   const cycleUnit = () => updateSettings({ portfolioUnit: UNITS[(UNITS.indexOf(unit) + 1) % UNITS.length] })
-  const rewardReady = useGame((s) => s.rewards.commissionPending >= 0.01 || s.rewards.checkIn.lastDate !== new Date().toDateString())
+  const rewardReady = useGame((s) => (REFERRALS_ENABLED && s.rewards.commissionPending >= 0.01) || s.rewards.checkIn.lastDate !== new Date().toDateString())
 
   return (
     <header className="shrink-0 border-b border-line bg-panel">
     <div className="flex h-12 items-center gap-3 px-3">
-      <Logo />
+      <div className="shrink-0"><Logo /></div>
       <GlobalSearch className="hidden w-52 shrink-0 transition-[width] focus-within:w-72 xl:block" />
       <div className="ml-auto hidden lg:flex items-center gap-2">
         <MarketStatus />
         <RunClock />
       </div>
-      <RoomChip />
+      <div className="shrink-0"><RoomChip /></div>
 
-      <div className="ml-auto lg:ml-3 flex items-center gap-4 whitespace-nowrap">
+      <div className="ml-auto lg:ml-3 flex min-w-0 items-center gap-4 overflow-hidden whitespace-nowrap">
         <div className="text-right">
           <button onClick={cycleUnit} className="block w-full text-right text-[9px] uppercase tracking-wider text-dim hover:text-ink" title="Show in USD / SOL / BNB / ETH">Portfolio · {unit === 'usd' ? 'USD' : CHAINS[unit].native}</button>
           <FlashNum value={cv ? Math.round(cv.total * 1000) : Math.round(v.equity)} className="text-[14px] font-bold"><span title={cv ? `Your ${CHAINS[unit as Chain].native} wallet plus your ${CHAINS[unit as Chain].name} coins. USD bank (${fmtUsd(v.portfolio.cash)}) not included.` : undefined}>{cv ? coin(cv.total) : money(v.equity)}</span></FlashNum>
@@ -212,24 +213,26 @@ export function TopBar() {
           </div>
         </div>
         <WalletSelector compact className="hidden sm:block" />
-        <div className="hidden xl:block">
+        <div className="hidden 2xl:block">
           <WalletChip compact />
         </div>
-        <div className="hidden xl:block text-right">
+        <div className="hidden min-[1800px]:block text-right">
           <div className="text-[9px] uppercase tracking-wider text-dim">Unrealized</div>
           <div className={clsx('num text-[12px]', toneClass(cv ? cv.unrealized : v.unrealized))}>{cv ? coin(cv.unrealized, true) : money(v.unrealized, true)}</div>
         </div>
-        <div className="hidden xl:block text-right">
+        <div className="hidden min-[1800px]:block text-right">
           <div className="text-[9px] uppercase tracking-wider text-dim">Realized</div>
           <div className={clsx('num text-[12px]', toneClass(cv ? cv.realized : v.portfolio.realized))}>{cv ? coin(cv.realized, true) : money(v.portfolio.realized, true)}</div>
         </div>
         <CashbackChip />
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
         <AdminButton />
         <FriendsButton />
         <AccountButton />
       </div>
 
-      <div className="flex items-center gap-0.5 border-l border-line pl-2">
+      <div className="flex shrink-0 items-center gap-0.5 border-l border-line pl-2">
         <div className="hidden md:block"><LevelChip /></div>
         <DockToggle />
         <button onClick={() => updateSettings({ sound: !sound })} className="rounded-md p-1.5 text-muted hover:bg-panel2 hover:text-ink" aria-label="Toggle sound" title="Sound">

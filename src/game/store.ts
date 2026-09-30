@@ -24,7 +24,7 @@ import { ACCOUNTS, CALL_SETTLE_TICKS, callerKey, freshSocial, KOL_FOLLOWERS, POS
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import { WORLD_START_BALANCE, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
 import { payNative, runBuy, runGiveAway, runSell, runSwap } from './orders'
-import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
+import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, REFERRALS_ENABLED, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
 
 export type View = 'discover' | 'trenches' | 'token' | 'portfolio' | 'missions' | 'leaderboard' | 'cooking' | 'copytrade' | 'sniper' | 'monitor' | 'track' | 'rewards' | 'admin'
 export type DockTab = 'positions' | 'watchlist' | 'history' | 'feed' | 'tracker' | 'social'
@@ -1097,7 +1097,7 @@ export const useGame = create<GameState>()((set, get) => {
 
       if (running) {
         runCopies(wr.actions)
-        set({ rewards: tickFriends(get().rewards, market.sentiment) })
+        if (REFERRALS_ENABLED) set({ rewards: tickFriends(get().rewards, market.sentiment) })
       }
       // Tracked (not copied) wallets: alerts per your tracker settings, with a quick-buy on the toast.
       const copiedIds = new Set(get().copies.filter((c) => !c.paused).map((c) => c.walletId))
@@ -1960,6 +1960,7 @@ export const useGame = create<GameState>()((set, get) => {
       persist()
     },
     shareInvite: () => {
+      if (!REFERRALS_ENABLED) return
       const s = get()
       const r = s.rewards
       const wait = SHARE_COOLDOWN_TICKS - (s.market.tick - r.lastShareTick)
@@ -1981,6 +1982,7 @@ export const useGame = create<GameState>()((set, get) => {
       persist()
     },
     claimReward: (kind) => {
+      if (!REFERRALS_ENABLED) return
       const s = get()
       const r = s.rewards
       const amount = r.commissionPending

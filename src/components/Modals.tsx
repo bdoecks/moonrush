@@ -289,7 +289,7 @@ function HelpModal() {
   const setModal = useGame((s) => s.setModal)
   const keys: [string, string][] = [
     ['/', 'Search token / CA / wallet'], ['N', 'Sniper'], ['↑ ↓ ↵', 'Move through table / open token'], ['B', 'Buy panel'], ['S', 'Sell panel'], ['↵', 'Confirm trade (in amount box)'],
-    ['F', 'Star / unstar token'], ['I', 'Instant trade panel'], ['W', 'Watchlist panel'], ['D', 'Discover'], ['C', 'Cooking (launch a token)'], ['Y', 'CopyTrade'], ['O', 'Monitor (smart money flows)'], ['K', 'Track (wallets, calls, alerts, X/TG)'], ['R', 'Rewards (referrals, cashback, check-in)'], ['T', 'Trenches'], ['P', 'Portfolio'], ['M', 'Missions'], ['L', 'Leaderboard'],
+    ['F', 'Star / unstar token'], ['I', 'Instant trade panel'], ['W', 'Watchlist panel'], ['D', 'Discover'], ['C', 'Cooking (launch a token)'], ['Y', 'CopyTrade'], ['O', 'Monitor (smart money flows)'], ['K', 'Track (wallets, calls, alerts, X/TG)'], ['R', 'Rewards (cashback, check-in)'], ['T', 'Trenches'], ['P', 'Portfolio'], ['M', 'Missions'], ['L', 'Leaderboard'],
     ['Space', 'Pause market'], ['Esc', 'Close / back'], ['?', 'This help'],
   ]
   return (
