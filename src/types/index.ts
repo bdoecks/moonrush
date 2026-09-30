@@ -405,6 +405,14 @@ export interface Socials {
 }
 export type LaunchStyle = 'fair' | 'hyped' | 'stealth'
 
+/** Trenches columns. */
+export type TrenchColumn = 'new' | 'stretch' | 'grad'
+/** A Trenches column's quick buy: its P1/P2/P3 fee preset, and a custom amount per chain (chain coin; unset = the P slot's default). */
+export interface ColumnQuick {
+  slot: number
+  amount?: Partial<Record<Chain, number>>
+}
+
 export interface CookSpec {
   chain: Chain
   pad: PadId
@@ -633,6 +641,7 @@ export interface Settings {
   speed: 1 | 2 | 4
   accent: Accent
   quickSlot: number // P1/P2/P3 quick-buy slot (amount per chain comes from CHAINS[chain].quick)
+  trenchQuick?: Partial<Record<TrenchColumn, ColumnQuick>> // Trenches: each column's own quick-buy preset and amount (Axiom Pulse)
   presetIdx: number // active P1/P2/P3 slot in the trade panel / instant trade
   buyPresets: Record<Chain, number[][]> // native-coin amounts per chain, per slot
   sellPresets: number[][] // % of position per slot

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
 import { useGame } from '../game/store'
 import { nativePrice, SWAP_FEE, type Asset } from '../game/tradingEngine'
-import type { Chain, Token } from '../types'
+import type { Chain, Settings, Token, TrenchColumn } from '../types'
 import { fmtUsd } from '../utils/format'
 import { Modal } from './ui'
 
@@ -22,15 +22,23 @@ export function ChainBadge({ chain, className, withName }: { chain: Chain; class
   )
 }
 
-/** One-click buy of the P-slot amount in the token's chain coin. */
-export function QuickBuyButton({ t, className, label }: { t?: Token; className?: string; label?: string }) {
-  const slot = useGame((s) => s.settings.quickSlot)
+/** A Trenches column's quick buy for a chain: its own P slot and amount (Axiom Pulse), else the global ones. */
+export function columnQuick(settings: Settings, col: TrenchColumn, chain: Chain) {
+  const q = settings.trenchQuick?.[col]
+  const slot = q?.slot ?? settings.quickSlot
+  const custom = q?.amount?.[chain]
+  return { slot, amount: custom && custom > 0 ? custom : CHAINS[chain].quick[slot] ?? CHAINS[chain].quick[1], custom: !!(custom && custom > 0) }
+}
+
+/** One-click buy of the P-slot amount in the token's chain coin (a Trenches column passes its own slot / amount). */
+export function QuickBuyButton({ t, className, label, col }: { t?: Token; className?: string; label?: string; col?: TrenchColumn }) {
   const buyNative = useGame((s) => s.buyNative)
   const openAfter = useGame((s) => !!s.settings.quickBuyOpen)
   const select = useGame((s) => s.select)
   const dead = !t || t.status === 'rugged' || t.status === 'dead'
   const chain = t?.chain ?? 'sol'
-  const amt = CHAINS[chain].quick[slot] ?? CHAINS[chain].quick[1]
+  const slot = useGame((s) => (col ? columnQuick(s.settings, col, chain).slot : s.settings.quickSlot))
+  const amt = useGame((s) => (col ? columnQuick(s.settings, col, chain).amount : CHAINS[chain].quick[s.settings.quickSlot] ?? CHAINS[chain].quick[1]))
   return (
     <button
       disabled={dead}
@@ -46,6 +54,96 @@ export function QuickBuyButton({ t, className, label }: { t?: Token; className?:
       {label}
       {fmtNative(amt, chain, false)}
       <span className="text-[9px] opacity-80">{CHAINS[chain].native}</span>
+    </button>
+  )
+}
+
+/**
+ * A Trenches column's own quick buy (Axiom Pulse / GMGN): type the ⚡ amount, pick its P1/P2/P3 fee preset. Amounts are
+ * per chain; with ALL chains showing, the chain chip picks which chain's amount you're editing.
+ */
+export function ColumnQuickPicker({ col, title }: { col: TrenchColumn; title: string }) {
+  const filter = useGame((s) => s.chainFilter)
+  const settings = useGame((s) => s.settings)
+  const updateSettings = useGame((s) => s.updateSettings)
+  const [editChain, setEditChain] = useState<Chain>('sol')
+  const chain: Chain = filter === 'all' ? editChain : filter
+  const { slot, amount, custom } = columnQuick(settings, col, chain)
+  const [draft, setDraft] = useState<string | null>(null)
+  const set = (patch: { slot?: number; amount?: number | null }) => {
+    const cur = settings.trenchQuick?.[col] ?? { slot: settings.quickSlot }
+    const amounts = { ...(cur.amount ?? {}) }
+    if (patch.amount === null) delete amounts[chain]
+    else if (patch.amount !== undefined) amounts[chain] = patch.amount
+    updateSettings({ trenchQuick: { ...(settings.trenchQuick ?? {}), [col]: { slot: patch.slot ?? cur.slot, amount: amounts } } })
+  }
+  const commit = () => {
+    if (draft === null) return
+    const n = Number(draft)
+    // Empty = back to the P slot's default amount; nonsense is ignored.
+    if (draft.trim() === '') set({ amount: null })
+    else if (n > 0 && Number.isFinite(n)) set({ amount: Math.min(n, 1e6) })
+    setDraft(null)
+  }
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <label className={clsx('flex h-6 items-center gap-0.5 rounded border bg-bg pl-1 pr-0.5', custom ? 'border-up/50' : 'border-line2')} title={`${title} quick buy amount in ${CHAINS[chain].native} (empty = the P${slot + 1} default)`}>
+        <Zap size={10} className="shrink-0 text-up" fill="currentColor" />
+        <input
+          value={draft ?? String(amount)}
+          onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ''))}
+          onFocus={(e) => e.target.select()}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            if (e.key === 'Escape') setDraft(null)
+          }}
+          inputMode="decimal"
+          aria-label={`${title} quick buy amount`}
+          className="num w-[42px] bg-transparent text-[11px] font-semibold text-ink outline-none"
+        />
+        {filter === 'all' ? (
+          <button
+            onClick={() => setEditChain(CHAIN_IDS[(CHAIN_IDS.indexOf(editChain) + 1) % CHAIN_IDS.length])}
+            title={`Editing the ${CHAINS[chain].native} amount (click for another chain)`}
+            className="rounded px-0.5 text-[9px] font-bold hover:bg-raise"
+            style={{ color: CHAINS[chain].color }}
+          >
+            {CHAINS[chain].native}
+          </button>
+        ) : (
+          <span className="px-0.5 text-[9px] font-bold" style={{ color: CHAINS[chain].color }}>{CHAINS[chain].native}</span>
+        )}
+      </label>
+      <div className="flex rounded border border-line2 bg-bg p-px">
+        {[0, 1, 2].map((i) => (
+          <button
+            key={i}
+            onClick={() => set({ slot: i })}
+            title={`${title}: quick buys use your P${i + 1} fees & slippage${custom ? '' : ` (default amount ${fmtNative(CHAINS[chain].quick[i], chain)})`}`}
+            className={clsx('rounded-sm px-1 py-0.5 text-[10px] font-bold', slot === i ? 'bg-up/15 text-up' : 'text-dim hover:text-ink')}
+          >
+            P{i + 1}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** "Open / Stay" after a quick buy (GMGN): jump to the coin's page, or keep you on the list. */
+export function OpenAfterToggle() {
+  const openAfter = useGame((s) => !!s.settings.quickBuyOpen)
+  const updateSettings = useGame((s) => s.updateSettings)
+  return (
+    <button
+      onClick={() => updateSettings({ quickBuyOpen: !openAfter })}
+      aria-pressed={openAfter}
+      title={openAfter ? 'Quick buy opens the coin page (click to stay on the list instead)' : 'Quick buy keeps you on the list (click to open the coin page after buying)'}
+      className={clsx('flex h-6 items-center gap-0.5 rounded border px-1.5 text-[10px] font-bold', openAfter ? 'border-up/50 bg-up/10 text-up' : 'border-line2 text-dim hover:text-ink')}
+    >
+      <ExternalLink size={10} /> <span className="hidden sm:inline">{openAfter ? 'Open' : 'Stay'}</span>
     </button>
   )
 }

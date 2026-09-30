@@ -1,6 +1,6 @@
 import { Search, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { QuickSlotPicker } from '../components/chain'
+import { OpenAfterToggle } from '../components/chain'
 import { HiddenToggle } from '../components/HideButton'
 import { Trenches } from '../components/discover/Trenches'
 import { useGame } from '../game/store'
@@ -31,7 +31,7 @@ export function TrenchesView() {
           />
           {query && <button onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-dim hover:text-ink" aria-label="Clear filter"><X size={12} /></button>}
         </div>
-        <div className="ml-auto flex items-center gap-1.5"><HiddenToggle /><QuickSlotPicker /></div>
+        <div className="ml-auto flex items-center gap-1.5"><HiddenToggle /><OpenAfterToggle /></div>
       </div>
       <div className="min-h-0 flex-1">
         <Trenches tokens={tokens} />

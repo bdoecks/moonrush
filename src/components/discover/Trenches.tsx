@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { fakeAddress } from '../../utils/address'
 import { CHAINS } from '../../data/chains'
-import { ChainBadge, QuickBuyButton, QuickSlotPicker } from '../chain'
+import { ChainBadge, ColumnQuickPicker, QuickBuyButton } from '../chain'
 import { HideButton } from '../HideButton'
 import { useHidden, useVisible } from '../../game/hidden'
 import { PadBadge } from '../pad'
@@ -12,7 +12,7 @@ import { useTokenMap } from '../../hooks/useDerived'
 import { useGame } from '../../game/store'
 import { publicBundlePct } from '../../game/devTools'
 import { devPctOf, top10Of } from '../../game/ledger'
-import type { PadId, Token } from '../../types'
+import type { PadId, Token, TrenchColumn } from '../../types'
 import { load, save } from '../../utils/storage'
 import { countActive, EMPTY_FILTER, matchesFilter, presetFor, withDefaults, type TrenchFilter } from './trenchFilter'
 import { useFilterPresets } from '../../hooks/useFilterPresets'
@@ -20,7 +20,7 @@ import { TrenchFilterButton } from './TrenchFilterPanel'
 import { fmtAge, fmtCompact, fmtNum } from '../../utils/format'
 import { EmptyState, FlashNum, Pct, Segmented, TokenIcon } from '../ui'
 
-type Col = 'new' | 'stretch' | 'grad'
+type Col = TrenchColumn
 const COLS: { id: Col; title: string }[] = [
   { id: 'new', title: 'New Pairs' },
   { id: 'stretch', title: 'Final Stretch' },
@@ -114,7 +114,7 @@ function Column({ col, list: all, now, visible }: { col: (typeof COLS)[number]; 
           />
         </div>
         <TrenchFilterButton title={col.title} value={filter} onApply={setFilter} chain={chain} counts={counts} scope={col.id} />
-        <QuickSlotPicker />
+        <ColumnQuickPicker col={col.id} title={col.title} />
       </header>
       {paused && (
         <div className="pointer-events-none absolute left-1/2 top-[42px] z-10 -translate-x-1/2 rounded-full border border-warn/50 bg-panel/95 px-2 py-0.5 text-[10px] font-bold text-warn shadow-lg">
@@ -123,7 +123,7 @@ function Column({ col, list: all, now, visible }: { col: (typeof COLS)[number]; 
       )}
       <div className="min-h-0 flex-1 overflow-auto" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
         {display.length ? (
-          display.map((t) => <Card key={t.id} t={t} now={now} />)
+          display.map((t) => <Card key={t.id} t={t} now={now} col={col.id} />)
         ) : (
           <EmptyState
             icon="🕳️"
@@ -147,7 +147,7 @@ function ringClass(t: Token) {
 // MC colour steps up with size so big caps pop out of the feed.
 const mcClass = (mc: number) => (mc >= 1e6 ? 'text-warn' : mc >= 1e5 ? 'text-info' : mc >= 3e4 ? 'text-up' : 'text-ink')
 
-export const Card = memo(function Card({ t, now, preview }: { t: Token; now: number; preview?: boolean }) {
+export const Card = memo(function Card({ t, now, preview, col }: { t: Token; now: number; preview?: boolean; col?: Col }) {
   const select = useGame((s) => s.select)
   const toggleWatch = useGame((s) => s.toggleWatch)
   const watched = useGame((s) => s.watchlist.includes(t.id))
@@ -253,7 +253,7 @@ export const Card = memo(function Card({ t, now, preview }: { t: Token; now: num
       </div>
 
       {/* Hover quick-buy */}
-      {!preview && <QuickBuyButton t={t} className="absolute right-2 bottom-2 border-0 bg-up px-2.5 text-black shadow-[0_0_16px_-4px_#19d989] hover:brightness-110 md:opacity-0 md:group-hover:opacity-100" />}
+      {!preview && <QuickBuyButton t={t} col={col} className="absolute right-2 bottom-2 border-0 bg-up px-2.5 text-black shadow-[0_0_16px_-4px_#19d989] hover:brightness-110 md:opacity-0 md:group-hover:opacity-100" />}
     </div>
   )
 })
