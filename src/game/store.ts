@@ -22,7 +22,7 @@ import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '.
 import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
 import { ACCOUNTS, CALL_SETTLE_TICKS, callerKey, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
-import type { ClientMsg, OpMsg, OrderMsg, RoomPlayer, RoundInfo } from '../net/protocol'
+import { WORLD_START_BALANCE, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
 import { payNative, runBuy, runGiveAway, runSell, runSwap } from './orders'
 import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
 
@@ -172,6 +172,7 @@ export interface OnlineState {
   round: RoundInfo
   conn: 'open' | 'reconnecting'
   chat: ChatLine[]
+  spectator?: boolean // World guest: watching only (sign in to trade)
 }
 
 /** Set by the network client while online; the store calls it to tell the server about your cooks, bots and coins. */
@@ -561,7 +562,16 @@ export const useGame = create<GameState>()((set, get) => {
    * Buy `usd` of a token from each of these wallets. On coins you cooked, only the deployer (and wallets sleuths have
    * linked to it) count as the dev; any other wallet looks like a normal buyer — unless this buy gets it linked.
    */
+  /** World guests only watch: anything that trades or spends says "sign in" instead. */
+  function watchingOnly(): boolean {
+    const s = get()
+    if (!s.online?.spectator) return false
+    s.notify({ title: 'SIGN IN TO TRADE', body: "You're watching the World as a guest. Sign in (top right) to get your own $10,000 wallet and trade.", tone: 'info', icon: '👀' }, 'alert')
+    return true
+  }
+
   function buyFrom(walletIds: string[], usd: number, id: string, slot?: number, label?: string): boolean {
+    if (watchingOnly()) return false
     const s = get()
     const tok = s.market.tokens.find((x) => x.id === id)
     const setting = tok ? slotSetting(s.settings, tok.chain, 'buy', slot) : undefined
@@ -637,6 +647,7 @@ export const useGame = create<GameState>()((set, get) => {
    */
   function runSnipers(newIds: string[]) {
     const s0 = get()
+    if (s0.online?.spectator) return
     if (!s0.snipers.some((x) => x.enabled)) return
     const words = (str: string) => str.split(',').map((w) => w.trim().toLowerCase().replace(/^\$/, '')).filter(Boolean)
     let snipers = s0.snipers.map((x) => ({ ...x, holdings: { ...x.holdings }, stats: { ...x.stats } }))
@@ -756,6 +767,7 @@ export const useGame = create<GameState>()((set, get) => {
    */
   function runCopies(actions: WalletAction[]) {
     const s0 = get()
+    if (s0.online?.spectator) return
     if (!s0.copies.some((c) => !c.paused)) return
     // Copy trades run from your primary wallet. In rooms each one is an order the server runs too (its result wins).
     const pid = primaryId(s0.portfolio)
@@ -1238,6 +1250,7 @@ export const useGame = create<GameState>()((set, get) => {
     },
 
     sell: (qty, tokenId, slot, scope = 'active') => {
+      if (watchingOnly()) return false
       const s = get()
       if (s.runStatus !== 'running') {
         s.notify({ title: 'ROUND NOT ACTIVE', body: 'Start a round to trade', tone: 'warn', icon: '⏸' })
@@ -1395,7 +1408,7 @@ export const useGame = create<GameState>()((set, get) => {
         set({ market, wallets: createWallets(new Rng((market.seed ^ 0xa11ce) >>> 0)), events: [], socialFeed: [], walletFeed: [], selectedId: defaultSelection(market), watchlist: [] })
       }
       const s = get()
-      const balance = startBalanceFor(mode, s.settings, !!s.online)
+      const balance = s.online?.round.world ? WORLD_START_BALANCE : startBalanceFor(mode, s.settings, !!s.online)
       const runDuration = opts?.durationTicks !== undefined ? opts.durationTicks : lengthTicks(mode, s.roundLength)
       // Your wallets carry over to the new round (emptied); the bank starts with the mode's balance.
       const portfolio = ensureAccounts({
@@ -1411,7 +1424,10 @@ export const useGame = create<GameState>()((set, get) => {
         players: s.online ? roomRivals(s.online) : createRivals(new Rng((s.market.seed ^ 0x5bd1e995) >>> 0), balance, mode),
         view: 'discover',
       })
-      s.notify({ title: `${MODES[mode].name.toUpperCase()} STARTED`, body: `${fmtUsd(balance, 0)} virtual USD · ${modeTagline(mode, runDuration)}${s.online ? ` · room ${s.online.code}` : ''}`, tone: 'info', icon: '🚀' }, 'achievement')
+      if (s.online?.round.world) s.notify(s.online.spectator
+        ? { title: 'WATCHING THE WORLD', body: 'Everything here is live and shared by everyone. Sign in to trade.', tone: 'info', icon: '🌍' }
+        : { title: 'WELCOME TO THE WORLD', body: 'One market for everyone, always running. Your wallet is saved to your account.', tone: 'info', icon: '🌍' }, 'achievement')
+      else s.notify({ title: `${MODES[mode].name.toUpperCase()} STARTED`, body: `${fmtUsd(balance, 0)} virtual USD · ${modeTagline(mode, runDuration)}${s.online ? ` · room ${s.online.code}` : ''}`, tone: 'info', icon: '🚀' }, 'achievement')
       if (!opts?.silent) s.notify({ title: 'PICK YOUR CHAINS', body: 'Solana coins cost SOL, BNB Chain costs BNB, Robinhood Chain costs ETH. Swap from the wallet chip, or let auto-swap cover buys.', tone: 'info', icon: '🔄' })
       persist()
     },
@@ -1465,6 +1481,7 @@ export const useGame = create<GameState>()((set, get) => {
     },
 
     cook: (spec) => {
+      if (watchingOnly()) return null
       const s = get()
       const fail = (body: string) => {
         s.notify({ title: 'CAN’T COOK', body, tone: 'warn', icon: '🍳' }, 'alert')
@@ -1646,6 +1663,7 @@ export const useGame = create<GameState>()((set, get) => {
       persist()
     },
     swapAssets: (from, to, amount, walletId) => {
+      if (watchingOnly()) return false
       const s = get()
       if (s.runStatus !== 'running') {
         s.notify({ title: 'ROUND NOT ACTIVE', body: 'Start a round to swap', tone: 'warn', icon: '⏸' })
@@ -1706,6 +1724,7 @@ export const useGame = create<GameState>()((set, get) => {
       persist()
     },
     transferNative: (fromId, toId, chain, amount) => {
+      if (watchingOnly()) return false
       const s = get()
       const from = accountOf(s.portfolio, fromId)
       const to = accountOf(s.portfolio, toId)
@@ -1730,6 +1749,7 @@ export const useGame = create<GameState>()((set, get) => {
       return true
     },
     fundWallets: (source, toIds, chain, amountEach) => {
+      if (watchingOnly()) return 0
       const s = get()
       if (s.runStatus !== 'running') {
         s.notify({ title: 'ROUND NOT ACTIVE', body: 'Start a round to fund wallets', tone: 'warn', icon: '⏸' })
@@ -1791,6 +1811,7 @@ export const useGame = create<GameState>()((set, get) => {
       return s.buy(amount * nativePrice(s.market, t.chain), t.id, slot)
     },
     claimCreatorFees: (tokenId, silent) => {
+      if (watchingOnly()) return
       const s = get()
       const recs = s.launches.filter((r) => (!tokenId || r.tokenId === tokenId) && (r.unclaimed ?? 0) > 1e-9)
       if (!recs.length) return
@@ -1807,6 +1828,7 @@ export const useGame = create<GameState>()((set, get) => {
       persist()
     },
     postSocial: (text, tokenId) => {
+      if (watchingOnly()) return false
       const s = get()
       const clean = text.trim().slice(0, 200)
       if (!clean) return false
@@ -1854,6 +1876,7 @@ export const useGame = create<GameState>()((set, get) => {
       return true
     },
     airdrop: (tokenId, pct, wallets, target) => {
+      if (watchingOnly()) return false
       const s = get()
       const fail = (body: string) => {
         s.notify({ title: 'AIRDROP FAILED', body, tone: 'warn', icon: '🪂' }, 'alert')
@@ -1910,6 +1933,7 @@ export const useGame = create<GameState>()((set, get) => {
       return true
     },
     setBot: (tokenId, patch) => {
+      if (watchingOnly()) return
       const s = get()
       const rec = s.launches.find((r) => r.tokenId === tokenId)
       const t = s.market.tokens.find((x) => x.id === tokenId)
@@ -1980,6 +2004,7 @@ export const useGame = create<GameState>()((set, get) => {
       persist()
     },
     claimCashback: (which, as) => {
+      if (watchingOnly()) return
       const s = get()
       if (s.runStatus !== 'running') {
         s.notify({ title: 'ROUND NOT ACTIVE', body: 'Start a round to claim rewards', tone: 'warn', icon: '⏸' })

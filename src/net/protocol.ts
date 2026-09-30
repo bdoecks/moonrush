@@ -8,6 +8,11 @@ import type { Candle, GameMode, MarketEngine, MarketEvent, MarketState, SimWalle
 
 export const MP_PATH = '/mp'
 
+/** The one public room everyone plays in (always on, never resets). Private rooms use random 5-letter codes. */
+export const WORLD_CODE = 'WORLD'
+/** What a new player starts with in the World (USD). */
+export const WORLD_START_BALANCE = 10_000
+
 export interface RoomPlayer {
   id: string
   name: string
@@ -23,6 +28,7 @@ export interface RoomPlayer {
   seasonPoints?: number // their real season points (sets the tier everyone sees for them)
   holdings?: MainHolding[] // what their public main wallet holds (side wallets stay hidden)
   verified?: boolean // signed in: the server confirmed this is their account
+  spectator?: boolean // World guests: watching only (not listed, can't trade or chat)
 }
 
 /** A coin in a player's main wallet, as everyone in the room can see it on-chain. */
@@ -42,6 +48,7 @@ export interface RoundInfo {
   seed: number
   startTime: number // market time the round's market was created at
   engine?: MarketEngine // Classic (6x clock) or Realistic (real-time, pump.fun order flow)
+  world?: boolean // the public World: one round that never ends
 }
 
 /**
@@ -123,7 +130,7 @@ export interface TickMsg {
 }
 
 export type ServerMsg =
-  | { t: 'welcome'; you: string; code: string; hostId: string; players: RoomPlayer[]; round: RoundInfo; market: NetMarket; wallets: SimWallet[]; posts: SocialPost[]; events: MarketEvent[] }
+  | { t: 'welcome'; you: string; code: string; hostId: string; players: RoomPlayer[]; round: RoundInfo; market: NetMarket; wallets: SimWallet[]; posts: SocialPost[]; events: MarketEvent[]; spectator?: boolean }
   | { t: 'players'; hostId: string; players: RoomPlayer[] }
   | { t: 'round'; round: RoundInfo; market?: NetMarket; wallets?: SimWallet[] }
   | TickMsg

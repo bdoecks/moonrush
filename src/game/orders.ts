@@ -140,17 +140,18 @@ export interface WalletState {
   feesPaid: number
   tradedTokens: string[]
   tradeCount: number
+  startBalance?: number // what the round's gains are measured from (moves with transfers in / out)
   cashback?: Record<Chain, number> // rooms: cashback earned and not yet claimed (the server counts it)
   vaults?: Record<string, number> // rooms: creator fees waiting in each of your coins' vaults, in the chain coin
 }
 
 export const walletStateOf = (p: Portfolio): WalletState => ({
-  cash: p.cash, accounts: p.accounts ?? [], active: p.active, realized: p.realized, feesPaid: p.feesPaid, tradedTokens: p.tradedTokens, tradeCount: p.trades.length,
+  cash: p.cash, accounts: p.accounts ?? [], active: p.active, realized: p.realized, feesPaid: p.feesPaid, tradedTokens: p.tradedTokens, tradeCount: p.trades.length, startBalance: p.startBalance,
 })
 
 /** Put the server's wallet state onto your local portfolio (charts, equity history etc. stay yours). */
 export function mergeWalletState(local: Portfolio, w: WalletState): Portfolio {
-  return aggregate({ ...local, cash: w.cash, accounts: w.accounts, active: w.active ?? local.active, realized: w.realized, feesPaid: w.feesPaid, tradedTokens: w.tradedTokens })
+  return aggregate({ ...local, cash: w.cash, accounts: w.accounts, active: w.active ?? local.active, realized: w.realized, feesPaid: w.feesPaid, tradedTokens: w.tradedTokens, ...(w.startBalance ? { startBalance: w.startBalance } : {}) })
 }
 
 // ─── Wallet differences ───────────────────────────────────────────────────────

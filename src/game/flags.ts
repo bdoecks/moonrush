@@ -7,10 +7,11 @@ export interface GameFlags {
   events: boolean // market events feed (off: showing announced pumps looked like free money)
   eventPopups: boolean // market event pop-ups (rug warnings for your own bags always show)
   multiplayer: boolean // "Play with friends"
+  world: boolean // "MOONRUSH World" (off: only admins see it, until launch day)
   notice: string // banner at the top for everyone ('' = none)
 }
 
-export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, notice: '' }
+export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '' }
 
 export const useFlags = create<GameFlags & { loaded: boolean }>(() => ({ ...DEFAULT_FLAGS, loaded: false }))
 

@@ -7,7 +7,7 @@ import type { GameMode, MarketEngine } from '../types'
 import { fmtClock, fmtPct, fmtUsd, toneClass } from '../utils/format'
 import { Logo } from './TopBar'
 import { Kbd, Modal, Segmented, Toggle } from './ui'
-import { LobbyModal } from './Multiplayer'
+import { LobbyModal, WorldCard } from './Multiplayer'
 import { useFlags } from '../game/flags'
 import { useAccount } from '../net/account'
 
@@ -40,6 +40,7 @@ function ModeModal() {
   const closable = runStatus !== 'select'
 
   const mpOn = useFlags((s) => s.multiplayer)
+  const worldOn = useFlags((s) => s.world)
   const isAdmin = useAccount((s) => s.admin)
   const choose = (m: GameMode) => {
     if (runStatus === 'running' && !confirm) return setConfirm(m)
@@ -54,6 +55,7 @@ function ModeModal() {
           Trade fictional memecoins in a live simulated market. Spot momentum, dodge rugs, climb the board. <span className="text-dim">Virtual money only: nothing here is real.</span>
         </p>
       </div>
+      {!import.meta.env.VITE_NO_MP && (worldOn || isAdmin) && <WorldCard adminOnly={!worldOn} />}
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <span className="mr-1 text-[11px] font-semibold text-muted">Round length</span>
         {ROUND_LENGTHS.map((o) => (

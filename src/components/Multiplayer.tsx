@@ -1,9 +1,10 @@
 import clsx from 'clsx'
-import { Copy, Crown, LogOut, Send, Users, Wifi, WifiOff } from 'lucide-react'
+import { Copy, Crown, Globe, LogOut, Send, Users, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { lengthTicks, MODES, ROUND_LENGTHS, type RoundLength } from '../game/progression'
 import { useGame } from '../game/store'
-import { joinRoom, leaveRoom, mpProfile, sendChat, setMpProfile, startRound } from '../net/client'
+import { joinRoom, joinWorld, leaveRoom, mpProfile, sendChat, setMpProfile, startRound } from '../net/client'
+import { WORLD_START_BALANCE } from '../net/protocol'
 import type { GameMode, MarketEngine } from '../types'
 import { EnginePicker } from './Modals'
 import { fmtClock, fmtPct, fmtUsd, toneClass } from '../utils/format'
@@ -18,6 +19,13 @@ export function LobbyModal() {
   const online = useGame((s) => s.online)
   const setModal = useGame((s) => s.setModal)
   const runStatus = useGame((s) => s.runStatus)
+  if (online?.round.world) {
+    return (
+      <Modal title={<span className="flex items-center gap-2"><Globe size={15} className="text-accent" /> MOONRUSH World</span>} onClose={() => setModal(null)} wide>
+        <WorldPanel />
+      </Modal>
+    )
+  }
   return (
     <Modal title={<span className="flex items-center gap-2"><Users size={15} className="text-accent" /> Play with friends</span>} onClose={() => setModal(online || runStatus !== 'select' ? null : 'mode')} wide={!!online}>
       {online ? <Room /> : <JoinForm />}
@@ -245,6 +253,7 @@ function Room() {
 const ret = (p: { equity: number; startEquity: number }) => (p.startEquity > 0 ? p.equity / p.startEquity - 1 : -Infinity)
 
 function Chat() {
+  const spectator = useGame((s) => !!s.online?.spectator)
   const chat = useGame((s) => s.online?.chat ?? [])
   const you = useGame((s) => s.online?.you)
   const [text, setText] = useState('')
@@ -268,10 +277,12 @@ function Chat() {
           </div>
         ))}
       </div>
-      <div className="flex gap-1 border-t border-line p-1.5">
+      {spectator ? (
+        <div className="border-t border-line p-2 text-center text-[11px] text-dim">Sign in to chat</div>
+      ) : <div className="flex gap-1 border-t border-line p-1.5">
         <input value={text} maxLength={200} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); e.stopPropagation() }} placeholder="Say something" aria-label="Chat message" className="h-8 min-w-0 flex-1 rounded-md border border-line2 bg-bg px-2 text-[12px] outline-none focus:border-accent/60" />
         <button onClick={submit} aria-label="Send" className="grid size-8 place-items-center rounded-md bg-raise text-accent hover:brightness-125"><Send size={13} /></button>
-      </div>
+      </div>}
     </div>
   )
 }
@@ -282,11 +293,155 @@ export function RoomChip() {
   const setModal = useGame((s) => s.setModal)
   if (!online) return null
   const n = online.players.filter((p) => p.online).length
+  if (online.round.world) {
+    return (
+      <button onClick={() => setModal('lobby')} title="The World: who's on, and chat" className={clsx('flex items-center gap-1.5 rounded-md border px-2 py-1', online.conn === 'open' ? 'border-accent/40 bg-accent/10' : 'border-warn/50 bg-warn/10')}>
+        <span className={clsx('size-1.5 rounded-full', online.conn === 'open' ? 'bg-up pulse-dot' : 'bg-warn')} />
+        <Globe size={12} className="text-accent" />
+        <span className="text-[11px] font-bold tracking-wider text-accent">WORLD</span>
+        <span className="flex items-center gap-0.5 text-[11px] text-muted"><Users size={11} />{n}</span>
+      </button>
+    )
+  }
   return (
     <button onClick={() => setModal('lobby')} title="Room, players and chat" className={clsx('flex items-center gap-1.5 rounded-md border px-2 py-1', online.conn === 'open' ? 'border-accent/40 bg-accent/10' : 'border-warn/50 bg-warn/10')}>
       <span className={clsx('size-1.5 rounded-full', online.conn === 'open' ? 'bg-up pulse-dot' : 'bg-warn')} />
       <span className="num text-[11px] font-bold tracking-wider text-accent">{online.code}</span>
       <span className="flex items-center gap-0.5 text-[11px] text-muted"><Users size={11} />{n}</span>
     </button>
+  )
+}
+
+// ─── MOONRUSH World ──────────────────────────────────────────────────────────
+/** The way into the World, on the start screen. */
+export function WorldCard({ adminOnly }: { adminOnly?: boolean }) {
+  const signedIn = useAccount((s) => s.status === 'signedIn')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [signIn, setSignIn] = useState(false)
+  const go = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await joinWorld()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not connect')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="mb-3 rounded-xl border border-accent/50 bg-gradient-to-br from-accent/15 via-accent/5 to-transparent p-4">
+      <div className="flex items-start gap-3">
+        <span className="text-[34px] leading-none">🌍</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-display text-[19px] font-bold text-accent">MOONRUSH World</span>
+            <span className="rounded bg-up/15 px-1.5 py-0.5 text-[9px] font-bold text-up">LIVE 24/7</span>
+            {adminOnly && <span className="rounded bg-warn/15 px-1.5 py-0.5 text-[9px] font-bold text-warn" title="Only admins see this until you turn the World on in the admin panel">ADMIN PREVIEW</span>}
+          </div>
+          <p className="mt-1 text-[12px] text-muted">
+            One market for everyone, always running. Every coin, pump, rug and cook is shared. Start with <b className="text-ink">{fmtUsd(WORLD_START_BALANCE, 0)}</b>, and your wallet <b className="text-ink">never resets</b>: it's yours on every device.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button disabled={busy} onClick={go} className="h-10 rounded-md bg-accent px-5 text-[14px] font-extrabold text-accent-ink hover:brightness-110 disabled:opacity-50">
+              {busy ? 'Connecting…' : signedIn ? 'Enter the World' : 'Watch the World'}
+            </button>
+            {!signedIn && (
+              <button onClick={() => setSignIn(true)} className="h-10 rounded-md border border-accent/50 px-4 text-[13px] font-bold text-accent hover:bg-accent/10">Sign in to trade</button>
+            )}
+            {!signedIn && <span className="text-[11px] text-dim">Guests can watch; an account gets you a wallet.</span>}
+          </div>
+          {error && <p className="mt-2 rounded-md border border-down/40 bg-down/10 px-2 py-1.5 text-[12px] text-down">{error}</p>}
+        </div>
+      </div>
+      {signIn && <AccountModal onClose={() => setSignIn(false)} />}
+    </div>
+  )
+}
+
+/** Inside the World: who's on, chat, and the way out. */
+function WorldPanel() {
+  const online = useGame((s) => s.online)!
+  const setModal = useGame((s) => s.setModal)
+  const [confirmLeave, setConfirmLeave] = useState(false)
+  const on = online.players.filter((p) => p.online)
+  const ranked = [...on].sort((a, b) => b.equity - a.equity)
+  return (
+    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 p-3">
+          <span className="text-[28px]">🌍</span>
+          <div>
+            <div className="text-[14px] font-bold">The World never stops</div>
+            <div className="text-[11px] text-muted">💊 Realistic pump.fun market · your wallet is saved to your account</div>
+          </div>
+          <span className={clsx('ml-auto flex items-center gap-1 text-[11px]', online.conn === 'open' ? 'text-up' : 'text-warn')}>
+            {online.conn === 'open' ? <Wifi size={13} /> : <WifiOff size={13} />}{online.conn === 'open' ? 'Connected' : 'Reconnecting…'}
+          </span>
+          <button onClick={() => setModal(null)} className="h-9 rounded-md bg-accent px-4 text-[13px] font-extrabold text-accent-ink hover:brightness-110">Back to trading</button>
+        </div>
+        {online.spectator && <WatchBanner inline />}
+        <div className="rounded-lg border border-line2">
+          <div className="border-b border-line px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-muted">Online now · {on.length}</div>
+          {ranked.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-dim">Nobody else is trading right now.</div>}
+          {ranked.map((p) => (
+            <div key={p.id} className={clsx('flex items-center gap-2 border-b border-line/50 px-3 py-2 last:border-b-0', p.id === online.you && 'bg-accent/5')}>
+              <span className="grid size-8 place-items-center rounded-md bg-raise text-[17px]">{p.avatar}</span>
+              <span className="min-w-0">
+                <span className="flex items-center gap-1 text-[13px] font-semibold">
+                  <span className="truncate">{p.name}</span>
+                  {p.verified && <span className="text-[10px] font-bold text-up" title="Signed in: this is their real account">✓</span>}
+                  {p.id === online.you && <span className="text-[10px] text-accent">(you)</span>}
+                </span>
+                <span className="text-[10px] text-dim">Lv {p.level}</span>
+              </span>
+              {p.startEquity > 0 && (
+                <span className="ml-auto text-right">
+                  <span className="num block text-[13px] font-bold">{fmtUsd(p.equity, 0)}</span>
+                  <span className={clsx('num block text-[10px]', toneClass(p.equity - p.startEquity))}>{fmtPct(p.equity / p.startEquity - 1, 1)}</span>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col gap-3">
+        <Chat />
+        <div className="mt-auto">
+          {confirmLeave ? (
+            <div className="rounded-md border border-warn/40 bg-warn/10 p-2 text-[11px] text-warn">
+              Leave the World? Your wallet stays here for when you come back; your solo game returns.
+              <div className="mt-2 flex gap-1.5">
+                <button onClick={leaveRoom} className="h-8 flex-1 rounded-md bg-warn text-[12px] font-bold text-black">Leave</button>
+                <button onClick={() => setConfirmLeave(false)} className="h-8 flex-1 rounded-md border border-line2 text-[12px] text-muted">Stay</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmLeave(true)} className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-line2 text-[12px] font-semibold text-muted hover:border-down/50 hover:text-down"><LogOut size={13} /> Leave the World</button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Guests watching the World: a strip saying so, with the way to start playing. Signing in rejoins as a player. */
+export function WatchBanner({ inline }: { inline?: boolean }) {
+  const spectator = useGame((s) => !!s.online?.spectator)
+  const signedIn = useAccount((s) => s.status === 'signedIn')
+  const [signIn, setSignIn] = useState(false)
+  useEffect(() => {
+    // Signed in while watching: reconnect so the server knows it's you (you come back into the World as a player).
+    if (spectator && signedIn) location.reload()
+  }, [spectator, signedIn])
+  if (!spectator) return null
+  return (
+    <div className={clsx('flex flex-wrap items-center justify-center gap-2 border-accent/40 bg-accent/10 px-3 py-1.5 text-[12px]', inline ? 'rounded-md border' : 'border-b')}>
+      <span>👀 You're <b>watching</b> the World as a guest.</span>
+      <span className="text-muted">Sign in to get your own {fmtUsd(WORLD_START_BALANCE, 0)} wallet and trade.</span>
+      <button onClick={() => setSignIn(true)} className="rounded border border-accent/60 px-2 py-0.5 text-[11px] font-bold text-accent hover:bg-accent/10">Sign in</button>
+      {signIn && <AccountModal onClose={() => setSignIn(false)} />}
+    </div>
   )
 }

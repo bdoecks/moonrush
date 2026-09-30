@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
-import { MP_PATH, type ClientMsg, type ServerMsg } from '../src/net/protocol'
+import { MP_PATH, WORLD_CODE, type ClientMsg, type ServerMsg } from '../src/net/protocol'
 import { Room, type RoomSnapshot } from './room'
 import { isBanned, nameTaken, verifyToken } from './auth'
 import { bannedGuests, handleAdmin } from './admin'
@@ -30,6 +30,26 @@ const ROOM_IDLE_MS = 15 * 60_000
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
 const rooms = new Map<string, Room>()
+
+// ─── The World: one public room, always on ───────────────────────────────────
+/** Load the World as it was saved (however long ago), or start a fresh one. Joiners wait for this. */
+const worldReady: Promise<void> = (async () => {
+  const saved = await loadRoom(WORLD_CODE, 10 * 365 * 24 * 3600_000)
+  let world: Room | null = null
+  if (saved) {
+    try {
+      world = Room.restore(saved.state as RoomSnapshot, saved.charts as never)
+      console.log(`[world] restored (${world.members.size} players)`)
+    } catch (e) {
+      console.warn('[world] could not restore, starting fresh:', e instanceof Error ? e.message : e)
+    }
+  }
+  if (!world) {
+    world = new Room(WORLD_CODE, true)
+    console.log('[world] started fresh')
+  }
+  rooms.set(WORLD_CODE, world)
+})()
 
 function newCode() {
   for (;;) {
@@ -91,7 +111,8 @@ wss.on('connection', (ws: WebSocket) => {
     if (!room) {
       if (msg.t !== 'hello' || !msg.playerId) return fail('Say hello first')
       joining = []
-      void Promise.all([identify(msg), msg.create ? null : revive(String(msg.room ?? '').toUpperCase())]).then(([who]) => {
+      const code = String(msg.room ?? '').toUpperCase()
+      void Promise.all([identify(msg), msg.create ? null : code === WORLD_CODE ? worldReady : revive(code)]).then(([who]) => {
         const queued = joining ?? []
         joining = null
         if (ws.readyState !== ws.OPEN) return
@@ -112,7 +133,7 @@ wss.on('connection', (ws: WebSocket) => {
     } else {
       room = rooms.get(String(msg.room ?? '').toUpperCase()) ?? null
       if (!room) return fail('No room with that code')
-      if (!room.members.has(msg.playerId) && room.members.size >= 12) return fail('Room is full (12 players)')
+      if (!room.world && !room.members.has(msg.playerId) && room.members.size >= 12) return fail('Room is full (12 players)')
     }
     playerId = msg.playerId
     room.join(ws, { ...msg, name })
@@ -124,7 +145,7 @@ wss.on('connection', (ws: WebSocket) => {
 /** A room that isn't running here (e.g. after an update restarted the server): bring it back from the database. */
 const reviving = new Map<string, Promise<void>>()
 function revive(code: string): Promise<void> {
-  if (!persistOn || rooms.has(code) || !/^[A-Z0-9]{5}$/.test(code)) return Promise.resolve()
+  if (!persistOn || rooms.has(code) || code === WORLD_CODE || !/^[A-Z0-9]{5}$/.test(code)) return Promise.resolve()
   let p = reviving.get(code)
   if (!p) {
     p = loadRoom(code).then((saved) => {
@@ -143,14 +164,17 @@ function revive(code: string): Promise<void> {
 }
 
 /** Save every room (charts too when asked; they're bigger, so only every few minutes and at shutdown). */
-async function saveAll(withCharts: boolean) {
-  await Promise.all([...rooms.values()].map((r) => saveRoom(r.code, r.snapshot(), withCharts ? r.chartSnapshot() : undefined)))
+async function saveAll(withCharts: boolean, world = true) {
+  await Promise.all([...rooms.values()].filter((r) => world || !r.world).map((r) => saveRoom(r.code, r.snapshot(), withCharts ? r.chartSnapshot() : undefined)))
 }
+// Rooms save every 20s (charts every 3 min). The World's save is much bigger, so it goes every minute (its charts
+// every 3 min too); everything is saved again at shutdown.
 let lastCharts = 0
+let saves = 0
 setInterval(() => {
   const charts = Date.now() - lastCharts > 3 * 60_000
   if (charts) lastCharts = Date.now()
-  void saveAll(charts)
+  void saveAll(charts, ++saves % 3 === 0 || charts)
 }, 20_000)
 
 // An update or restart: save everything (with charts) before the server stops, so everyone picks up where they were.
@@ -170,7 +194,7 @@ for (const sig of ['SIGTERM', 'SIGINT'] as const) {
 setInterval(() => {
   for (const r of rooms.values()) void r.pullGifts()
   for (const [code, r] of rooms) {
-    if (r.emptySince && Date.now() - r.emptySince > ROOM_IDLE_MS) {
+    if (!r.world && r.emptySince && Date.now() - r.emptySince > ROOM_IDLE_MS) {
       r.dispose()
       rooms.delete(code)
       void deleteRoom(code)

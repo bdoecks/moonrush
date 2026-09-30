@@ -17,11 +17,16 @@ import { airdropFeePerWallet, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBot
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
-import type { BotRun, ClientMsg, NetMarket, NetToken, RoomPlayer, RoundInfo, ServerMsg, TickMsg, TokenDiff, TransferMsg, WalletDiff } from '../src/net/protocol'
+import { WORLD_START_BALANCE, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
 const KEYFRAME_TICKS = 30 // a full market refresh every ~30s; ticks in between only carry what changed
+const WORLD_TRADES_KEPT = 300 // World wallets live forever: keep their recent trade history only
+const WORLD_DEAD_COIN_SEC = 3600 // World: dead player-cooked coins leave the market after an hour
+const WORLD_FADE_AFTER_SEC = 1800 // World: a graduated coin can fade out once it's been on the DEX for 30 min…
+const WORLD_FADE_MCAP = 5_000 // …and has sunk below this market cap
+const WORLD_MAX_OLD_GRADS = 60 // at most this many older graduated coins stay alive (the biggest ones)
 const live = (t: { status: string }) => t.status === 'bonding' || t.status === 'graduated'
 
 // Numbers go over the wire with 6 significant digits (3 for volumes on chart points): plenty for prices and
@@ -75,6 +80,7 @@ const SAVED_TFS: Timeframe[] = ['1m', '5m', '15m', '1h', '4h']
 export interface RoomSnapshot {
   v: 1
   code: string
+  world?: boolean
   hostId: string
   round: RoundInfo
   market: MarketState
@@ -112,9 +118,15 @@ export class Room {
   private playersDirty = false
   private timer: ReturnType<typeof setInterval>
 
-  constructor(code: string) {
+  /** The public World: one round that never ends, never pauses, and keeps everyone's wallet. */
+  readonly world: boolean
+
+  constructor(code: string, world = false) {
     this.code = code
-    this.newMarket({ id: 0, state: 'lobby', mode: 'practice', durationTicks: null, startTick: 0, seed: 0, startTime: 0 })
+    this.world = world
+    this.newMarket(world
+      ? { id: 1, state: 'running', mode: 'practice', durationTicks: null, startTick: 0, seed: 0, startTime: 0, engine: 'realistic', world: true }
+      : { id: 0, state: 'lobby', mode: 'practice', durationTicks: null, startTick: 0, seed: 0, startTime: 0 })
     this.timer = setInterval(() => this.tick(), 1000)
   }
 
@@ -127,10 +139,10 @@ export class Room {
   /** Everything needed to bring this room back after a restart (players reconnect to it). */
   snapshot(): RoomSnapshot {
     return {
-      v: 1, code: this.code, hostId: this.hostId, round: this.round, market: this.market, wallets: this.wallets,
+      v: 1, code: this.code, world: this.world || undefined, hostId: this.hostId, round: this.round, market: this.market, wallets: this.wallets,
       posts: this.posts.slice(0, 80), events: this.events.slice(0, 80), bots: [...this.bots.entries()],
       lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()],
-      members: [...this.members.values()].map((m) => ({
+      members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
         cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick,
       })),
@@ -154,7 +166,8 @@ export class Room {
 
   /** Bring a saved room back: its market, round, players (offline until they reconnect) and their wallets. */
   static restore(s: RoomSnapshot, charts?: Record<string, Partial<Record<Timeframe, PackedCandle[]>>> | null): Room {
-    const r = new Room(s.code)
+    const r = new Room(s.code, !!s.world)
+    for (const t of r.market.tokens) candleStore.delete(t.id) // the placeholder market's charts
     r.hostId = s.hostId
     r.round = s.round
     r.market = s.market
@@ -185,15 +198,17 @@ export class Room {
   // ─── Players ───────────────────────────────────────────────────────────────
   join(ws: WebSocket, msg: Extract<ClientMsg, { t: 'hello' }> & { verified?: boolean }) {
     const existing = this.members.get(msg.playerId)
+    // World: you need an account to play; guests watch (WORLD_GUESTS_PLAY=1 lets guests play, for local testing only).
+    const spectator = this.world && !msg.verified && process.env.WORLD_GUESTS_PLAY !== '1'
     const info: RoomPlayer = existing
-      ? { ...existing.info, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, verified: !!msg.verified }
-      : { id: msg.playerId, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, equity: 0, startEquity: 0, trades: 0, wins: 0, verified: !!msg.verified }
+      ? { ...existing.info, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, verified: !!msg.verified, spectator: spectator || undefined }
+      : { id: msg.playerId, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, equity: 0, startEquity: 0, trades: 0, wins: 0, verified: !!msg.verified, spectator: spectator || undefined }
     existing?.ws?.close(4000, 'Joined from another tab')
     this.members.set(msg.playerId, { ...existing, info, ws, protect: existing?.protect ?? [], inbox: undefined, ack: 0 }) // a new connection restarts the wallet message count (the game does too)
-    if (!this.hostId) this.hostId = msg.playerId
+    if (!this.hostId && !this.world) this.hostId = msg.playerId
     this.emptySince = null
     this.send(ws, {
-      t: 'welcome', you: msg.playerId, code: this.code, hostId: this.hostId, players: this.playerList(), round: this.round,
+      t: 'welcome', you: msg.playerId, code: this.code, hostId: this.hostId, players: this.playerList(), round: this.round, spectator: spectator || undefined,
       market: this.netMarket(), wallets: round(this.wallets) as SimWallet[], posts: this.posts, events: this.events,
     })
     for (const tr of existing?.inbox ?? []) this.send(ws, tr) // transfers that came in while they were away
@@ -207,6 +222,7 @@ export class Room {
     if (!m || m.ws !== ws) return // an old socket closing after a reconnect
     m.ws = null
     m.info.online = false
+    if (m.info.spectator) this.members.delete(playerId)
     // The host keeps the crown through a quick reload; after 20s away it passes to someone still here.
     if (this.hostId === playerId) {
       setTimeout(() => {
@@ -225,8 +241,10 @@ export class Room {
   handle(playerId: string, msg: ClientMsg) {
     const me = this.members.get(playerId)
     if (!me) return
+    if (me.info.spectator && msg.t !== 'candles') return // watching only
     switch (msg.t) {
       case 'start':
+        if (this.world) return this.sendTo(playerId, { t: 'error', message: 'The World never stops: no new rounds here' })
         if (playerId !== this.hostId) return this.sendTo(playerId, { t: 'error', message: 'Only the host can start a round' })
         return this.startRound(msg.mode, msg.durationTicks, msg.engine === 'realistic' ? 'realistic' : 'classic')
       case 'cook':
@@ -342,7 +360,7 @@ export class Room {
     this.newMarket({ id: this.round.id + 1, state: 'running', mode, durationTicks, startTick: 0, seed: 0, startTime: 0, engine })
     for (const m of this.members.values()) {
       m.info = { ...m.info, equity: 0, startEquity: 0, trades: 0, wins: 0, finished: false }
-      m.wallet = freshWallet(MODES[mode].startBalance, m.layout)
+      m.wallet = freshWallet(this.startBalance(), m.layout)
       m.cashback = undefined
       m.cooks = 0
       m.lastCookTick = undefined
@@ -355,14 +373,20 @@ export class Room {
   // ─── Wallets (Phase 2: the server is the judge of every player's wallets) ──
   /** This player's wallets in the running round (created fresh when they first need them). */
   private walletOf(m: Member): Portfolio | null {
-    if (this.round.state !== 'running') return null
-    if (!m.wallet) m.wallet = freshWallet(MODES[this.round.mode].startBalance, m.layout)
+    if (this.round.state !== 'running' || m.info.spectator) return null
+    if (!m.wallet) m.wallet = freshWallet(this.startBalance(), m.layout)
     return m.wallet
+  }
+
+  /** What a fresh wallet starts with here. */
+  private startBalance() {
+    return this.world ? WORLD_START_BALANCE : MODES[this.round.mode].startBalance
   }
 
   /** Tell a player their wallets as the server has them (after the wallet message numbered `m.ack`). */
   private sendWallet(m: Member, extra: { ref?: number; fills?: Trade[]; failures?: string[] } = {}) {
     if (!m.wallet) return
+    if (this.world && m.wallet.trades.length > WORLD_TRADES_KEPT) m.wallet = { ...m.wallet, trades: m.wallet.trades.slice(0, WORLD_TRADES_KEPT) }
     const vaults: Record<string, number> = {}
     for (const [id, c] of this.cooked) if (c.pid === m.info.id) vaults[id] = c.vault
     const state = { ...walletStateOf(m.wallet), cashback: m.cashback ?? { sol: 0, bsc: 0, hood: 0 }, vaults }
@@ -465,10 +489,15 @@ export class Room {
     const sw = this.walletOf(me)
     const tw = this.walletOf(target)
     if (sw && fundsIn(sw, msg.asset, msg.fromWallet) < msg.amount - 1e-9) return fail('Not enough in that wallet')
-    if (sw) me.wallet = addFunds(sw, msg.asset, -msg.amount, msg.fromWallet)
+    const usd = msg.asset === 'usdc' ? msg.amount : msg.amount * nativePrice(this.market, msg.asset)
+    if (sw) {
+      const w = addFunds(sw, msg.asset, -msg.amount, msg.fromWallet)
+      me.wallet = { ...w, startBalance: Math.max(1, w.startBalance - usd) }
+    }
     if (tw) {
       const toWallet = toAddr ? (tw.accounts ?? []).find((a) => walletAddress(target!.info.id, a.id, 'sol') === toAddr)?.id : undefined
-      target.wallet = addFunds(tw, msg.asset, msg.amount, toWallet)
+      const w = addFunds(tw, msg.asset, msg.amount, toWallet)
+      target.wallet = { ...w, startBalance: w.startBalance + usd }
     }
     const fromAddr = String(msg.fromAddr ?? '').slice(0, 24)
     const recv: TransferMsg = {
@@ -564,12 +593,13 @@ export class Room {
 
   // ─── The clock ─────────────────────────────────────────────────────────────
   private tick() {
-    if (![...this.members.values()].some((m) => m.info.online)) return // nobody watching: freeze
+    if (!this.world && ![...this.members.values()].some((m) => m.info.online)) return // nobody watching: freeze (the World never does)
     setClock(secPerTickOf(this.market)) // rooms can run different clocks (Classic 6s / Realistic 1s per tick)
     setCandleLog(this.pending)
     const rng = new Rng(this.market.seed)
     const prevIds = new Set(this.market.tokens.map((t) => t.id))
-    const protectedIds = new Set([...this.members.values()].flatMap((m) => m.protect))
+    // Coins players hold or watch aren't delisted (in the World: only players who are on right now).
+    const protectedIds = new Set([...this.members.values()].filter((m) => !this.world || m.info.online).flatMap((m) => m.protect))
     for (const id of this.bots.keys()) protectedIds.add(id)
     const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds })
     const e2 = rollEvents(market, rng)
@@ -635,6 +665,22 @@ export class Room {
     }
     devEvents.forEach((e, i) => (e.id = market.tick * 100 + 90 + i))
     market.seed = rng.s
+    // The World runs forever: dead coins players cooked leave after an hour (unless someone on now holds or watches
+    // them), and vaults of coins that are gone are dropped once claimed.
+    if (this.world) {
+      // Graduated coins that faded away get abandoned (like real ones), and only the biggest old ones stay alive:
+      // otherwise a forever market would fill up with zombie coins.
+      const old = market.tokens.filter((t) => t.status === 'graduated' && !protectedIds.has(t.id) && market.time - (t.graduatedAt ?? t.createdAt) > WORLD_FADE_AFTER_SEC)
+      const kill = (t: (typeof old)[number]) => {
+        t.status = 'dead'
+        t.diedAt = market.time
+      }
+      for (const t of old) if (t.mcap < WORLD_FADE_MCAP) kill(t)
+      const survivors = old.filter((t) => t.status === 'graduated').sort((a, b) => a.mcap - b.mcap)
+      for (const t of survivors.slice(0, Math.max(0, survivors.length - WORLD_MAX_OLD_GRADS))) kill(t)
+      market.tokens = market.tokens.filter((t) => !((t.status === 'dead' || t.status === 'rugged') && t.diedAt && market.time - t.diedAt > WORLD_DEAD_COIN_SEC && !protectedIds.has(t.id)))
+      for (const [id, c] of this.cooked) if (c.vault < 1e-12 && !market.tokens.some((t) => t.id === id)) this.cooked.delete(id)
+    }
     this.market = market
     this.wallets = wr.wallets
     for (const m of billed) this.sendWallet(m)
@@ -801,7 +847,8 @@ export class Room {
   }
 
   private playerList(): RoomPlayer[] {
-    return [...this.members.values()].map((m) => m.info)
+    // The World lists who's on right now; private rooms list everyone in the round.
+    return [...this.members.values()].filter((m) => !m.info.spectator && (!this.world || m.info.online)).map((m) => m.info)
   }
 
   private broadcastPlayers() {

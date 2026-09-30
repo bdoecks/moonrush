@@ -248,10 +248,11 @@ function SwitchesTab() {
     const err = await setFlag(k, v)
     notify(err ? { title: 'ADMIN FAILED', body: err, tone: 'warn', icon: '⚠️' } : { title: 'SWITCH', body: `${label}: ${typeof v === 'boolean' ? (v ? 'ON' : 'OFF') : 'saved'} for everyone`, tone: 'info', icon: '🎛' })
   }
-  const rows: { k: 'events' | 'eventPopups' | 'multiplayer'; label: string }[] = [
+  const rows: { k: 'events' | 'eventPopups' | 'multiplayer' | 'world'; label: string }[] = [
     { k: 'events', label: 'Events feed' },
     { k: 'eventPopups', label: 'Event pop-ups' },
     { k: 'multiplayer', label: 'Play with friends' },
+    { k: 'world', label: 'MOONRUSH World' },
   ]
   return (
     <div className="space-y-1.5 text-[11px]">

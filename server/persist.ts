@@ -28,10 +28,10 @@ export async function saveRoom(code: string, state: unknown, charts?: unknown): 
   }
 }
 
-export async function loadRoom(code: string): Promise<{ state: unknown; charts: unknown } | null> {
+export async function loadRoom(code: string, maxAgeMs = MAX_AGE_MS): Promise<{ state: unknown; charts: unknown } | null> {
   if (!persistOn || !/^[A-Z0-9]{5}$/.test(code)) return null
   try {
-    const since = new Date(Date.now() - MAX_AGE_MS).toISOString()
+    const since = new Date(Date.now() - maxAgeMs).toISOString()
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rooms?code=eq.${code}&updated_at=gte.${encodeURIComponent(since)}&select=state,charts`, { headers: headers(), signal: AbortSignal.timeout(TIMEOUT) })
     if (!res.ok) return null
     const rows = (await res.json()) as { state: unknown; charts: unknown }[]

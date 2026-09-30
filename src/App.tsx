@@ -25,6 +25,7 @@ import { MonitorView } from './pages/MonitorView'
 import { TrackView } from './pages/TrackView'
 import { AdminView } from './pages/AdminView'
 import { NoticeBanner } from './components/NoticeBanner'
+import { WatchBanner } from './components/Multiplayer'
 import { AdminFloat } from './components/AdminFloat'
 import { watchFlags } from './game/flags'
 import { DiscoverView } from './pages/DiscoverView'
@@ -103,6 +104,7 @@ export default function App() {
     <div className="flex h-full flex-col">
       <TopBar />
       <NoticeBanner />
+      <WatchBanner />
       <AdminFloat />
       <TickerStrip />
       <div className="flex min-h-0 flex-1">

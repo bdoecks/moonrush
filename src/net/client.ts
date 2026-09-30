@@ -13,11 +13,11 @@ import { aggregate } from '../game/accounts'
 import { CHAINS } from '../data/chains'
 import { load, remove, save } from '../utils/storage'
 import { myAddresses, recordPlayerTrades, useFriends } from './friends'
-import { accessToken, accountPlayerId } from './account'
+import { accessToken, accountPlayerId, useAccount } from './account'
 import { giveLocal } from '../game/gifts'
 import { diffWallet, layoutOf, mergeWalletState } from '../game/orders'
 import { cashbackOf } from '../game/rewardsEngine'
-import { MP_PATH, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TransferMsg } from './protocol'
+import { MP_PATH, WORLD_CODE, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TransferMsg } from './protocol'
 
 const STATUS_MS = 2000
 const TAPE_LEN = 40
@@ -347,7 +347,7 @@ function onMessage(msg: ServerMsg) {
 function onWelcome(msg: Extract<ServerMsg, { t: 'welcome' }>) {
   const s = useGame.getState()
   const wasOnline = !!s.online
-  const online: OnlineState = { code: msg.code, you: msg.you, hostId: msg.hostId, players: msg.players, round: msg.round, conn: 'open', chat: s.online?.chat ?? [] }
+  const online: OnlineState = { code: msg.code, you: msg.you, hostId: msg.hostId, players: msg.players, round: msg.round, conn: 'open', chat: s.online?.chat ?? [], spectator: msg.spectator }
   save('mpRoom', { code: msg.code })
   retries = 0
   netHooks.send = send
@@ -626,4 +626,14 @@ function stopLoops() {
 }
 
 export const sendChat = (text: string) => send({ t: 'chat', text })
+
+/** Into the public World: signed in, you play under your account; as a guest you watch. */
+export function joinWorld() {
+  const acc = useAccount.getState().profile
+  const saved = mpProfile()
+  const name = acc?.username ?? (saved.name || 'Guest')
+  const avatar = acc?.avatar ?? saved.avatar
+  setMpProfile(name, avatar)
+  return joinRoom({ room: WORLD_CODE, name, avatar })
+}
 export const startRound = (mode: RoundInfo['mode'], durationTicks: number | null, engine: MarketEngine = 'classic') => send({ t: 'start', mode, durationTicks, engine })

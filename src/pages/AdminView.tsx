@@ -364,10 +364,11 @@ function Switches({ rooms }: { rooms: RoomSummary[] }) {
     notify(err ? { title: 'ADMIN FAILED', body: err, tone: 'warn', icon: '⚠️' } : { title: 'SWITCH', body: `${label}: ${typeof v === 'boolean' ? (v ? 'ON' : 'OFF') : 'saved'} for everyone`, tone: 'info', icon: '🎛' })
   }
   const online = rooms.reduce((a, r) => a + r.players.filter((p) => p.online).length, 0)
-  const rows: { k: 'events' | 'eventPopups' | 'multiplayer'; label: string; hint: string }[] = [
+  const rows: { k: 'events' | 'eventPopups' | 'multiplayer' | 'world'; label: string; hint: string }[] = [
     { k: 'events', label: 'Events feed', hint: 'The Events tab and sidebar feed' },
     { k: 'eventPopups', label: 'Market event pop-ups', hint: 'Trending / parabolic / whale pop-ups (rug warnings for your bags always show)' },
     { k: 'multiplayer', label: 'Play with friends', hint: 'Off hides the button for everyone except you' },
+    { k: 'world', label: 'MOONRUSH World', hint: 'The public World for everyone. Off: only you see it (turn on at launch)' },
   ]
   return (
     <div className="grid gap-3 lg:grid-cols-2">

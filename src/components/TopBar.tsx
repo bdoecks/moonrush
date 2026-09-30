@@ -78,11 +78,12 @@ export function RunClock() {
   const setModal = useGame((s) => s.setModal)
   const runDuration = useGame((s) => s.runDuration)
   const online = useGame((s) => !!s.online)
+  const world = useGame((s) => !!s.online?.round.world)
   const cfg = MODES[mode]
   const remaining = runDuration ? (runDuration - runTicks) / speed : null
   return (
     <button onClick={() => setModal(online ? 'lobby' : 'mode')} className="flex items-center gap-1.5 rounded-md border border-line bg-panel2 px-2 py-1 hover:border-line2" title="Game mode">
-      <span className="text-[10px] font-bold tracking-wider text-accent">{cfg.name.toUpperCase()}</span>
+      <span className="text-[10px] font-bold tracking-wider text-accent">{world ? '🌍 WORLD' : cfg.name.toUpperCase()}</span>
       {status === 'running' && remaining !== null && (
         <span className={clsx('num flex items-center gap-1 text-[11px]', remaining < 60 ? 'text-down' : 'text-ink')}>
           <Timer size={11} />
