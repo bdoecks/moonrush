@@ -414,6 +414,20 @@ export interface ColumnQuick {
   amount?: Partial<Record<Chain, number>>
 }
 
+/** Trenches display settings: card look, which row parts show (`hide` lists the hidden ones), column order. */
+export interface TrenchDisplay {
+  metrics: 'small' | 'large'
+  spaced: boolean
+  search: boolean
+  image: 'square' | 'circle'
+  progress: 'ring' | 'bar'
+  volume: 'beside' | 'beneath'
+  roundMc: boolean
+  curveTag: 'always' | 'hover'
+  hide: string[]
+  order: TrenchColumn[]
+}
+
 export interface CookSpec {
   chain: Chain
   pad: PadId
@@ -643,6 +657,7 @@ export interface Settings {
   accent: Accent
   quickSlot: number // P1/P2/P3 quick-buy slot (amount per chain comes from CHAINS[chain].quick)
   trenchQuick?: Partial<Record<TrenchColumn, ColumnQuick>> // Trenches: each column's own quick-buy preset and amount (Axiom Pulse)
+  trenchDisplay?: Partial<TrenchDisplay> // Trenches: how cards look and what they show (Axiom's Pulse Display)
   presetIdx: number // active P1/P2/P3 slot in the trade panel / instant trade
   buyPresets: Record<Chain, number[][]> // native-coin amounts per chain, per slot
   sellPresets: number[][] // % of position per slot
