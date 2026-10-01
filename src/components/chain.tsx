@@ -1,11 +1,12 @@
 import clsx from 'clsx'
-import { ArrowDownUp, ExternalLink, Wallet, Zap } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowDownUp, ChevronDown, ExternalLink, Wallet, Zap } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
 import { useGame } from '../game/store'
 import { nativePrice, SWAP_FEE, type Asset } from '../game/tradingEngine'
 import type { Chain, Settings, Token, TrenchColumn } from '../types'
 import { fmtUsd } from '../utils/format'
+import { load, save } from '../utils/storage'
 import { Modal } from './ui'
 
 export function ChainBadge({ chain, className, withName }: { chain: Chain; className?: string; withName?: boolean }) {
@@ -227,6 +228,92 @@ export function WalletChip({ compact }: { compact?: boolean }) {
       {!compact && <span className="num text-muted">$ <span className="text-ink">{Math.round(cash).toLocaleString('en-US')}</span></span>}
       <ArrowDownUp size={11} className="text-accent" />
     </button>
+  )
+}
+
+/**
+ * Top-bar wallet balance: one chain coin at a time (starts on SOL). Click it for a dropdown with all three coins and
+ * your USD; picking one makes it the one shown. Swap is in the dropdown too.
+ */
+export function WalletBalanceChip() {
+  const cash = useGame((s) => s.portfolio.cash)
+  const balances = useGame((s) => s.portfolio.balances)
+  const native = useGame((s) => s.market.native)
+  const setSwapOpen = useGame((s) => s.setSwapOpen)
+  const [chain, setChain] = useState<Chain>(() => load<Chain>('walletChipChain') ?? 'sol')
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ left: 0, top: 0 })
+  const btn = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent) => {
+      if (!menu.current?.contains(e.target as Node) && !btn.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', esc)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', esc)
+    }
+  }, [open])
+  const toggle = () => {
+    const r = btn.current?.getBoundingClientRect()
+    if (r) setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 228)), top: r.bottom + 6 })
+    setOpen((o) => !o)
+  }
+  const usd = (c: Chain) => (balances?.[c] ?? 0) * (native?.[c]?.price ?? CHAINS[c].basePrice)
+  return (
+    <>
+      <button ref={btn} onClick={toggle} aria-expanded={open} title="Wallet balance · click to switch coin or swap" className="flex items-center gap-1.5 rounded-md border border-line bg-panel2 px-2 py-1 text-[11px] hover:border-line2">
+        <Wallet size={12} className="text-muted" />
+        <span className="num flex items-center gap-1" style={{ color: CHAINS[chain].color }}>
+          {CHAINS[chain].glyph}
+          <span className="font-semibold text-ink">{fmtNative(balances?.[chain] ?? 0, chain, false)}</span>
+          <span className="text-[9px] font-bold">{CHAINS[chain].native}</span>
+        </span>
+        <ChevronDown size={11} className={clsx('text-muted transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        // Fixed, so it isn't clipped by the top bar (which hides anything that overflows it).
+        <div ref={menu} className="fixed z-50 w-[220px] rounded-md border border-line2 bg-panel p-1 shadow-2xl" style={{ left: pos.left, top: pos.top }}>
+          {CHAIN_IDS.map((c) => (
+            <button
+              key={c}
+              onClick={() => {
+                setChain(c)
+                save('walletChipChain', c)
+                setOpen(false)
+              }}
+              className={clsx('flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] hover:bg-raise', c === chain && 'bg-raise')}
+            >
+              <span className="w-4 text-center" style={{ color: CHAINS[c].color }}>{CHAINS[c].glyph}</span>
+              <span className="font-semibold">{CHAINS[c].native}</span>
+              <span className="ml-auto text-right">
+                <span className="num block font-semibold">{fmtNative(balances?.[c] ?? 0, c, false)}</span>
+                <span className="num block text-[10px] text-dim">{fmtUsd(usd(c))}</span>
+              </span>
+            </button>
+          ))}
+          <div className="mx-1 my-1 border-t border-line" />
+          <div className="flex items-center gap-2 px-2 py-1 text-[12px]">
+            <span className="w-4 text-center text-muted">$</span>
+            <span className="font-semibold">USD</span>
+            <span className="num ml-auto font-semibold">{fmtUsd(cash)}</span>
+          </div>
+          <button
+            onClick={() => {
+              setOpen(false)
+              setSwapOpen(true)
+            }}
+            className="mt-1 flex w-full items-center justify-center gap-1.5 rounded bg-accent/10 px-2 py-1.5 text-[12px] font-bold text-accent hover:bg-accent/20"
+          >
+            <ArrowDownUp size={12} /> Swap
+          </button>
+        </div>
+      )}
+    </>
   )
 }
 

@@ -10,7 +10,7 @@ import { levelFromXp, MODES, titleFor } from '../game/progression'
 import { selectSpeed, useGame, type View } from '../game/store'
 import { fmtClock, fmtUsd, toneClass } from '../utils/format'
 import { FlashNum } from './ui'
-import { ChainSwitcher, WalletChip } from './chain'
+import { ChainSwitcher, WalletBalanceChip } from './chain'
 import { WalletSelector } from './wallets'
 import { GlobalSearch } from './GlobalSearch'
 import { RoomChip } from './Multiplayer'
@@ -174,16 +174,8 @@ export function TopBar() {
           </div>
         </div>
         <WalletSelector compact className="hidden sm:block" />
-        <div className="hidden 2xl:block">
-          <WalletChip compact />
-        </div>
-        <div className="hidden min-[1800px]:block text-right">
-          <div className="text-[9px] uppercase tracking-wider text-dim">Unrealized</div>
-          <div className={clsx('num text-[12px]', toneClass(cv ? cv.unrealized : v.unrealized))}>{cv ? coin(cv.unrealized, true) : money(v.unrealized, true)}</div>
-        </div>
-        <div className="hidden min-[1800px]:block text-right">
-          <div className="text-[9px] uppercase tracking-wider text-dim">Realized</div>
-          <div className={clsx('num text-[12px]', toneClass(cv ? cv.realized : v.portfolio.realized))}>{cv ? coin(cv.realized, true) : money(v.portfolio.realized, true)}</div>
+        <div className="hidden lg:block">
+          <WalletBalanceChip />
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
