@@ -8,6 +8,9 @@ export function fmtUsd(v: number, digits = 2): string {
 export function fmtCompact(v: number, prefix = '$'): string {
   const a = Math.abs(v)
   const sign = v < 0 ? '-' : ''
+  if (!Number.isFinite(a)) return `${sign}${prefix}∞`
+  if (a >= 1e15) return `${sign}${prefix}${a.toExponential(1).replace('+', '')}`
+  if (a >= 1e12) return `${sign}${prefix}${(a / 1e12).toFixed(2)}T`
   if (a >= 1e9) return `${sign}${prefix}${(a / 1e9).toFixed(2)}B`
   if (a >= 1e6) return `${sign}${prefix}${(a / 1e6).toFixed(2)}M`
   if (a >= 1e3) return `${sign}${prefix}${(a / 1e3).toFixed(1)}K`

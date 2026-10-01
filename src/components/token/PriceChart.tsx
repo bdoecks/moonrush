@@ -123,8 +123,10 @@ export function PriceChart(o: ChartOptions) {
     })
     const priceFormat = { type: 'custom' as const, formatter: (v: number) => fmt(v), minMove: unit === 'mcap' ? 0.01 : 1e-13 }
     const autoscaleInfoProvider = (original: () => AutoscaleInfo | null): AutoscaleInfo | null => {
+      // Fit the candles (GMGN / Axiom): the Migration line only joins the view once price is over halfway there,
+      // so a brand-new coin's candles aren't squashed flat under a line far above them.
       const r = original()
-      if (!r?.priceRange || !migLevel.current) return r
+      if (!r?.priceRange || !migLevel.current || r.priceRange.maxValue < migLevel.current * 0.55) return r
       return { ...r, priceRange: { minValue: r.priceRange.minValue, maxValue: Math.max(r.priceRange.maxValue, migLevel.current) } }
     }
     const s =

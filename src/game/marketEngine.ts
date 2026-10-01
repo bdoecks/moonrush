@@ -75,6 +75,8 @@ const REGIME_DRIFT: Record<Regime, [number, number]> = {
 // How likely each kind of coin is to go parabolic (relative weight next to its other regimes).
 const MOON_WEIGHT: Record<Archetype, number> = { bluechip: 0, runner: 0.08, grinder: 0.006, bleeder: 0.002, chaotic: 0.05, rugger: 0.045, sleeper: 0.01 }
 // Memecoins bleed by default: a small negative drift (in sigma units) on top of every regime.
+/** A coin feels gravity above this many times its archetype's usual top market cap; 40x further is a hard ceiling. */
+const SIZE_CAP_MULT = 25
 const BLEED: Record<Archetype, number> = { bluechip: -0.01, runner: -0.05, grinder: 0.01, bleeder: -0.08, chaotic: -0.06, rugger: -0.07, sleeper: -0.02 }
 const REGIME_VOL: Record<Regime, number> = { sideways: 0.7, accumulation: 0.9, pump: 1.7, moon: 2.1, distribution: 1, dump: 1.9, recovery: 1.2, rug: 1 }
 const REGIME_ACTIVITY: Record<Regime, number> = { sideways: 0.7, accumulation: 1, pump: 2.6, moon: 4, distribution: 1.1, dump: 2.2, recovery: 1.4, rug: 3 }
@@ -809,6 +811,14 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
           s.pressure +
           sigma * rng.gauss() +
           (rng.chance(0.012) ? sigma * 4 * rng.gauss() : 0)
+        // Gravity: far above its weight class a coin gets heavy (the pull grows the further it goes), and a steady
+        // climber eventually tops out and starts to bleed. Rounds rarely get here; a market that never stops would
+        // otherwise compound its climbers into the trillions.
+        const sizeCap = PROFILES[s.archetype].mcap[1] * SIZE_CAP_MULT
+        if (t.mcap > sizeCap) {
+          r -= 0.002 * Math.log(t.mcap / sizeCap)
+          if (s.archetype === 'grinder' && rng.chance(0.0004)) s.archetype = 'bleeder'
+        }
         r = clamp(r, -0.4, 0.5)
         s.anchor = s.anchor * 0.996 + logP * 0.004
         activity = REGIME_ACTIVITY[s.regime]
@@ -821,6 +831,17 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
     t.price = Math.max(1e-13, t.price * Math.exp(r))
     if ((t.status === 'rugged' || t.status === 'dead') && t.bondingProgress < 100) {
       t.price = Math.max(t.price, startPriceNative(t.pad) * nativeUsdOf(native, t.chain) * 1.0005)
+    }
+    // Hard ceiling (only ever hit by a market saved before gravity existed): back to a sane price, history and all.
+    const ceiling = PROFILES[s.archetype].mcap[1] * SIZE_CAP_MULT * 40
+    if (!(t.price * SUPPLY <= ceiling)) {
+      t.price = (PROFILES[s.archetype].mcap[1] * SIZE_CAP_MULT) / SUPPLY
+      s.anchor = Math.log(t.price)
+      t.ath = t.price * SUPPLY
+      t.volume = Math.min(t.volume, t.price * SUPPLY)
+      t.volMark = t.volume
+      t.momentum = 0
+      if (t.status === 'graduated') t.liquidity = t.price * SUPPLY * 0.1
     }
     t.mcap = t.price * SUPPLY
     t.ath = Math.max(t.ath, t.mcap)
