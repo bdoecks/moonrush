@@ -148,7 +148,7 @@ export class Room {
       posts: this.posts.slice(0, 80), events: this.events.slice(0, 80), bots: [...this.bots.entries()],
       lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()],
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
-        info: { ...m.info, online: false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
+        info: { ...m.info, online: m.info.bot ? m.info.online : false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
         cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, brain: m.brain,
       })),
     }
@@ -811,6 +811,7 @@ export class Room {
       }
       const m = this.members.get(spec.id)!
       m.brain ??= freshBrain(spec, this.market.tick, rng)
+      if (spec.always && !m.info.online) m.info = { ...m.info, online: true } // the always-on bots are back as soon as the World is
       if (!this.wallets.some((w) => w.id === spec.id)) this.wallets = [...this.wallets, mirrorWallet(spec, m.wallet?.startBalance ?? WORLD_START_BALANCE)]
     }
   }
