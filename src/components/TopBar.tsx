@@ -1,9 +1,8 @@
 import clsx from 'clsx'
-import { CircleHelp, Gift, PanelLeft, PanelRight, Pause, Play, Settings as SettingsIcon, Timer, Volume2, VolumeX } from 'lucide-react'
-import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
-import { cashbackOf, pendingUsd, REFERRALS_ENABLED } from '../game/rewardsEngine'
+import { CircleHelp, PanelLeft, PanelRight, Pause, Play, Settings as SettingsIcon, Timer, Volume2, VolumeX } from 'lucide-react'
+import { CHAINS, fmtNative } from '../data/chains'
+import { cashbackOf, REFERRALS_ENABLED } from '../game/rewardsEngine'
 import type { Chain } from '../types'
-import { save } from '../utils/storage'
 import { useDockPrefs } from './tracker/TrackerDock'
 import { useTokenMap, useValuation } from '../hooks/useDerived'
 import { chainView } from '../game/chainPnl'
@@ -11,7 +10,7 @@ import { levelFromXp, MODES, titleFor } from '../game/progression'
 import { selectSpeed, useGame, type View } from '../game/store'
 import { fmtClock, fmtUsd, toneClass } from '../utils/format'
 import { FlashNum } from './ui'
-import { WalletChip } from './chain'
+import { ChainSwitcher, WalletChip } from './chain'
 import { WalletSelector } from './wallets'
 import { GlobalSearch } from './GlobalSearch'
 import { RoomChip } from './Multiplayer'
@@ -126,44 +125,6 @@ function DockToggle() {
   )
 }
 
-/** Claimable trading cashback (SOL / BNB / ETH); click to open Rewards → Cashback. */
-function CashbackChip() {
-  const rewards = useGame((s) => s.rewards)
-  const native = useGame((s) => s.market.native)
-  const running = useGame((s) => s.runStatus === 'running')
-  const setView = useGame((s) => s.setView)
-  const cb = cashbackOf(rewards)
-  const price = (c: Chain) => native?.[c]?.price ?? CHAINS[c].basePrice
-  const usd = cb.auto === 'off' ? pendingUsd(cb, price) : cb.roundUsd
-  if (!running) return null
-  const has = CHAIN_IDS.filter((c) => cb.pending[c] > 1e-9)
-  const tip = cb.auto === 'off'
-    ? `Claimable cashback: ${has.length ? has.map((c) => fmtNative(cb.pending[c], c)).join(' · ') : 'none yet'}. Click to claim.`
-    : `Auto-claiming cashback as ${cb.auto === 'coin' ? 'coins' : 'USDC'}: ${fmtUsd(cb.roundUsd, 4)} this round.`
-  return (
-    <button
-      onClick={() => {
-        save('rewardsTab', 'cashback')
-        setView('rewards')
-      }}
-      title={tip}
-      className={clsx('hidden items-center gap-1.5 rounded-md border px-2 py-1 text-left sm:flex', usd >= 0.0001 && cb.auto === 'off' ? 'border-up/40 bg-up/10' : 'border-line bg-panel2 hover:border-line2')}
-    >
-      <Gift size={13} className="text-up" />
-      <span>
-        <span className="block text-[9px] uppercase leading-none tracking-wider text-dim">{cb.auto === 'off' ? 'Cashback' : 'Cashback · auto'}</span>
-        {/* Claimable cashback is shown in the coins you'll get (like GMGN / Axiom), so it only changes when you earn more. */}
-        <span className="num block text-[12px] font-semibold leading-tight text-up">{cb.auto !== 'off' ? fmtUsd(usd, usd < 10 ? 4 : 2) : has.length ? `${fmtNative(cb.pending[has[0]], has[0])}${has.length > 1 ? ` +${has.length - 1}` : ''}` : fmtNative(0, 'sol')}</span>
-      </span>
-      {has.length > 0 && (
-        <span className="flex -space-x-1">
-          {has.map((c) => <span key={c} className="size-2 rounded-full ring-1 ring-panel" style={{ background: CHAINS[c].color }} />)}
-        </span>
-      )}
-    </button>
-  )
-}
-
 export function TopBar() {
   const v = useValuation()
   const view = useGame((s) => s.view)
@@ -185,7 +146,7 @@ export function TopBar() {
   const pnlPct = cv ? (cv.spent > 0 ? cv.pnl / cv.spent : 0) : v.stats.totalPnlPct
   const pnlTone = cv ? cv.pnl : pnl
   const cycleUnit = () => updateSettings({ portfolioUnit: UNITS[(UNITS.indexOf(unit) + 1) % UNITS.length] })
-  const rewardReady = useGame((s) => (REFERRALS_ENABLED && s.rewards.commissionPending >= 0.01) || s.rewards.checkIn.lastDate !== new Date().toDateString())
+  const rewardReady = useGame((s) => (REFERRALS_ENABLED && s.rewards.commissionPending >= 0.01) || s.rewards.checkIn.lastDate !== new Date().toDateString() || (cashbackOf(s.rewards).auto === 'off' && Object.values(cashbackOf(s.rewards).pending).some((n) => n > 1e-6)))
 
   return (
     <header className="shrink-0 border-b border-line bg-panel">
@@ -224,7 +185,6 @@ export function TopBar() {
           <div className="text-[9px] uppercase tracking-wider text-dim">Realized</div>
           <div className={clsx('num text-[12px]', toneClass(cv ? cv.realized : v.portfolio.realized))}>{cv ? coin(cv.realized, true) : money(v.portfolio.realized, true)}</div>
         </div>
-        <CashbackChip />
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <AdminButton />
@@ -264,6 +224,8 @@ export function TopBar() {
             {n.id === 'rewards' && rewardReady && <span className="absolute right-0.5 top-1 size-1.5 rounded-full bg-warn" />}
           </button>
         ))}
+        {/* Chain filter (ALL / SOL / BNB / ETH) lives at the end of the tabs instead of on its own bar. */}
+        <div className="ml-2 shrink-0 border-l border-line pl-3"><ChainSwitcher /></div>
       </nav>
     </header>
   )

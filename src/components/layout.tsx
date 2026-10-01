@@ -115,7 +115,7 @@ export function Sidebar() {
 }
 
 // ─── Movers ticker strip ─────────────────────────────────────────────────────
-/** The scrolling "MOVERS 5M" coin % marquee: switched off for now (the chain switcher bar stays). */
+/** The scrolling "MOVERS 5M" coin % marquee: switched off for now. */
 const SHOW_MOVERS = false
 
 export function TickerStrip() {
@@ -133,12 +133,14 @@ export function TickerStrip() {
   const map = new Map(tokens.map((t) => [t.id, t]))
   const items = movers.map((id) => map.get(id)).filter((t) => !!t)
   return (
-    <div className="flex h-7 shrink-0 items-center border-b border-line bg-bg">
+    // Only for screens too narrow for the top bar to hold everything: status and search move down here, and on
+    // phones (no tab row) the chain filter too. Wide screens don't get this bar at all.
+    <div className={clsx('flex h-7 shrink-0 items-center border-b border-line bg-bg', !SHOW_MOVERS && 'xl:hidden')}>
       <div className="flex items-center gap-1.5 px-2 lg:hidden">
         <MarketStatus />
         <RunClock />
       </div>
-      <div className="flex h-full shrink-0 items-center border-r border-line px-2"><ChainSwitcher /></div>
+      <div className="flex h-full shrink-0 items-center border-r border-line px-2 md:hidden"><ChainSwitcher /></div>
       <div className="flex h-full shrink-0 items-center border-r border-line px-1.5 xl:hidden"><GlobalSearch small className="w-40 transition-[width] focus-within:w-64 sm:w-48" /></div>
       {SHOW_MOVERS && <div className="hidden h-full items-center border-r border-line px-2 text-[9px] font-bold tracking-[0.2em] text-dim lg:flex">MOVERS 5M</div>}
       {SHOW_MOVERS && <div className="relative min-w-0 flex-1 overflow-hidden">
