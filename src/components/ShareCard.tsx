@@ -269,6 +269,7 @@ function ShareWindow({ data, onClose }: { data: ShareData; onClose: () => void }
   const [url, setUrl] = useState('')
   const [failed, setFailed] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [posted, setPosted] = useState<'copied' | 'manual' | null>(null) // after Post on X: what's left for you to do
   useEffect(() => {
     let live = true
     let made = ''
@@ -311,7 +312,7 @@ function ShareWindow({ data, onClose }: { data: ShareData; onClose: () => void }
     // X can't take a picture from a link, so the picture goes on the clipboard and the post opens with the words and the game's link.
     const ok = await copyImage()
     window.open(`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(gameUrl())}`, '_blank', 'noopener')
-    notify(ok ? { title: 'PICTURE COPIED', body: 'Paste it into your post with Ctrl+V.', tone: 'info', icon: '📋' } : { title: 'ADD THE PICTURE', body: 'Download the picture and attach it to your post.', tone: 'info', icon: '🖼️' })
+    setPosted(ok ? 'copied' : 'manual') // stays on screen (a pop-up would be gone by the time you come back from X)
   }
   // Phones: the system share sheet (Messages, Discord, X…) with the picture attached.
   const file = blob ? new File([blob], fileName, { type: 'image/png' }) : null
@@ -327,10 +328,19 @@ function ShareWindow({ data, onClose }: { data: ShareData; onClose: () => void }
       <div className="mt-3 flex flex-wrap gap-2">
         <button onClick={() => void onCopy()} disabled={!blob} className="flex h-9 min-w-max flex-1 items-center justify-center gap-1.5 rounded-md bg-accent px-2 text-[12px] font-bold text-accent-ink disabled:opacity-40">{copied ? <Check size={13} /> : <Copy size={13} />} {copied ? 'Copied' : 'Copy picture'}</button>
         <a href={url || undefined} download={fileName} aria-disabled={!url} className={btn}><Download size={13} /> Download</a>
-        <button onClick={() => void onPost()} disabled={!blob} className={btn}><Send size={13} /> Post on X</button>
+        <button onClick={() => void onPost()} disabled={!blob} className={btn}><Send size={13} /> Post on X <span className="font-normal text-dim">(then paste)</span></button>
         {canNative && <button onClick={onNative} className={btn}><Share2 size={13} /> Share…</button>}
       </div>
-      <p className="mt-2 text-[10px] text-dim">The picture is made on your device and only goes where you put it.</p>
+      {posted && (
+        <div className="mt-3 rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-[12px] text-ink">
+          {posted === 'copied' ? (
+            <><b>One more step:</b> the picture is copied. In the X post, click the text box and press <b>Ctrl+V</b> (on a phone: hold, then Paste) to add it.</>
+          ) : (
+            <><b>One more step:</b> this browser can’t copy pictures. Click <b>Download</b>, then attach the saved picture to your X post.</>
+          )}
+        </div>
+      )}
+      <p className="mt-2 text-[10px] text-dim">X doesn’t let websites attach pictures to a post, so the picture is copied for you to paste. It’s made on your device and only goes where you put it.</p>
     </Modal>
   )
 }
