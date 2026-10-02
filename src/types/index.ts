@@ -697,6 +697,28 @@ export interface InstantPrefs {
   sellUsd: number[][] // USD sell presets per P slot
   sellNative: Record<Chain, number[][]> // chain-coin sell presets per P slot
   showHoldings?: boolean // GMGN: list each of your wallets with its bag of this coin on the Trade tab
+  // Instant Trade settings (the gear), like Axiom's. All optional: unset = the default in `instantOpts`.
+  pnlRow?: boolean // the Bal / Bought / Sold / PnL row
+  resetPnl?: boolean // a button to zero that row for the coin you're on
+  dragAnywhere?: boolean // drag the panel from anywhere, not just its top bar
+  unitSwitch?: boolean // the coin / USD / % switches
+  tokenAmounts?: boolean // the balance and bag lines under the buttons
+  shape?: 'square' | 'rounded' // button shape
+  buyRows?: 1 | 2 | 3 // rows of buy amounts (rows 2 and 3 show your other presets' amounts)
+  sellRows?: 1 | 2 | 3
+  sellMode?: 'follow' | 'both' | 'pct' // sell rows follow the switch, show amounts and %, or are always %
+  groupChips?: boolean // your wallet groups along the top: click one to trade from it
+  rotateGroups?: boolean // each buy steps to the next wallet group
+  hotkeys?: InstantHotkeys
+}
+
+/** Instant Trade hotkeys (only while the panel is open and you're not typing). One key each, lower case. */
+export interface InstantHotkeys {
+  on: boolean
+  buy: string[] // buy button 1-4
+  sell: string[] // sell button 1-4
+  initials: string // sell enough to get back what you put in
+  bubbles: string // show / hide chart trade markers
 }
 
 export interface Profile {

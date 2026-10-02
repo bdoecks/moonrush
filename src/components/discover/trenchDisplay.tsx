@@ -176,7 +176,7 @@ function Boxes({ gap }: { gap: number }) {
 }
 
 /** One setting with two (or three) picture options, like Axiom's. */
-function Pick<T extends string>({ label, hint, value, onChange, options }: { label: string; hint?: string; value: T; onChange: (v: T) => void; options: { v: T; label: string; demo: ReactNode }[] }) {
+export function Pick<T extends string>({ label, hint, value, onChange, options }: { label: string; hint?: string; value: T; onChange: (v: T) => void; options: { v: T; label: string; demo: ReactNode }[] }) {
   return (
     <div className="flex items-center justify-between gap-3 py-2.5">
       <div className="min-w-0">

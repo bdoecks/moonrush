@@ -7,7 +7,7 @@ import { PadBadge, PadTag } from '../components/pad'
 import { LAUNCHPADS } from '../data/launchpads'
 import { MARKER_KINDS, withMarkerDefaults, type MarkerKinds } from '../components/token/markers'
 import { ArrowLeft, BarChart3, CandlestickChart, Copy, Eye, Globe, LineChart, Magnet, Maximize2, Send, Share2, Star, Tags, AtSign, Users } from 'lucide-react'
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { FlowStats } from '../components/token/FlowStats'
 import { InstantTrade } from '../components/token/InstantTrade'
 import { PriceChart, type ScaleMode } from '../components/token/PriceChart'
@@ -103,6 +103,12 @@ export function TokenView() {
   const [scale, setScale] = usePersisted<ScaleMode>('chartScale', 'auto')
   const [showVolume, setShowVolume] = usePersisted('chartVol', true)
   const [showMarkers, setShowMarkers] = usePersisted('chartMarkers', true)
+  // The Instant Trade hotkey for chart markers asks for a toggle with this event.
+  useEffect(() => {
+    const flip = () => setShowMarkers(!showMarkers)
+    window.addEventListener('moonrush:toggleMarkers', flip)
+    return () => window.removeEventListener('moonrush:toggleMarkers', flip)
+  }, [showMarkers, setShowMarkers])
   const [magnet, setMagnet] = usePersisted('chartMagnet', false)
   const [kindsRaw, setKinds] = usePersisted<MarkerKinds>('chartMarkerKinds', withMarkerDefaults({}))
   const kinds = withMarkerDefaults(kindsRaw)

@@ -50,17 +50,18 @@ export function LighthouseButton() {
   }, [open])
   const toggle = () => {
     const r = btn.current?.getBoundingClientRect()
-    if (r) setPos({ left: Math.max(8, Math.min(r.left - 40, window.innerWidth - 328)), bottom: window.innerHeight - r.top + 6 })
+    // Opens upward from the button; on a short screen it's kept fully on screen (it may then cover the button).
+    if (r) setPos({ left: Math.max(8, Math.min(r.left - 40, window.innerWidth - 328)), bottom: Math.max(8, Math.min(window.innerHeight - r.top + 6, window.innerHeight - 500)) })
     setOpen((o) => !o)
   }
   return (
     <>
-      <button ref={btn} onClick={toggle} aria-expanded={open} title="Market Lighthouse: the whole market at a glance" className={clsx('flex h-5 items-center gap-1 rounded-full border px-1.5 hover:border-line2', open ? 'border-accent/50 bg-accent/10' : 'border-line')}>
+      <button ref={btn} onClick={toggle} aria-expanded={open} title="Market Lighthouse: the whole market at a glance" className={clsx('flex h-[22px] items-center gap-1 rounded-full border px-2 hover:border-line2', open ? 'border-accent/50 bg-accent/10' : 'border-line')}>
         {top.map((r) => <PadBadge key={r.pad} pad={r.pad} size={12} />)}
-        <span className="text-[10px] font-semibold text-muted">Lighthouse</span>
+        <span className="text-[11px] font-semibold text-muted">Lighthouse</span>
       </button>
       {open && (
-        <div ref={panel} className="fixed z-50 w-[320px] rounded-lg border border-line2 bg-panel p-3 text-ink shadow-2xl" style={{ left: pos.left, bottom: pos.bottom }}>
+        <div ref={panel} className="fixed z-50 max-h-[calc(100vh-16px)] w-[320px] overflow-auto rounded-lg border border-line2 bg-panel p-3 text-ink shadow-2xl" style={{ left: pos.left, bottom: pos.bottom }}>
           <Panel />
         </div>
       )}

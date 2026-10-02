@@ -23,7 +23,7 @@ import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
 import { ACCOUNTS, CALL_SETTLE_TICKS, callerKey, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import { WORLD_START_BALANCE, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
-import { payNative, runBuy, runGiveAway, runSell, runSwap } from './orders'
+import { payNative, runBuy, runConvert, runGiveAway, runSell, runSwap } from './orders'
 import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, REFERRALS_ENABLED, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
 
 export type View = 'discover' | 'trenches' | 'token' | 'portfolio' | 'missions' | 'leaderboard' | 'cooking' | 'copytrade' | 'sniper' | 'monitor' | 'track' | 'rewards' | 'admin'
@@ -320,6 +320,8 @@ export interface GameState {
   updateSniper: (id: string, patch: Partial<SniperTask>) => void
   removeSniper: (id: string) => void
   swapAssets: (from: Asset, to: Asset, amount: number, walletId?: string) => boolean
+  /** Convert any asset in one wallet into any asset in another (USD is the shared bank). */
+  convertAssets: (from: Asset, to: Asset, amount: number, fromWallet: string, toWallet: string) => boolean
   // Multi-wallet (GMGN-style)
   createWallet: (name: string, emoji: string) => string | null
   updateWallet: (id: string, patch: { name?: string; emoji?: string }) => void
@@ -1679,6 +1681,25 @@ export const useGame = create<GameState>()((set, get) => {
       quietly(() => set({ portfolio: res.portfolio }))
       const label = (a: Asset, n: number) => (a === 'usd' ? fmtUsd(n) : fmtNative(n, a))
       s.notify({ title: 'SWAPPED', body: `${label(from, amount)} → ${label(to, res.received)}`, tone: 'info', icon: '🔄' }, 'click')
+      persist()
+      return true
+    },
+    convertAssets: (from, to, amount, fromWallet, toWallet) => {
+      if (watchingOnly()) return false
+      const s = get()
+      if (s.runStatus !== 'running') {
+        s.notify({ title: 'ROUND NOT ACTIVE', body: 'Start a round to convert', tone: 'warn', icon: '⏸' })
+        return false
+      }
+      const res = runConvert(s.portfolio, s.market, from, to, amount, fromWallet, toWallet, s.market.tick)
+      if (!res.ok) {
+        s.notify({ title: 'CONVERT FAILED', body: res.error, tone: 'warn', icon: '⛔' }, 'alert')
+        return false
+      }
+      if (s.online) netHooks.op?.({ kind: 'convert', from, to, amount, fromWallet, toWallet }) // the server converts too (its result wins)
+      quietly(() => set({ portfolio: res.portfolio }))
+      const label = (a: Asset, n: number) => (a === 'usd' ? fmtUsd(n) : fmtNative(n, a))
+      s.notify({ title: from === to ? 'TRANSFERRED' : 'CONVERTED', body: `${label(from, amount)} → ${label(to, res.received)}`, tone: 'info', icon: '🔄' }, 'click')
       persist()
       return true
     },

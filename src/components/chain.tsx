@@ -266,7 +266,7 @@ export function WalletBalanceChip() {
   const usd = (c: Chain) => (balances?.[c] ?? 0) * (native?.[c]?.price ?? CHAINS[c].basePrice)
   return (
     <>
-      <button ref={btn} onClick={toggle} aria-expanded={open} title="Wallet balance · click to switch coin or swap" className="flex items-center gap-1.5 rounded-md border border-line bg-panel2 px-2 py-1 text-[11px] hover:border-line2">
+      <button ref={btn} onClick={toggle} aria-expanded={open} title="Wallet balance · click to switch coin or convert" className="flex items-center gap-1.5 rounded-md border border-line bg-panel2 px-2 py-1 text-[11px] hover:border-line2">
         <Wallet size={12} className="text-muted" />
         <span className="num flex items-center gap-1" style={{ color: CHAINS[chain].color }}>
           {CHAINS[chain].glyph}
@@ -309,7 +309,7 @@ export function WalletBalanceChip() {
             }}
             className="mt-1 flex w-full items-center justify-center gap-1.5 rounded bg-accent/10 px-2 py-1.5 text-[12px] font-bold text-accent hover:bg-accent/20"
           >
-            <ArrowDownUp size={12} /> Swap
+            <ArrowDownUp size={12} /> Convert
           </button>
         </div>
       )}
@@ -320,91 +320,100 @@ export function WalletBalanceChip() {
 const ASSETS: Asset[] = ['usd', 'sol', 'bsc', 'hood']
 const assetLabel = (a: Asset) => (a === 'usd' ? 'USD' : CHAINS[a].native)
 
-function Picker({ value: v, onChange }: { value: Asset; onChange: (a: Asset) => void }) {
-  return (
-    <div className="flex gap-1">
-      {ASSETS.map((a) => (
-        <button
-          key={a}
-          onClick={() => onChange(a)}
-          className={clsx('rounded-md border px-2 py-1 text-[11px] font-bold', v === a ? 'border-accent/60 bg-accent/10 text-ink' : 'border-line2 text-muted hover:text-ink')}
-          style={v === a && a !== 'usd' ? { color: CHAINS[a].color } : undefined}
-        >
-          {a !== 'usd' && CHAINS[a].glyph} {assetLabel(a)}
-        </button>
-      ))}
-    </div>
-  )
-}
 
+/**
+ * Convert (Axiom's Exchange → Convert): pick what you're converting and from which wallet, what you're getting and
+ * into which wallet, see the rate, flip the two sides, confirm. USD is your shared bank, so it has no wallet.
+ */
 export function SwapModal() {
   const open = useGame((s) => s.swapOpen)
   const setOpen = useGame((s) => s.setSwapOpen)
   const market = useGame((s) => s.market)
   const cash = useGame((s) => s.portfolio.cash)
-  const balances = useGame((s) => s.portfolio.balances)
+  const accounts = useGame((s) => s.portfolio.accounts ?? [])
+  const active = useGame((s) => s.portfolio.active)
+  const convert = useGame((s) => s.convertAssets)
   const swapAssets = useGame((s) => s.swapAssets)
   const autoSwap = useGame((s) => s.settings.autoSwap)
   const updateSettings = useGame((s) => s.updateSettings)
   const filter = useGame((s) => s.chainFilter)
+  const main = active?.[0] ?? accounts[0]?.id ?? ''
   const [from, setFrom] = useState<Asset>('usd')
   const [to, setTo] = useState<Asset>(filter === 'all' ? 'sol' : filter)
+  const [fromW, setFromW] = useState('')
+  const [toW, setToW] = useState('')
   const [amount, setAmount] = useState('')
   if (!open) return null
-  const have = (a: Asset) => (a === 'usd' ? cash : balances?.[a] ?? 0)
+  // A wallet that was deleted (or never picked) falls back to your main one.
+  const walletOf = (id: string) => (accounts.some((a) => a.id === id) ? id : main)
+  const fw = walletOf(fromW)
+  const tw = walletOf(toW)
+  const have = (a: Asset, w: string) => (a === 'usd' ? cash : accounts.find((x) => x.id === w)?.balances[a] ?? 0)
   const usdPer = (a: Asset) => (a === 'usd' ? 1 : nativePrice(market, a))
   const value = parseFloat(amount) || 0
-  const out = value > 0 && from !== to ? (value * usdPer(from) * (1 - SWAP_FEE)) / usdPer(to) : 0
+  const sameCoin = from === to
+  const blocked = sameCoin && (from === 'usd' || fw === tw)
+  const out = value > 0 && !blocked ? (sameCoin ? value : (value * usdPer(from) * (1 - SWAP_FEE)) / usdPer(to)) : 0
   const fmt = (a: Asset, n: number) => (a === 'usd' ? fmtUsd(n) : fmtNative(n, a))
+  const bal = have(from, fw)
+  const flip = () => {
+    setFrom(to)
+    setTo(from)
+    setFromW(tw)
+    setToW(fw)
+    setAmount(out > 0 ? String(+out.toPrecision(6)) : '')
+  }
   const split = () => {
-    // Quick split of half your USD: 50% SOL, 25% BNB, 25% ETH.
+    // Quick split of half your USD: 50% SOL, 25% BNB, 25% ETH (into your main wallet).
     const pot = cash / 2
     if (pot < 1) return
     swapAssets('usd', 'sol', pot * 0.5)
     swapAssets('usd', 'bsc', pot * 0.25)
     swapAssets('usd', 'hood', pot * 0.25)
   }
+  const sub =
+    from === to
+      ? from === 'usd' ? 'Pick two different assets' : `Move ${assetLabel(from)} between two of your wallets (no fee)`
+      : `Swap ${assetLabel(from)}${from === 'usd' ? '' : ` on ${CHAINS[from].name}`} for ${assetLabel(to)}${to === 'usd' ? '' : ` on ${CHAINS[to].name}`}`
 
   return (
-    <Modal title={<span className="flex items-center gap-2"><ArrowDownUp size={14} className="text-accent" /> Swap</span>} onClose={() => setOpen(false)}>
-      <div className="space-y-3 text-[12px]">
-        <div className="grid grid-cols-2 gap-2">
-          {ASSETS.map((a) => (
-            <div key={a} className="rounded-md border border-line bg-bg px-2.5 py-1.5">
-              <div className="flex items-center justify-between text-[10px] text-dim">
-                <span>{a === 'usd' ? 'USD cash' : `${CHAINS[a].native} · ${CHAINS[a].name}`}</span>
-                {a !== 'usd' && <span className="num">{fmtUsd(usdPer(a), 2)}</span>}
-              </div>
-              <div className="num font-bold">{fmt(a, have(a))}</div>
-              {a !== 'usd' && <div className="num text-[10px] text-muted">≈ {fmtUsd(have(a) * usdPer(a))}</div>}
-            </div>
-          ))}
+    <Modal title={<span className="flex items-center gap-2"><ArrowDownUp size={14} className="text-accent" /> Convert</span>} onClose={() => setOpen(false)}>
+      <div className="space-y-2.5 text-[12px]">
+        <p className="text-[11px] text-muted">{sub}</p>
+
+        <ConvertSide
+          label="Converting" asset={from} wallet={fw} accounts={accounts} balance={bal} fmt={fmt}
+          onAsset={(a) => { setFrom(a); if (a === to && (a === 'usd' || fw === tw)) setTo(a === 'usd' ? 'sol' : 'usd') }}
+          onWallet={setFromW}
+          onMax={() => setAmount(String(Math.floor(bal * 1e6) / 1e6))}
+        >
+          <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))} placeholder="0.0" className="num h-9 w-full min-w-0 bg-transparent text-[18px] font-semibold outline-none placeholder:text-dim" aria-label="Amount to convert" autoFocus />
+        </ConvertSide>
+
+        <div className="-my-1 flex justify-center">
+          <button onClick={flip} className="rounded-full border border-line2 bg-raise p-1.5 text-muted hover:text-ink" aria-label="Flip the two sides" title="Flip"><ArrowDownUp size={14} /></button>
         </div>
-        <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-dim">From</div>
-          <Picker value={from} onChange={(a) => { setFrom(a); if (a === to) setTo(a === 'usd' ? 'sol' : 'usd') }} />
-          <div className="mt-1.5 flex items-center rounded-md border border-line2 bg-bg px-2 focus-within:border-accent/60">
-            <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))} placeholder="0" className="num h-9 w-full bg-transparent text-[15px] font-semibold outline-none" aria-label="Swap amount" />
-            <span className="text-muted">{assetLabel(from)}</span>
-            <button onClick={() => setAmount(String(Math.floor(have(from) * 1e6) / 1e6))} className="ml-2 rounded bg-raise px-1.5 py-0.5 text-[10px] font-bold text-accent">MAX</button>
-          </div>
+
+        <ConvertSide
+          label="Gaining" asset={to} wallet={tw} accounts={accounts} balance={have(to, tw)} fmt={fmt}
+          onAsset={(a) => { setTo(a); if (a === from && (a === 'usd' || fw === tw)) setFrom(a === 'usd' ? 'sol' : 'usd') }}
+          onWallet={setToW}
+        >
+          <div className={clsx('num flex h-9 items-center text-[18px] font-semibold', out > 0 ? 'text-ink' : 'text-dim')}>{out > 0 ? +out.toPrecision(6) : '0.0'}</div>
+        </ConvertSide>
+
+        <div className="text-right text-[10px] text-dim">
+          {sameCoin ? 'Same coin: a transfer between wallets, no fee' : <>1 {assetLabel(from)} ≈ {(usdPer(from) / usdPer(to)).toPrecision(5)} {assetLabel(to)} · fee {SWAP_FEE * 100}% · simulated prices</>}
         </div>
-        <div className="flex justify-center">
-          <button onClick={() => { setFrom(to); setTo(from) }} className="rounded-full border border-line2 bg-raise p-1.5 text-muted hover:text-ink" aria-label="Flip"><ArrowDownUp size={14} /></button>
-        </div>
-        <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-dim">To</div>
-          <Picker value={to} onChange={(a) => { setTo(a); if (a === from) setFrom(a === 'usd' ? 'sol' : 'usd') }} />
-          <div className="mt-1.5 rounded-md border border-line bg-bg px-2 py-2 num text-[15px] font-semibold text-muted">≈ {fmt(to, out)}</div>
-          <div className="mt-1 text-[10px] text-dim">Rate 1 {assetLabel(from)} = {(usdPer(from) / usdPer(to)).toPrecision(5)} {assetLabel(to)} · fee {SWAP_FEE * 100}% · simulated prices</div>
-        </div>
+
         <button
-          disabled={!(value > 0) || from === to}
-          onClick={() => { if (swapAssets(from, to, value)) setAmount('') }}
+          disabled={!(value > 0) || blocked || value > bal + 1e-9}
+          onClick={() => { if (convert(from, to, value, fw, tw)) setAmount('') }}
           className="flex h-10 w-full items-center justify-center gap-1.5 rounded-md bg-accent text-[13px] font-extrabold text-accent-ink hover:brightness-110 disabled:opacity-40"
         >
-          <ArrowDownUp size={14} /> Swap {value > 0 ? `${fmt(from, value)} → ${fmt(to, out)}` : ''}
+          {value > bal + 1e-9 ? `Not enough ${assetLabel(from)}` : <>Confirm{value > 0 && !blocked ? ` · ${fmt(from, value)} → ${fmt(to, out)}` : ''}</>}
         </button>
+
         <button onClick={split} className="h-9 w-full rounded-md border border-line2 text-[12px] font-semibold text-muted hover:text-ink">
           Quick split half my USD · 50% SOL / 25% BNB / 25% ETH
         </button>
@@ -417,5 +426,34 @@ export function SwapModal() {
         </label>
       </div>
     </Modal>
+  )
+}
+
+/** One side of the Convert box: the amount on the left; wallet, balance and coin pickers on the right. */
+function ConvertSide({ label, asset, wallet, accounts, balance, fmt, onAsset, onWallet, onMax, children }: {
+  label: string; asset: Asset; wallet: string; accounts: { id: string; name: string; emoji: string }[]; balance: number; fmt: (a: Asset, n: number) => string
+  onAsset: (a: Asset) => void; onWallet: (id: string) => void; onMax?: () => void; children: React.ReactNode
+}) {
+  const pick = 'rounded border border-line2 bg-panel px-1.5 py-0.5 text-[11px] font-semibold outline-none hover:border-muted'
+  return (
+    <div className="rounded-md border border-line2 bg-bg px-2.5 py-2 focus-within:border-accent/60">
+      <div className="flex items-center gap-2 text-[10px] text-dim">
+        <span>{label}</span>
+        {asset === 'usd' ? (
+          <span className="ml-auto" title="USD is one shared bank for all your wallets">USD bank</span>
+        ) : (
+          <select value={wallet} onChange={(e) => onWallet(e.target.value)} aria-label={`${label}: wallet`} className={clsx(pick, 'ml-auto max-w-[130px] text-ink')}>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.emoji} {a.name}</option>)}
+          </select>
+        )}
+        <button type="button" onClick={onMax} disabled={!onMax} title={onMax ? 'Use the whole balance' : undefined} className={clsx('num', onMax && 'text-accent hover:underline')}>Balance: {fmt(asset, balance)}</button>
+      </div>
+      <div className="mt-1 flex items-center gap-2">
+        <div className="min-w-0 flex-1">{children}</div>
+        <select value={asset} onChange={(e) => onAsset(e.target.value as Asset)} aria-label={`${label}: coin`} className={clsx(pick, 'text-[13px] font-bold')} style={asset === 'usd' ? undefined : { color: CHAINS[asset].color }}>
+          {ASSETS.map((a) => <option key={a} value={a} style={{ color: 'initial' }}>{a === 'usd' ? '$ USD' : `${CHAINS[a].glyph} ${CHAINS[a].native}`}</option>)}
+        </select>
+      </div>
+    </div>
   )
 }

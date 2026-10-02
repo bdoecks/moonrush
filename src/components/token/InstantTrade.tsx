@@ -1,6 +1,7 @@
 import clsx from 'clsx'
-import { Check, GripHorizontal, Pencil, Wallet, X, Zap } from 'lucide-react'
+import { Check, GripHorizontal, Pencil, RotateCcw, Settings2, Wallet, X, Zap } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useSelectedToken, useTokenMap } from '../../hooks/useDerived'
 import { slotSetting, useGame } from '../../game/store'
 import { previewBuy, previewSell, qtyForProceeds, SWAP_FEE, tradeFee } from '../../game/tradingEngine'
@@ -14,6 +15,8 @@ import { Kbd, TokenIcon } from '../ui'
 import { TradeSettingsChip, TradeSettingsModal } from './TradeSettings'
 import { useActiveBalance, useActivePosition, useWallets } from '../../hooks/useWallets'
 import { WalletSelector } from '../wallets'
+import { liveIds, useWalletGroups } from '../../game/walletGroups'
+import { InstantSettingsModal, instantOpts } from './InstantSettings'
 
 const W = 300
 const clampPos = (p: { x: number; y: number }) => ({
@@ -21,7 +24,7 @@ const clampPos = (p: { x: number; y: number }) => ({
   y: Math.min(Math.max(56, p.y), Math.max(56, window.innerHeight - 240)),
 })
 
-/** Floating one-click trade panel (GMGN-style): preset buys in the chain coin or USD, sells by %, coin or USD. */
+/** Floating one-click trade panel (GMGN / Axiom style): preset buys in the chain coin or USD, sells by %, coin or USD. */
 export function InstantTrade() {
   const open = useGame((s) => s.instantOpen)
   const toggle = useGame((s) => s.toggleInstant)
@@ -34,7 +37,9 @@ export function InstantTrade() {
   const px = useGame((s) => s.market.native?.[chain]?.price ?? CHAINS[chain].basePrice)
   const bal = useActiveBalance(chain)
   const nativeBal = bal.total
-  const { activeIds, primary } = useWallets()
+  const { all: allWallets, activeIds, primary } = useWallets()
+  const setActiveWallets = useGame((s) => s.setActiveWallets)
+  const groups = useWalletGroups((s) => s.groups)
   const trades = useGame((s) => s.portfolio.trades)
   const pos = useActivePosition(t?.id) // what your selected wallets hold
   const running = useGame((s) => s.runStatus === 'running')
@@ -43,14 +48,20 @@ export function InstantTrade() {
   const sell = useGame((s) => s.sell)
   const [pos2d, setPos] = useState(() => clampPos(load<{ x: number; y: number }>('instantPos') ?? { x: 96, y: 150 }))
   const [editing, setEditing] = useState(false)
+  const [gear, setGear] = useState(false)
   const [settingsSide, setSettingsSide] = useState<'buy' | 'sell' | null>(null)
   const drag = useRef<{ dx: number; dy: number } | null>(null)
   const [tab, setTab] = useState<'trade' | 'holding'>(() => load<'trade' | 'holding'>('instantTab') ?? 'trade')
+  // "Reset PNL": per coin, the tick the Bal / Bought / Sold / PnL row starts counting from.
+  const [resets, setResets] = useState<Record<string, number>>(() => load<Record<string, number>>('instantPnlReset') ?? {})
   const pickTab = (k: 'trade' | 'holding') => {
     setTab(k)
     save('instantTab', k)
   }
   const holdCount = useHoldings().length
+  const o = instantOpts(settings.instant)
+  // What the hotkeys do right now (set further down, once the buttons' amounts are known).
+  const keys = useRef<{ buy: (i: number) => void; sell: (i: number) => void; initials: () => void } | null>(null)
 
   useEffect(() => {
     const onResize = () => setPos((p) => clampPos(p))
@@ -58,7 +69,35 @@ export function InstantTrade() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  // Hotkeys: only while the panel is open on its Trade tab and you're not typing. They run before the game's own
+  // shortcuts (which use some of the same keys) and stop those from also firing.
+  const hk = o.hotkeys
+  const hkOn = open && hk.on && tab === 'trade'
+  const hkSig = `${hk.buy.join()}|${hk.sell.join()}|${hk.initials}|${hk.bubbles}`
+  useEffect(() => {
+    if (!hkOn) return
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || useGame.getState().modal) return
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
+      const k = e.key.toLowerCase()
+      const b = hk.buy.indexOf(k)
+      const s = hk.sell.indexOf(k)
+      if (b >= 0) keys.current?.buy(b)
+      else if (s >= 0) keys.current?.sell(s)
+      else if (k === hk.initials) keys.current?.initials()
+      else if (k === hk.bubbles) window.dispatchEvent(new Event('moonrush:toggleMarkers'))
+      else return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hkOn, hkSig])
+
   const scope = settings.instant.pnlScope ?? 'total'
+  const resetTick = t ? resets[t.id] ?? -1 : -1
   const stats = useMemo(() => {
     if (!t) return null
     let bought = 0
@@ -67,7 +106,7 @@ export function InstantTrade() {
     let soldN = 0
     let realized = 0
     // Only the selected wallets' fills (trades from before multi-wallet belong to the first wallet), oldest first.
-    let fills = trades.filter((tr) => tr.tokenId === t.id && activeIds.includes(tr.walletId ?? primary?.id ?? '')).reverse()
+    let fills = trades.filter((tr) => tr.tokenId === t.id && tr.tick >= resetTick && activeIds.includes(tr.walletId ?? primary?.id ?? '')).reverse()
     if (scope === 'position') {
       // The current (or most recent) position starts at the first buy after your holdings were last at zero.
       let held = 0
@@ -92,51 +131,84 @@ export function InstantTrade() {
     const unrealized = pos ? value - pos.costBasis : 0
     const pnl = realized + unrealized
     return { bought, sold, boughtN, soldN, value, pnl, pnlPct: bought > 0 ? pnl / bought : 0 }
-  }, [t, trades, pos, px, activeIds, primary, scope])
+  }, [t, trades, pos, px, activeIds, primary, scope, resetTick])
 
   if (!open || !t || !stats) return null
 
   const idx = settings.presetIdx
   const ip = settings.instant
   const setIp = (patch: Partial<InstantPrefs>) => updateSettings({ instant: { ...ip, ...patch } })
-  // Buy presets are in the token's chain coin or USD; with auto-swap, USD cash can cover a shortfall.
-  const buyNativeRow = (settings.buyPresets[chain] ?? meta.presets)[idx] ?? meta.presets[idx]
-  const buys = ip.buyUnit === 'usd' ? ip.buyUsd[idx] : buyNativeRow
+  // Rows: the first is the preset you're on; extra rows show your other presets' amounts.
+  const slotRows = (n: number) => [idx, (idx + 1) % 3, (idx + 2) % 3].slice(0, n)
+  const buyRow = (r: number) => (ip.buyUnit === 'usd' ? ip.buyUsd[r] : (settings.buyPresets[chain] ?? meta.presets)[r] ?? meta.presets[r])
+  type SellUnit = 'pct' | 'native' | 'usd'
+  const sellRow = (unit: SellUnit, r: number) => (unit === 'pct' ? settings.sellPresets[r] : unit === 'usd' ? ip.sellUsd[r] : (ip.sellNative[chain] ?? meta.presets)[r])
+  // Sell rows: follow the switch, always %, or one row of amounts and the rest %.
+  const sellRows: { unit: SellUnit; r: number }[] =
+    o.sellMode === 'pct' ? slotRows(o.sellRows).map((r) => ({ unit: 'pct', r }))
+      : o.sellMode === 'both' ? [{ unit: ip.sellUnit === 'pct' ? 'native' : ip.sellUnit, r: idx }, ...slotRows(Math.max(1, o.sellRows - 1)).map((r) => ({ unit: 'pct' as const, r }))]
+        : slotRows(o.sellRows).map((r) => ({ unit: ip.sellUnit, r }))
+  const buys = buyRow(idx)
   const toUsd = (a: number) => (ip.buyUnit === 'usd' ? a : a * px)
   // The amount is split evenly across the selected wallets, so a button is live if every wallet can cover its share.
   const spendableUsd = bal.count * bal.min * px + (settings.autoSwap ? cash * (1 - SWAP_FEE) : 0)
-  const sells = ip.sellUnit === 'pct' ? settings.sellPresets[idx] : ip.sellUnit === 'usd' ? ip.sellUsd[idx] : (ip.sellNative[chain] ?? meta.presets)[idx]
   const dead = t.status === 'rugged' || t.status === 'dead'
   const firstSlip = previewBuy(t, toUsd(buys[0])).slippage
   const posNet = pos ? previewSell(t, pos.qty).net : 0 // what the whole bag would fetch right now
+  const round = o.shape === 'rounded' ? 'rounded-full' : 'rounded-md'
 
-  const setPreset = (side: 'buy' | 'sell', i: number, v: number) => {
+  const setPreset = (side: 'buy' | 'sell', r: number, i: number, v: number, unit?: SellUnit) => {
     if (!(v > 0)) return
-    const edit = (rows: number[][]) => rows.map((row, r) => (r === idx ? row.map((x, c) => (c === i ? v : x)) : row))
+    const edit = (rows: number[][]) => rows.map((row, k) => (k === r ? row.map((x, c) => (c === i ? v : x)) : row))
     if (side === 'buy') {
       if (ip.buyUnit === 'usd') setIp({ buyUsd: edit(ip.buyUsd) })
       else updateSettings({ buyPresets: { ...settings.buyPresets, [chain]: edit(settings.buyPresets[chain] ?? meta.presets) } })
-    } else if (ip.sellUnit === 'pct') updateSettings({ sellPresets: settings.sellPresets.map((row, r) => (r === idx ? row.map((x, c) => (c === i ? Math.min(100, v) : x)) : row)) })
-    else if (ip.sellUnit === 'usd') setIp({ sellUsd: edit(ip.sellUsd) })
+    } else if (unit === 'pct') updateSettings({ sellPresets: settings.sellPresets.map((row, k) => (k === r ? row.map((x, c) => (c === i ? Math.min(100, v) : x)) : row)) })
+    else if (unit === 'usd') setIp({ sellUsd: edit(ip.sellUsd) })
     else setIp({ sellNative: { ...ip.sellNative, [chain]: edit(ip.sellNative[chain] ?? meta.presets) } })
   }
-  const doBuy = (a: number) => (ip.buyUnit === 'usd' ? buy(a, t.id) : buyNative(a, t.id))
-  const doSell = (a: number) => {
+  // Wallet groups that still have wallets, in order; "rotate" steps to the next one after a buy.
+  const allIds = allWallets.map((a) => a.id)
+  const liveGroups = groups.map((g) => ({ g, ids: liveIds(g, allIds) })).filter((x) => x.ids.length > 0)
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x))
+  const groupIdx = liveGroups.findIndex((x) => sameSet(x.ids, activeIds))
+  const doBuy = (a: number) => {
+    const done = ip.buyUnit === 'usd' ? buy(a, t.id) : buyNative(a, t.id)
+    if (done && o.rotateGroups && liveGroups.length > 1) setActiveWallets(liveGroups[(groupIdx + 1 + liveGroups.length) % liveGroups.length].ids)
+    return done
+  }
+  const doSell = (a: number, unit: SellUnit) => {
     if (!pos) return
-    if (ip.sellUnit === 'pct') return sell(a >= 100 ? pos.qty : (pos.qty * a) / 100, t.id)
+    if (unit === 'pct') return sell(a >= 100 ? pos.qty : (pos.qty * a) / 100, t.id)
     // Aim for the amount you actually receive: add this slot's network fee (paid out of the proceeds).
     const s = slotSetting(settings, chain, 'sell')
-    const usd = (ip.sellUnit === 'usd' ? a : a * px) + (s.priority + s.tip) * px
+    const usd = (unit === 'usd' ? a : a * px) + (s.priority + s.tip) * px
     return sell(qtyForProceeds(t, pos.qty, usd), t.id)
   }
+  keys.current = {
+    buy: (i) => {
+      const a = buys[i]
+      if (a !== undefined && running && !dead && toUsd(a) <= spendableUsd + 1e-9) doBuy(a)
+    },
+    sell: (i) => {
+      const a = sellRow(sellRows[0].unit, sellRows[0].r)[i]
+      if (a !== undefined && running && pos) doSell(a, sellRows[0].unit)
+    },
+    // "Initials": sell just enough to take back what this bag cost you (the rest rides for free).
+    initials: () => {
+      if (running && pos && posNet > 0) sell(posNet <= pos.costBasis ? pos.qty : qtyForProceeds(t, pos.qty, pos.costBasis), t.id)
+    },
+  }
   const buyLabel = (a: number) => (ip.buyUnit === 'usd' ? `$${fmtNum(a)}` : fmtNative(a, chain, false))
-  const sellLabel = (a: number) => (ip.sellUnit === 'pct' ? `${a}%` : ip.sellUnit === 'usd' ? `$${fmtNum(a)}` : fmtNative(a, chain, false))
+  const sellLabel = (a: number, unit: SellUnit) => (unit === 'pct' ? `${a}%` : unit === 'usd' ? `$${fmtNum(a)}` : fmtNative(a, chain, false))
   // Stats row: USD or chain coin; PnL as value or %.
   const inNative = ip.statsUnit === 'native'
   const money = (usd: number, nat: number) => (inNative ? fmtNative(nat, chain, false) : fmtCompact(usd))
+  const hint = (list: string[], i: number) => (hk.on && list[i] ? ` · key ${list[i].toUpperCase()}` : '')
 
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest('button')) return
+    // Not from a control, and not from a window opened by the panel (those sit outside it on the page).
+    if ((e.target as HTMLElement).closest('button, input, select, a, label') || !e.currentTarget.contains(e.target as Node)) return
     drag.current = { dx: e.clientX - pos2d.x, dy: e.clientY - pos2d.y }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
@@ -147,19 +219,36 @@ export function InstantTrade() {
     if (drag.current) save('instantPos', pos2d)
     drag.current = null
   }
+  const dragProps = { onPointerDown: onDown, onPointerMove: onMove, onPointerUp: onUp }
+  const resetPnl = () => {
+    const next = { ...resets, [t.id]: useGame.getState().market.tick + 1 }
+    setResets(next)
+    save('instantPnlReset', next)
+  }
 
   return (
     <div
       role="dialog"
       aria-label="Instant trade"
-      className="pop-in fixed z-40 rounded-lg border border-line2 bg-panel/95 shadow-2xl shadow-black/60 backdrop-blur"
+      className={clsx('pop-in fixed z-40 rounded-lg border border-line2 bg-panel/95 shadow-2xl shadow-black/60 backdrop-blur', o.dragAnywhere && 'touch-none')}
       style={{ left: pos2d.x, top: pos2d.y, width: W }}
+      {...(o.dragAnywhere ? dragProps : {})}
     >
+      {/* Wallet groups: click one to trade from its wallets */}
+      {o.groupChips && (
+        <div className="no-scrollbar flex items-center gap-1 overflow-x-auto border-b border-line px-2 py-1">
+          {liveGroups.length === 0 ? (
+            <span className="text-[10px] text-dim">No wallet groups yet · make one in Portfolio → Wallet groups</span>
+          ) : liveGroups.map((x, i) => (
+            <button key={x.g.id} onClick={() => setActiveWallets(x.ids)} aria-pressed={i === groupIdx} title={`Trade from ${x.g.name} (${x.ids.length} wallet${x.ids.length > 1 ? 's' : ''})`} className={clsx('flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold', i === groupIdx ? 'border-warn/60 bg-warn/10 text-warn' : 'border-line2 text-muted hover:text-ink')}>
+              <span>{x.g.emoji}</span>{x.g.name}
+            </button>
+          ))}
+        </div>
+      )}
       {/* Drag handle */}
       <div
-        onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onUp}
+        {...(o.dragAnywhere ? {} : dragProps)}
         className="flex cursor-grab touch-none items-center gap-2 border-b border-line px-2.5 py-1.5 active:cursor-grabbing"
       >
         <GripHorizontal size={14} className="text-dim" />
@@ -171,10 +260,15 @@ export function InstantTrade() {
         <button onClick={() => setEditing((v) => !v)} className={clsx('ml-auto rounded p-1', editing ? 'bg-accent/15 text-accent' : 'text-dim hover:text-ink')} title={editing ? 'Done editing' : 'Edit preset amounts'} aria-label="Edit presets">
           {editing ? <Check size={13} /> : <Pencil size={13} />}
         </button>
+        <button onClick={() => setGear(true)} className="rounded p-1 text-dim hover:text-ink" title="Instant Trade settings" aria-label="Instant Trade settings">
+          <Settings2 size={13} />
+        </button>
         <button onClick={() => toggle(false)} className="rounded p-1 text-dim hover:text-ink" title="Close (I)" aria-label="Close instant trade">
           <X size={14} />
         </button>
       </div>
+      {/* In a portal: the panel's blur would otherwise trap the window inside it. */}
+      {gear && createPortal(<InstantSettingsModal onClose={() => setGear(false)} />, document.body)}
 
       {/* Trade / Holding tabs */}
       <div role="tablist" aria-label="Instant trade view" className="flex gap-3 border-b border-line px-2.5">
@@ -202,34 +296,42 @@ export function InstantTrade() {
           <div className="mb-1.5 flex items-center gap-1">
             <span className="mr-1 text-[12px] font-bold text-up">Buy</span>
             <Slots idx={idx} onPick={(i) => updateSettings({ presetIdx: i })} />
-            <UnitSwitch
-              value={ip.buyUnit}
-              onChange={(v) => setIp({ buyUnit: v })}
-              options={[{ value: 'native', label: meta.native }, { value: 'usd', label: 'USD' }]}
-              label="Buy amounts in"
-              className="ml-auto"
-            />
-          </div>
-          <div className="grid grid-cols-4 gap-1.5">
-            {buys.map((a, i) =>
-              editing ? (
-                <PresetInput key={`${ip.buyUnit}-${i}`} value={a} onCommit={(v) => setPreset('buy', i, v)} tone="up" prefix={ip.buyUnit === 'usd' ? '$' : undefined} />
-              ) : (
-                <button
-                  key={i}
-                  disabled={!running || dead || toUsd(a) > spendableUsd + 1e-9}
-                  onClick={() => doBuy(a)}
-                  title={ip.buyUnit === 'usd' ? `Buy $${fmtNum(a)} (≈${fmtNative(a / px, chain)}) of ${t.ticker} instantly` : `Buy ${fmtNative(a, chain)} (≈${fmtUsd(a * px)}) of ${t.ticker} instantly`}
-                  className="num rounded-md border border-up/50 py-1.5 text-[12px] font-bold text-up transition-all hover:bg-up hover:text-black active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-up"
-                >
-                  {buyLabel(a)}
-                </button>
-              ),
+            {o.unitSwitch && (
+              <UnitSwitch
+                value={ip.buyUnit}
+                onChange={(v) => setIp({ buyUnit: v })}
+                options={[{ value: 'native', label: meta.native }, { value: 'usd', label: 'USD' }]}
+                label="Buy amounts in"
+                className="ml-auto"
+              />
             )}
           </div>
-          <div className="mt-1 flex items-center justify-end gap-1 num text-[10px]" style={{ color: meta.color }}>
-            <Wallet size={10} />{fmtNative(nativeBal, chain)}<span className="text-dim">· {fmtUsd(nativeBal * px + cash, 0)} total</span>
+          <div className="space-y-1.5">
+            {slotRows(o.buyRows).map((r, ri) => (
+              <div key={r} className="grid grid-cols-4 gap-1.5">
+                {buyRow(r).map((a, i) =>
+                  editing ? (
+                    <PresetInput key={`${ip.buyUnit}-${r}-${i}`} value={a} onCommit={(v) => setPreset('buy', r, i, v)} tone="up" prefix={ip.buyUnit === 'usd' ? '$' : undefined} />
+                  ) : (
+                    <button
+                      key={i}
+                      disabled={!running || dead || toUsd(a) > spendableUsd + 1e-9}
+                      onClick={() => doBuy(a)}
+                      title={(ip.buyUnit === 'usd' ? `Buy $${fmtNum(a)} (≈${fmtNative(a / px, chain)}) of ${t.ticker} instantly` : `Buy ${fmtNative(a, chain)} (≈${fmtUsd(a * px)}) of ${t.ticker} instantly`) + (ri === 0 ? hint(hk.buy, i) : '')}
+                      className={clsx('num border border-up/50 py-1.5 text-[12px] font-bold text-up transition-all hover:bg-up hover:text-black active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-up', round)}
+                    >
+                      {buyLabel(a)}
+                    </button>
+                  ),
+                )}
+              </div>
+            ))}
           </div>
+          {o.tokenAmounts && (
+            <div className="mt-1 flex items-center justify-end gap-1 num text-[10px]" style={{ color: meta.color }}>
+              <Wallet size={10} />{fmtNative(nativeBal, chain)}<span className="text-dim">· {fmtUsd(nativeBal * px + cash, 0)} total</span>
+            </div>
+          )}
           <div className="mt-1 flex items-center gap-1.5 text-[10px] text-dim">
             <TradeSettingsChip chain={chain} side="buy" onOpen={() => setSettingsSide('buy')} className="-ml-1" />
             <span className="ml-auto" title="Trading fee (incl. tax)">Fee {+(tradeFee(t, 'buy') * 100).toFixed(2)}%</span>
@@ -242,68 +344,82 @@ export function InstantTrade() {
           <div className="mb-1.5 flex items-center gap-1">
             <span className="mr-1 text-[12px] font-bold text-down">Sell</span>
             <Slots idx={idx} onPick={(i) => updateSettings({ presetIdx: i })} />
-            <UnitSwitch
-              value={ip.sellUnit}
-              onChange={(v) => setIp({ sellUnit: v })}
-              options={[{ value: 'pct', label: '%' }, { value: 'native', label: meta.native }, { value: 'usd', label: 'USD' }]}
-              label="Sell by"
-              className="ml-auto"
-            />
-          </div>
-          <div className="grid grid-cols-4 gap-1.5">
-            {sells.map((p, i) => {
-              const valueMode = ip.sellUnit !== 'pct'
-              const wantUsd = ip.sellUnit === 'usd' ? p : p * px
-              const all = valueMode && wantUsd >= posNet // more than the bag is worth → sells everything
-              return editing ? (
-                <PresetInput key={`${ip.sellUnit}-${i}`} value={p} onCommit={(v) => setPreset('sell', i, v)} tone="down" suffix={ip.sellUnit === 'pct' ? '%' : undefined} prefix={ip.sellUnit === 'usd' ? '$' : undefined} />
-              ) : (
-                <button
-                  key={i}
-                  disabled={!running || !pos}
-                  onClick={() => doSell(p)}
-                  title={
-                    ip.sellUnit === 'pct'
-                      ? `Sell ${p}% of your ${t.ticker} instantly`
-                      : `Sell about ${ip.sellUnit === 'usd' ? `$${fmtNum(p)}` : fmtNative(p, chain)} worth of ${t.ticker} (after fees)${all ? ' — more than your bag, so it sells all' : ''}`
-                  }
-                  className={clsx(
-                    'num relative rounded-md border border-down/50 py-1.5 text-[12px] font-bold text-down transition-all hover:bg-down hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-down',
-                    all && pos && 'border-down/80',
-                  )}
-                >
-                  {sellLabel(p)}
-                  {all && pos && <span className="absolute -right-1 -top-1.5 rounded bg-down px-0.5 text-[7px] leading-[10px] text-white">ALL</span>}
-                </button>
-              )
-            })}
-          </div>
-          <div className="mt-1 flex items-center justify-end gap-1 num text-[10px] text-muted">
-            {pos ? (
-              <>
-                {fmtNum(pos.qty)} {t.ticker}
-                <span className="text-dim">· ≈{ip.sellUnit === 'native' ? fmtNative(posNet / px, chain) : fmtUsd(posNet)}</span>
-              </>
-            ) : (
-              `0 ${t.ticker}`
+            {o.unitSwitch && o.sellMode !== 'pct' && (
+              <UnitSwitch
+                value={ip.sellUnit}
+                onChange={(v) => setIp({ sellUnit: v })}
+                options={o.sellMode === 'both' ? [{ value: 'native', label: meta.native }, { value: 'usd', label: 'USD' }] : [{ value: 'pct', label: '%' }, { value: 'native', label: meta.native }, { value: 'usd', label: 'USD' }]}
+                label={o.sellMode === 'both' ? 'Amount row in' : 'Sell by'}
+                className="ml-auto"
+              />
             )}
           </div>
+          <div className="space-y-1.5">
+            {sellRows.map(({ unit, r }, ri) => (
+              <div key={`${unit}-${r}-${ri}`} className="grid grid-cols-4 gap-1.5">
+                {sellRow(unit, r).map((p, i) => {
+                  const valueMode = unit !== 'pct'
+                  const wantUsd = unit === 'usd' ? p : p * px
+                  const all = valueMode && wantUsd >= posNet // more than the bag is worth → sells everything
+                  return editing ? (
+                    <PresetInput key={`${unit}-${r}-${i}`} value={p} onCommit={(v) => setPreset('sell', r, i, v, unit)} tone="down" suffix={unit === 'pct' ? '%' : undefined} prefix={unit === 'usd' ? '$' : undefined} />
+                  ) : (
+                    <button
+                      key={i}
+                      disabled={!running || !pos}
+                      onClick={() => doSell(p, unit)}
+                      title={
+                        (unit === 'pct'
+                          ? `Sell ${p}% of your ${t.ticker} instantly`
+                          : `Sell about ${unit === 'usd' ? `$${fmtNum(p)}` : fmtNative(p, chain)} worth of ${t.ticker} (after fees)${all ? ' — more than your bag, so it sells all' : ''}`) + (ri === 0 ? hint(hk.sell, i) : '')
+                      }
+                      className={clsx(
+                        'num relative border border-down/50 py-1.5 text-[12px] font-bold text-down transition-all hover:bg-down hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-down',
+                        round, all && pos && 'border-down/80',
+                      )}
+                    >
+                      {sellLabel(p, unit)}
+                      {all && pos && <span className="absolute -right-1 -top-1.5 rounded bg-down px-0.5 text-[7px] leading-[10px] text-white">ALL</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+          {o.tokenAmounts && (
+            <div className="mt-1 flex items-center justify-end gap-1 num text-[10px] text-muted">
+              {pos ? (
+                <>
+                  {fmtNum(pos.qty)} {t.ticker}
+                  <span className="text-dim">· ≈{ip.sellUnit === 'native' ? fmtNative(posNet / px, chain) : fmtUsd(posNet)}</span>
+                </>
+              ) : (
+                `0 ${t.ticker}`
+              )}
+            </div>
+          )}
           <div className="mt-1 flex items-center gap-1.5 text-[10px] text-dim">
             <TradeSettingsChip chain={chain} side="sell" onOpen={() => setSettingsSide('sell')} className="-ml-1" />
             <span className="ml-auto">Fee {+(tradeFee(t, 'sell') * 100).toFixed(2)}% · No confirm</span>
           </div>
         </div>
-        {settingsSide && <TradeSettingsModal chain={chain} side={settingsSide} slot={idx} onClose={() => setSettingsSide(null)} />}
+        {settingsSide && createPortal(<TradeSettingsModal chain={chain} side={settingsSide} slot={idx} onClose={() => setSettingsSide(null)} />, document.body)}
 
         {!running &&<div className="rounded border border-warn/30 bg-warn/5 px-2 py-1 text-center text-[10px] text-warn">Start a round to trade</div>}
       </div>
 
       {/* Position summary */}
+      {o.pnlRow && (
       <div className="border-t border-line px-2.5 pb-2 pt-1.5 text-[10px]">
         <div className="mb-1 flex items-center justify-end gap-1">
           <span className="mr-auto" title="Total: every trade on this coin this round. Position: only the position you hold now (since your holdings were last at zero).">
             <UnitSwitch value={ip.pnlScope ?? 'total'} onChange={(v) => setIp({ pnlScope: v })} options={[{ value: 'total', label: 'Total' }, { value: 'position', label: 'Position' }]} label="PnL covers" />
           </span>
+          {o.resetPnl && (
+            <button type="button" onClick={resetPnl} title={`Start this row again from zero for ${t.ticker} (your trades and bag aren't touched)`} aria-label="Reset PNL" className="rounded border border-line2 p-0.5 text-dim hover:text-ink">
+              <RotateCcw size={11} />
+            </button>
+          )}
           <UnitSwitch value={ip.statsUnit} onChange={(v) => setIp({ statsUnit: v })} options={[{ value: 'usd', label: 'USD' }, { value: 'native', label: meta.native }]} label="Show amounts in" />
           <UnitSwitch value={ip.pnlUnit} onChange={(v) => setIp({ pnlUnit: v })} options={[{ value: 'value', label: 'PnL $' }, { value: 'pct', label: 'PnL %' }]} label="Show PnL as" />
         </div>
@@ -324,10 +440,11 @@ export function InstantTrade() {
           </button>
         </div>
       </div>
+      )}
       </>
       )}
       <div className="flex items-center justify-between border-t border-line px-2.5 py-1 text-[9px] text-dim">
-        <span>Drag to move</span>
+        <span>{o.dragAnywhere ? 'Drag anywhere to move' : 'Drag the top bar to move'}{hk.on ? ' · hotkeys on' : ''}</span>
         <span><Kbd>I</Kbd> toggle</span>
       </div>
     </div>

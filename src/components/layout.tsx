@@ -59,6 +59,8 @@ export function Dock() {
             {t.key && <span className="hidden xl:inline"><Kbd>{t.key}</Kbd></span>}
           </button>
         ))}
+        {/* Market Lighthouse sits with the tabs (Positions, Watchlist, Events, trackers…). */}
+        <span className="ml-1 flex items-center border-l border-line pl-2"><LighthouseButton /></span>
         <PnlButton className="ml-auto" />
         {!collapsed && (
           <button onClick={() => setTall((v) => !v)} className="rounded p-1 text-muted hover:bg-raise hover:text-ink" aria-label={tall ? 'Make panel smaller' : 'Make panel taller'} title={tall ? 'Smaller panel' : 'Taller panel'}>
@@ -170,7 +172,6 @@ export function StatusBar() {
       <span className="num">tick {tick}</span>
       <span className="num">{nTokens} tokens</span>
       <span className="num">{speed}× speed</span>
-      <LighthouseButton />
       <NativePrices />
       <PnlButton className="ml-auto h-5" />
       <span>Fictional tokens · virtual money · no real transactions</span>

@@ -9,7 +9,7 @@ import { valuePortfolio } from '../src/game/portfolioEngine'
 import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
 import { POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
-import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
+import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
 import { accountOf } from '../src/game/accounts'
 import { nativePrice } from '../src/game/tradingEngine'
 import { cashbackUsd } from '../src/game/rewardsEngine'
@@ -455,6 +455,12 @@ export class Room {
       if (o.kind === 'swap') {
         const r = runSwap(w, this.market, o.from, o.to, Number(o.amount) || 0, String(o.walletId))
         if (r.ok) me.wallet = r.portfolio
+      } else if (o.kind === 'convert') {
+        const ok = (a: unknown) => a === 'usd' || a === 'sol' || a === 'bsc' || a === 'hood'
+        if (ok(o.from) && ok(o.to)) {
+          const r = runConvert(w, this.market, o.from, o.to, Number(o.amount) || 0, String(o.fromWallet), String(o.toWallet), this.market.tick)
+          if (r.ok) me.wallet = r.portfolio
+        }
       } else if (o.kind === 'transfer') {
         const r = runTransfer(w, String(o.fromId), String(o.toId), o.chain, Number(o.amount) || 0, this.market.tick)
         if (r.ok) me.wallet = r.portfolio

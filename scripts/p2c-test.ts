@@ -85,6 +85,16 @@ ok(Math.abs(main().positions[cooked.token.id].qty - (bagA - give)) < 1e-6, 'aird
 const q = (room.market.shillQueue ?? []).filter((x) => x.tokenId === cooked.token.id && x.side === 'sell')
 ok(q.reduce((a, x) => a + (x.qty ?? 0), 0) <= give + 1e-6, 'dumpers capped at what was airdropped')
 
+// Convert: SOL in the main wallet → BNB in the same wallet, one fee, on the server.
+const solC = main().balances.sol
+const bnbC = main().balances.bsc
+r.handle('p1', { t: 'op', seq: 20, op: { kind: 'convert', from: 'sol', to: 'bsc', amount: 1, fromWallet: main().id, toWallet: main().id } })
+const gotBnb = main().balances.bsc - bnbC
+const rate = room.market.native.sol.price / room.market.native.bsc.price
+ok(Math.abs(main().balances.sol - (solC - 1)) < 1e-9 && Math.abs(gotBnb - rate * 0.997) < 1e-6, `convert 1 SOL → ${gotBnb.toFixed(4)} BNB at the market rate minus 0.3%`)
+r.handle('p1', { t: 'op', seq: 21, op: { kind: 'convert', from: 'bsc', to: 'usd', amount: 999, fromWallet: main().id, toWallet: main().id } })
+ok(Math.abs(main().balances.bsc - (bnbC + gotBnb)) < 1e-9, 'converting more than you have is refused')
+
 // The old trusted paths do nothing now.
 const cashT = me().wallet.cash
 r.handle('p1', { t: 'adjust', seq: 8, delta: { cash: 1e6, realized: 0, feesPaid: 0, balances: {}, positions: {}, trades: [], tradedTokens: [] } })

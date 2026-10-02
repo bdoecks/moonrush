@@ -1,9 +1,10 @@
 // Money moves on a player's wallets, as pure functions shared by the game (solo rounds, and the instant on-screen
 // result in rooms) and the room server (which is the judge in rooms). Same code on both sides = same rules.
+import { CHAINS } from '../data/chains'
 import type { Account, Chain, MarketState, Portfolio, Position, Trade, TradeSetting } from '../types'
 import { accountOf, aggregate, commitView, ensureAccounts, primaryId, viewOf, withAccount } from './accounts'
 import { newPortfolio } from './portfolioEngine'
-import { emptyBalances, executeBuy, executeSell, nativePrice, swap, type Asset } from './tradingEngine'
+import { emptyBalances, executeBuy, executeSell, nativePrice, swap, SWAP_FEE, type Asset } from './tradingEngine'
 
 export interface Who {
   name: string
@@ -83,6 +84,36 @@ export function runSell(p: Portfolio, m: MarketState, legs: { walletId: string; 
 export function runSwap(p: Portfolio, m: MarketState, from: Asset, to: Asset, amount: number, walletId: string): { ok: true; portfolio: Portfolio; received: number } | { ok: false; error: string } {
   const { res, portfolio } = withAccount(p, walletId, (view) => swap(view, m, from, to, amount))
   return res.ok ? { ok: true, portfolio, received: res.received } : { ok: false, error: res.error }
+}
+
+/**
+ * Convert (Axiom's Exchange → Convert): give `amount` of one asset from one wallet, get another asset in the same or
+ * another wallet, at the current rate minus one swap fee. USD is the shared bank, so its "wallet" doesn't matter.
+ * The same coin between two wallets is a plain transfer (no fee).
+ */
+export function runConvert(p: Portfolio, m: MarketState, from: Asset, to: Asset, amount: number, fromWallet: string, toWallet: string, tick = 0): { ok: true; portfolio: Portfolio; received: number } | { ok: false; error: string } {
+  if (!(amount > 0) || !Number.isFinite(amount)) return { ok: false, error: 'Enter an amount' }
+  const src = from === 'usd' ? null : accountOf(p, fromWallet)
+  const dst = to === 'usd' ? null : accountOf(p, toWallet)
+  if ((from !== 'usd' && !src) || (to !== 'usd' && !dst)) return { ok: false, error: 'Pick a wallet' }
+  if (from === to) {
+    if (from === 'usd' || fromWallet === toWallet) return { ok: false, error: 'Pick two different assets or wallets' }
+    const r = runTransfer(p, fromWallet, toWallet, from, amount, tick)
+    return r.ok ? { ok: true, portfolio: r.portfolio, received: r.amount } : r
+  }
+  const have = from === 'usd' ? p.cash : src!.balances[from]
+  if (amount > have + 1e-12) return { ok: false, error: `Not enough ${from === 'usd' ? 'USD' : CHAINS[from].native} in that wallet` }
+  const usdIn = from === 'usd' ? amount : amount * nativePrice(m, from)
+  const usdOut = usdIn * (1 - SWAP_FEE)
+  const received = to === 'usd' ? usdOut : usdOut / nativePrice(m, to)
+  const accounts = (p.accounts ?? []).map((a) => {
+    let balances = a.balances
+    if (from !== 'usd' && a.id === fromWallet) balances = { ...balances, [from]: Math.max(0, balances[from] - amount) }
+    if (to !== 'usd' && a.id === toWallet) balances = { ...balances, [to]: balances[to] + received }
+    return balances === a.balances ? a : { ...a, balances }
+  })
+  const cash = p.cash - (from === 'usd' ? amount : 0) + (to === 'usd' ? received : 0)
+  return { ok: true, portfolio: ensureAccounts({ ...p, cash: Math.max(0, cash), accounts, feesPaid: p.feesPaid + usdIn * SWAP_FEE }), received }
 }
 
 /** Move a chain coin between two of your wallets (the receiving wallet remembers who funded it). */

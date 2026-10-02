@@ -75,6 +75,7 @@ export type OrderMsg =
 export type OpMsg =
   | { kind: 'swap'; from: Asset; to: Asset; amount: number; walletId: string }
   | { kind: 'transfer'; fromId: string; toId: string; chain: Chain; amount: number }
+  | { kind: 'convert'; from: Asset; to: Asset; amount: number; fromWallet: string; toWallet: string } // any asset / wallet → any asset / wallet
   | { kind: 'claimFees'; tokenIds?: string[] } // creator fees from your coins' vaults, into each coin's dev wallet
   | { kind: 'cashback'; chains: Chain[]; as: 'coin' | 'usdc' }
 
