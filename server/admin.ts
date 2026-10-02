@@ -11,6 +11,8 @@ export type AdminAction =
   | { action: 'notice'; room?: string; text: string } // no room = every room
   | { action: 'grant'; room: string; playerId: string; usd?: number; asset?: 'usd' | 'sol' | 'bsc' | 'hood'; amount?: number }
   | { action: 'market'; room: string; market: AdminMarketAction }
+  | { action: 'mute'; room: string; playerId: string; minutes: number } // 0 = unmute
+  | { action: 'dismissReport'; room: string; id: number }
   | { action: 'reset'; room: string; playerId?: string } // wipe a wallet back to the start (no player = everyone)
 
 /** Guests banned from this server (until it restarts); accounts are banned in the database. */
@@ -74,6 +76,10 @@ export async function handleAdmin(req: IncomingMessage, res: ServerResponse, pat
         if (!amount) return json(res, 400, { error: 'Amount must be more than 0' })
         return json(res, room.grant(a.playerId, amount, asset) ? 200 : 404, { ok: true })
       }
+      case 'mute':
+        return json(res, room.mute(String(a.playerId), Math.max(0, Math.min(60 * 24 * 30, Number(a.minutes) || 0))) ? 200 : 404, { ok: true })
+      case 'dismissReport':
+        return json(res, room.dismissReport(Number(a.id)) ? 200 : 404, { ok: true })
       case 'reset': {
         const n = room.resetWallets(a.playerId ? String(a.playerId) : undefined)
         return json(res, n ? 200 : 404, n ? { ok: true, reset: n } : { error: a.playerId ? 'That player has no wallet in this room' : 'No wallets to reset (is a round running?)' })

@@ -10,6 +10,7 @@ import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
 import { POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
 import { seasonNumber } from '../src/game/season'
+import { AUTO_MUTE_MS, moderate, rateCheck, strike, type ChatMeter } from './moderation'
 import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
 import { accountOf } from '../src/game/accounts'
 import { nativePrice } from '../src/game/tradingEngine'
@@ -21,7 +22,7 @@ import { airdropFeePerWallet, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBot
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
-import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, type BoardMsg, type BoardRow, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
+import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, type BoardMsg, type BoardRow, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
@@ -70,6 +71,10 @@ interface Member {
   lastRestart?: number // real time (ms)
   restarts?: number
   pnlCarry?: number // profit / loss from before their last restart (a restart doesn't wipe your record)
+  // Chat safety
+  mutedUntil?: number // real time (ms): can't chat or post until then
+  meter?: ChatMeter // rate limit and strikes (not saved)
+  lastReportAt?: number
 }
 
 /** A coin a player cooked: who, the dev wallet that pays its bot and earns its fees, and its creator-fee vault. */
@@ -102,6 +107,7 @@ export interface RoomSnapshot {
   lastWalletTradeId: number
   members: Omit<Member, 'ws' | 'ack'>[]
   cooked?: [string, Cooked][]
+  reports?: ChatReport[]
 }
 
 export class Room {
@@ -121,6 +127,8 @@ export class Room {
   private playerPosts: SocialPost[] = [] // players' posts on the timeline, sent with the next tick
   private bots = new Map<string, VolumeBot>() // tokenId → a player's volume bot on their own coin
   private cooked = new Map<string, Cooked>() // tokenId → players' coins
+  private chatLog: { from: string; name: string; text: string; time: number }[] = [] // recent chat, to check reports against
+  reports: ChatReport[] = [] // chat messages players reported, newest first (for the admin)
   private lastTapeId = 0
   private lastWalletTradeId = 0
   private sentTokens = new Map<string, Record<string, string>>() // coin → field → JSON last sent (for diffs)
@@ -152,11 +160,11 @@ export class Room {
     return {
       v: 1, code: this.code, world: this.world || undefined, hostId: this.hostId, round: this.round, market: this.market, wallets: this.wallets,
       posts: this.posts.slice(0, 80), events: this.events.slice(0, 80), bots: [...this.bots.entries()],
-      lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()],
+      lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()], reports: this.reports.slice(0, 100),
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: m.info.bot ? m.info.online : false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
         cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, brain: m.brain,
-        weekBase: m.weekBase, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry,
+        weekBase: m.weekBase, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
       })),
     }
   }
@@ -188,6 +196,7 @@ export class Room {
     r.events = s.events ?? []
     r.bots = new Map(s.bots ?? [])
     r.cooked = new Map(s.cooked ?? [])
+    r.reports = s.reports ?? []
     r.lastTapeId = s.lastTapeId ?? r.market.nextTradeId - 1
     r.lastWalletTradeId = s.lastWalletTradeId ?? r.market.nextTradeId - 1
     r.members.clear() // the placeholder World's bots; the saved ones come back below
@@ -319,12 +328,85 @@ export class Room {
       }
       case 'airdrop':
         return this.airdrop(me, msg)
-      case 'chat': {
-        const text = msg.text.trim().slice(0, 200)
-        if (text) this.broadcast({ t: 'chat', from: playerId, name: me.info.name, avatar: me.info.avatar, text, time: Date.now() })
-        return
-      }
+      case 'chat':
+        return this.chat(me, msg.text)
+      case 'report':
+        return this.report(me, msg)
     }
+  }
+
+  // ─── Chat safety ─────────────────────────────────────────────────────────────
+  /** Whether this player may talk right now; tells them (and returns false) if they're muted. */
+  private canTalk(me: Member): boolean {
+    const left = (me.mutedUntil ?? 0) - Date.now()
+    if (left <= 0) return true
+    this.sendTo(me.info.id, { t: 'error', message: `You're muted for another ${left > 3600_000 ? `${Math.ceil(left / 3600_000)}h` : `${Math.ceil(left / 60_000)} min`}.` })
+    return false
+  }
+
+  /** A filtered message, or null if it was refused (the sender is told why; repeated offences mute them). */
+  private screen(me: Member, raw: string): string | null {
+    if (!this.canTalk(me)) return null
+    const meter = (me.meter ??= { times: [], strikes: [] })
+    const now = Date.now()
+    const m = moderate(raw, { noLinks: this.world })
+    if (m.strike && strike(meter, now)) {
+      me.mutedUntil = now + AUTO_MUTE_MS
+      meter.strikes = []
+      this.sendTo(me.info.id, { t: 'error', message: 'You’ve been muted for 10 minutes for breaking the chat rules.' })
+      return null
+    }
+    if (!m.ok) {
+      if (m.reason) this.sendTo(me.info.id, { t: 'error', message: m.reason })
+      return null
+    }
+    return m.text
+  }
+
+  private chat(me: Member, raw: string) {
+    const text = this.screen(me, raw)
+    if (!text) return
+    const meter = me.meter!
+    const now = Date.now()
+    const slow = rateCheck(meter, text, now)
+    if (slow) return this.sendTo(me.info.id, { t: 'error', message: slow })
+    meter.times.push(now)
+    meter.last = text
+    meter.lastAt = now
+    this.chatLog = [...this.chatLog, { from: me.info.id, name: me.info.name, text, time: now }].slice(-120)
+    this.broadcast({ t: 'chat', from: me.info.id, name: me.info.name, avatar: me.info.avatar, text, time: now })
+  }
+
+  /** A player reports a chat message: it must be a real recent one; repeat reports of it are counted together. */
+  private report(me: Member, msg: Extract<ClientMsg, { t: 'report' }>) {
+    const now = Date.now()
+    if (now - (me.lastReportAt ?? 0) < 5000) return
+    const line = this.chatLog.find((l) => l.from === msg.from && l.time === msg.time && l.text === String(msg.text))
+    if (!line || line.from === me.info.id) return
+    me.lastReportAt = now
+    const old = this.reports.find((r) => r.target.id === line.from && r.at === line.time)
+    if (old) {
+      if (old.by.id !== me.info.id) old.count++
+      return
+    }
+    const context = this.chatLog.filter((l) => l.from === line.from).slice(-6).map((l) => l.text)
+    this.reports = [{ id: now, at: line.time, by: { id: me.info.id, name: me.info.name }, target: { id: line.from, name: line.name }, text: line.text, context, count: 1 }, ...this.reports].slice(0, 100)
+  }
+
+  /** Admin: stop a player chatting and posting for a while (0 minutes = unmute). */
+  mute(playerId: string, minutes: number): boolean {
+    const m = this.members.get(playerId)
+    if (!m) return false
+    m.mutedUntil = minutes > 0 ? Date.now() + minutes * 60_000 : undefined
+    this.sendTo(playerId, { t: 'error', message: minutes > 0 ? `An admin muted you for ${minutes >= 60 ? `${Math.round(minutes / 60)}h` : `${minutes} min`}.` : 'You can chat again.' })
+    return true
+  }
+
+  /** Admin: clear a report (or all of a player's). */
+  dismissReport(id: number) {
+    const n = this.reports.length
+    this.reports = this.reports.filter((r) => r.id !== id)
+    return this.reports.length < n
   }
 
   /** A player's airdrop: the tokens leave their dev wallet here, and recipients who'll dump go on the shared market. */
@@ -599,7 +681,8 @@ export class Room {
 
   /** A player's post on the timeline: the crowd reacts on the shared market; everyone sees it next tick. */
   private post(me: Member, msg: Extract<ClientMsg, { t: 'post' }>) {
-    const text = String(msg.text ?? '').trim().slice(0, 200)
+    // Bots write their own lines; players' posts go through the chat filter (and mutes).
+    const text = me.info.bot ? String(msg.text ?? '').trim().slice(0, 200) : this.screen(me, String(msg.text ?? ''))
     if (!text || this.market.tick - (me.lastPostTick ?? -999) < POST_COOLDOWN_TICKS) return
     me.lastPostTick = this.market.tick
     setClock(secPerTickOf(this.market))
@@ -1078,6 +1161,8 @@ export class Room {
       coins: this.market.tokens.filter((t) => t.status === 'bonding' || t.status === 'graduated').sort((a, b) => b.mcap - a.mcap).slice(0, 60)
         .map((t) => ({ id: t.id, ticker: t.ticker, emoji: t.emoji, chain: t.chain, mcap: t.mcap, status: t.status, creator: (t as NetToken).creatorName ?? null })),
       sentiment: this.market.sentiment,
+      reports: this.reports.slice(0, 50),
+      muted: [...this.members.values()].filter((m) => (m.mutedUntil ?? 0) > Date.now()).map((m) => ({ id: m.info.id, name: m.info.name, until: m.mutedUntil! })),
     }
   }
 

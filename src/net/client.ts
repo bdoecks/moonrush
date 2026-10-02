@@ -636,6 +636,8 @@ function stopLoops() {
 }
 
 export const sendChat = (text: string) => send({ t: 'chat', text })
+/** Report a chat message to the admins. */
+export const reportChat = (from: string, time: number, text: string) => send({ t: 'report', from, time, text })
 
 /** Into the public World: signed in, you play under your account; as a guest you watch. */
 export function joinWorld() {

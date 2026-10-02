@@ -1,9 +1,10 @@
 import clsx from 'clsx'
-import { Copy, Crown, Globe, LogOut, Send, Users, Wifi, WifiOff } from 'lucide-react'
+import { Copy, Crown, EyeOff, Flag, Globe, LogOut, Send, Users, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { lengthTicks, MODES, ROUND_LENGTHS, type RoundLength } from '../game/progression'
 import { useGame } from '../game/store'
-import { joinRoom, joinWorld, leaveRoom, mpProfile, sendChat, setMpProfile, startRound } from '../net/client'
+import { joinRoom, joinWorld, leaveRoom, mpProfile, reportChat, sendChat, setMpProfile, startRound } from '../net/client'
+import { load, save } from '../utils/storage'
 import { WORLD_START_BALANCE } from '../net/protocol'
 import type { GameMode, MarketEngine } from '../types'
 import { EnginePicker } from './Modals'
@@ -256,11 +257,27 @@ function Chat() {
   const spectator = useGame((s) => !!s.online?.spectator)
   const chat = useGame((s) => s.online?.chat ?? [])
   const you = useGame((s) => s.online?.you)
+  const notify = useGame((s) => s.notify)
   const [text, setText] = useState('')
+  // Players you've hidden (only for you, kept in this browser) and messages you've reported.
+  const [hidden, setHidden] = useState<string[]>(() => load<string[]>('chatHidden') ?? [])
+  const [reported, setReported] = useState<string[]>([])
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
     box.current?.scrollTo({ top: box.current.scrollHeight })
   }, [chat.length])
+  const hide = (id: string, name: string) => {
+    const next = [...hidden, id]
+    setHidden(next)
+    save('chatHidden', next)
+    notify({ title: 'HIDDEN', body: `You won't see ${name}'s messages any more (only you; undo below the chat).`, tone: 'info', icon: '🙈' })
+  }
+  const report = (c: { from: string; time: number; text: string; name: string }) => {
+    reportChat(c.from, c.time, c.text)
+    setReported((r) => [...r, `${c.from}:${c.time}`])
+    notify({ title: 'REPORTED', body: `Thanks. An admin will look at ${c.name}'s message.`, tone: 'info', icon: '🚩' })
+  }
+  const shown = chat.filter((c) => !hidden.includes(c.from))
   const submit = () => {
     if (!text.trim()) return
     sendChat(text)
@@ -270,13 +287,28 @@ function Chat() {
     <div className="flex h-[300px] flex-col rounded-lg border border-line2">
       <div className="border-b border-line px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-muted">Chat</div>
       <div ref={box} className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 py-2 text-[12px]">
-        {chat.length === 0 && <div className="pt-6 text-center text-[11px] text-dim">Talk trash here. 🗣</div>}
-        {chat.map((c, i) => (
-          <div key={i} className="leading-snug">
-            <span className={clsx('font-semibold', c.from === you ? 'text-accent' : 'text-ink')}>{c.avatar} {c.name}</span> <span className="break-words text-muted">{c.text}</span>
-          </div>
-        ))}
+        {shown.length === 0 && <div className="pt-6 text-center text-[11px] text-dim">Talk trash here. 🗣</div>}
+        {shown.map((c, i) => {
+          const mine = c.from === you
+          const done = reported.includes(`${c.from}:${c.time}`)
+          return (
+            <div key={i} className="group/line leading-snug">
+              <span className={clsx('font-semibold', mine ? 'text-accent' : 'text-ink')}>{c.avatar} {c.name}</span> <span className="break-words text-muted">{c.text}</span>
+              {!mine && !spectator && (
+                <span className="ml-1 inline-flex gap-0.5 align-middle opacity-60 md:opacity-0 md:group-hover/line:opacity-100">
+                  <button onClick={() => report(c)} disabled={done} title={done ? 'Reported' : 'Report this message to the admins'} aria-label="Report message" className={clsx('rounded p-0.5', done ? 'text-warn' : 'text-dim hover:text-warn')}><Flag size={10} /></button>
+                  <button onClick={() => hide(c.from, c.name)} title={`Hide ${c.name}'s messages (only for you)`} aria-label="Hide this player's messages" className="rounded p-0.5 text-dim hover:text-ink"><EyeOff size={10} /></button>
+                </span>
+              )}
+            </div>
+          )
+        })}
       </div>
+      {hidden.length > 0 && (
+        <button onClick={() => { setHidden([]); save('chatHidden', []) }} className="border-t border-line px-3 py-1 text-left text-[10px] text-dim hover:text-ink">
+          {hidden.length} player{hidden.length > 1 ? 's' : ''} hidden · show again
+        </button>
+      )}
       {spectator ? (
         <div className="border-t border-line p-2 text-center text-[11px] text-dim">Sign in to chat</div>
       ) : <div className="flex gap-1 border-t border-line p-1.5">

@@ -2,7 +2,7 @@
 import { adminMarket, type AdminMarketAction } from '../game/marketEngine'
 import { useGame } from '../game/store'
 import type { Chain } from '../types'
-import type { RoomPlayer } from './protocol'
+import type { ChatReport, RoomPlayer } from './protocol'
 import { Rng } from '../utils/rng'
 import { accessToken } from './account'
 import { supabase } from './supabase'
@@ -15,6 +15,8 @@ export interface RoomSummary {
   emptySince: number | null
   coins: { id: string; ticker: string; emoji: string; chain: Chain; mcap: number; status: string; creator: string | null }[]
   sentiment: number
+  reports?: ChatReport[]
+  muted?: { id: string; name: string; until: number }[]
 }
 
 /** Call the game server's admin API with your login. */

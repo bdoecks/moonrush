@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { Ban, Crown, DoorClosed, Megaphone, RefreshCw, RotateCcw, ShieldCheck, UserX } from 'lucide-react'
+import { Ban, Crown, DoorClosed, Flag, Megaphone, MicOff, RefreshCw, RotateCcw, ShieldCheck, UserX } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { CHAIN_IDS, CHAINS } from '../data/chains'
 import { setFlag, useFlags, type GameFlags } from '../game/flags'
@@ -109,6 +109,43 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
             </span>
           }
         >
+          {/* Chat reports from players, and who is muted right now */}
+          {(r.reports?.length ?? 0) > 0 && (
+            <div className="mb-3 rounded-md border border-warn/30 bg-warn/5 p-2">
+              <div className="mb-1 flex items-center gap-1 text-[11px] font-bold text-warn"><Flag size={12} /> {r.reports!.length} chat report{r.reports!.length > 1 ? 's' : ''}</div>
+              <div className="space-y-1.5">
+                {r.reports!.map((rep) => (
+                  <div key={rep.id} className="rounded border border-line bg-bg px-2 py-1.5 text-[11px]">
+                    <div className="flex flex-wrap items-center gap-x-2">
+                      <span className="font-semibold">{rep.target.name}</span>
+                      <span className="text-dim">said</span>
+                      <span className="break-all text-ink">“{rep.text}”</span>
+                      <span className="ml-auto text-[10px] text-dim">reported by {rep.by.name}{rep.count > 1 ? ` +${rep.count - 1} more` : ''} · {fmtAge((Date.now() - rep.at) / 1000)} ago</span>
+                    </div>
+                    {rep.context.length > 1 && <div className="mt-0.5 truncate text-[10px] text-dim">Their recent messages: {rep.context.join(' · ')}</div>}
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {[[10, '10 min'], [60, '1 hour'], [1440, '24 hours']].map(([m, label]) => (
+                        <button key={m} onClick={async () => { if (await act({ action: 'mute', room: r.code, playerId: rep.target.id, minutes: m }, `Muted ${rep.target.name} for ${label}`)) void act({ action: 'dismissReport', room: r.code, id: rep.id }, 'Report cleared') }} className={clsx(btn, 'border-warn/50 text-warn hover:bg-warn/10')}>Mute {label}</button>
+                      ))}
+                      <button onClick={() => act({ action: 'kick', room: r.code, playerId: rep.target.id, reason: 'You were removed from the room by an admin' }, `Kicked ${rep.target.name}`)} className={clsx(btn, 'border-warn/50 text-warn hover:bg-warn/10')}>Kick</button>
+                      <button onClick={() => act({ action: 'dismissReport', room: r.code, id: rep.id }, 'Report cleared')} className={clsx(btn, 'ml-auto border-line2 text-muted hover:text-ink')}>Dismiss</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {(r.muted?.length ?? 0) > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="flex items-center gap-1 text-dim"><MicOff size={12} /> Muted:</span>
+              {r.muted!.map((m) => (
+                <span key={m.id} className="flex items-center gap-1 rounded border border-line2 px-1.5 py-0.5">
+                  {m.name} <span className="text-dim">({fmtAge((m.until - Date.now()) / 1000)} left)</span>
+                  <button onClick={() => act({ action: 'mute', room: r.code, playerId: m.id, minutes: 0 }, `Unmuted ${m.name}`)} className="text-accent hover:underline">unmute</button>
+                </span>
+              ))}
+            </div>
+          )}
           {!r.players.length ? <div className="text-[11px] text-dim">Nobody here.</div> : (
             <table className="w-full text-[12px]">
               <thead><tr className="text-left text-[10px] uppercase tracking-wider text-dim"><th className="py-1">Player</th><th>Status</th><th className="text-right">Portfolio</th><th className="text-right">Return</th><th className="text-right">Trades</th><th className="text-right">Actions</th></tr></thead>
@@ -131,6 +168,7 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
                         <span className="inline-flex flex-wrap items-center justify-end gap-1">
                           <input value={gift[p.id] ?? ''} onChange={(e) => setGift({ ...gift, [p.id]: e.target.value.replace(/[^0-9.-]/g, '') })} placeholder="$" className="num h-6 w-16 rounded border border-line2 bg-bg px-1 text-[11px] outline-none" />
                           <button disabled={!Number(gift[p.id])} onClick={() => act({ action: 'grant', room: r.code, playerId: p.id, usd: Number(gift[p.id]) }, `Gave ${p.name} ${fmtUsd(Number(gift[p.id]))}`)} className={clsx(btn, 'border-up/50 text-up hover:bg-up/10')}>Give $</button>
+                          <button onClick={() => act({ action: 'mute', room: r.code, playerId: p.id, minutes: 60 }, `Muted ${p.name} for 1 hour`)} className={clsx(btn, 'flex items-center gap-0.5 border-warn/50 text-warn hover:bg-warn/10')} title="Stop them chatting and posting for an hour"><MicOff size={10} /> Mute 1h</button>
                           <button onClick={() => confirm(`Reset ${p.name}'s wallet back to the start? Their coins and cash are gone. This can't be undone.`) && act({ action: 'reset', room: r.code, playerId: p.id }, `Reset ${p.name}'s wallet`)} className={clsx(btn, 'flex items-center gap-0.5 border-down/50 text-down hover:bg-down/10')}><RotateCcw size={10} /> Reset</button>
                           <button onClick={() => act({ action: 'kick', room: r.code, playerId: p.id, reason: 'You were removed from the room by an admin' }, `Kicked ${p.name}`)} className={clsx(btn, 'flex items-center gap-0.5 border-warn/50 text-warn hover:bg-warn/10')}><UserX size={10} /> Kick</button>
                           <button onClick={() => confirm(`Ban ${p.name}?${p.verified ? ' Their account can\'t join any room until you unban it (Accounts tab).' : ' (Guest: banned until the server restarts.)'}`) && adminBan(p, r.code)} className={clsx(btn, 'flex items-center gap-0.5 border-down/50 text-down hover:bg-down/10')}><Ban size={10} /> Ban</button>
@@ -381,6 +419,79 @@ function Accounts() {
   )
 }
 
+// ─── Player counters ─────────────────────────────────────────────────────────
+interface DayRow { day: string; players: number; new_accounts: number; avg_minutes: number; world_players: number; back_next_day: number; back_in_week: number }
+
+/** Players per day, time played, and how many come back (signed-in players; needs supabase/006_activity.sql). */
+function PlayerCounters() {
+  const [rows, setRows] = useState<DayRow[] | null>(null)
+  const [err, setErr] = useState('')
+  const load = useCallback(async () => {
+    if (!supabase) return setErr('Accounts are off')
+    const { data, error } = await supabase.rpc('activity_summary', { days: 14 })
+    if (error) return setErr(/activity_summary|schema cache|does not exist/i.test(error.message) ? 'setup' : error.message)
+    setErr('')
+    setRows(((data ?? []) as DayRow[]).map((r) => ({ ...r, players: +r.players, new_accounts: +r.new_accounts, avg_minutes: +r.avg_minutes, world_players: +r.world_players, back_next_day: +r.back_next_day, back_in_week: +r.back_in_week })))
+  }, [])
+  useEffect(() => void load(), [load])
+  const pct = (n: number, of: number) => (of > 0 ? `${Math.round((n / of) * 100)}%` : '—')
+  const today = new Date().toISOString().slice(0, 10)
+  const full = (rows ?? []).filter((r) => r.day !== today) // today isn't over yet
+  const avg = (f: (r: DayRow) => number) => (full.length ? full.reduce((a, r) => a + f(r), 0) / full.length : 0)
+  const withNext = full.filter((r) => r.players > 0 && r.day < today)
+  const d1 = withNext.length ? withNext.reduce((a, r) => a + r.back_next_day, 0) / Math.max(1, withNext.reduce((a, r) => a + r.players, 0)) : 0
+  return (
+    <Card title={<>📈 Players per day</>} right={<button onClick={() => void load()} className={clsx(btn, 'flex items-center gap-1 border-line2 text-muted hover:text-ink')}><RefreshCw size={11} /> Refresh</button>}>
+      {err === 'setup' ? (
+        <div className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+          One-time setup needed: open Supabase → SQL Editor, paste the contents of <b>supabase/006_activity.sql</b> and click Run. Counting starts from then.
+        </div>
+      ) : err ? (
+        <div className="text-[12px] text-down">{err}</div>
+      ) : !rows ? (
+        <div className="text-[12px] text-dim">Loading…</div>
+      ) : (
+        <>
+          <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[
+              ['Players / day (avg)', avg((r) => r.players).toFixed(1)],
+              ['Minutes / player (avg)', avg((r) => r.avg_minutes).toFixed(0)],
+              ['Come back next day', `${Math.round(d1 * 100)}%`],
+              ['New accounts (14d)', (rows ?? []).reduce((a, r) => a + r.new_accounts, 0)],
+            ].map(([l, v]) => (
+              <div key={l as string} className="rounded-md border border-line bg-bg px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wider text-dim">{l}</div>
+                <div className="num text-[20px] font-bold">{v}</div>
+              </div>
+            ))}
+          </div>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wider text-dim">
+                <th className="py-1">Day</th><th className="text-right">Players</th><th className="text-right">In the World</th><th className="text-right">New accounts</th><th className="text-right">Avg minutes</th><th className="text-right" title="Of that day's players, how many played again the next day">Back next day</th><th className="text-right" title="Of that day's players, how many played again within 7 days">Back within 7 days</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.day} className="border-t border-line/50">
+                  <td className="num py-1.5">{r.day}{r.day === today && <span className="ml-1 text-[10px] text-dim">(today so far)</span>}</td>
+                  <td className="num text-right font-semibold">{r.players}</td>
+                  <td className="num text-right">{r.world_players}</td>
+                  <td className="num text-right">{r.new_accounts}</td>
+                  <td className="num text-right">{r.avg_minutes}</td>
+                  <td className="num text-right">{r.day === today ? '—' : <>{r.back_next_day} <span className="text-dim">({pct(r.back_next_day, r.players)})</span></>}</td>
+                  <td className="num text-right">{r.back_in_week} <span className="text-dim">({pct(r.back_in_week, r.players)})</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-[10px] text-dim">Signed-in players only (guests aren't counted), measured while the game is open and on screen. "Come back next day" is the number to watch: under about 20% means people try it and leave; 30–40%+ is healthy for a game.</p>
+        </>
+      )}
+    </Card>
+  )
+}
+
 // ─── Switches & stats ────────────────────────────────────────────────────────
 function Switches({ rooms }: { rooms: RoomSummary[] }) {
   const flags = useFlags()
@@ -445,6 +556,7 @@ function Switches({ rooms }: { rooms: RoomSummary[] }) {
         </div>
         <p className="mt-2 text-[10px] text-dim">"Active" = signed-in players whose progress synced in that time. Guests aren't counted.</p>
       </Card>
+      <div className="lg:col-span-2"><PlayerCounters /></div>
     </div>
   )
 }

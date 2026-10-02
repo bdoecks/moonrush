@@ -9,6 +9,7 @@ import { Room, type RoomSnapshot } from './room'
 import { isBanned, nameTaken, verifyToken } from './auth'
 import { bannedGuests, handleAdmin } from './admin'
 import { deleteRoom, loadRoom, persistOn, saveRoom } from './persist'
+import { nameBlocked } from './moderation'
 
 /**
  * Who's joining: signed in (token checks out) → their account id and name; otherwise a guest, who can't use an
@@ -20,6 +21,7 @@ async function identify(msg: Extract<ClientMsg, { t: 'hello' }>): Promise<{ play
   if (v) return { playerId: `u-${v.id}`, name: v.username, avatar: String(msg.avatar || v.avatar).slice(0, 8), verified: true }
   const pid = String(msg.playerId).startsWith('u-') ? `g-${String(msg.playerId).slice(2, 14)}` : String(msg.playerId).slice(0, 64)
   let name = String(msg.name ?? '').trim().slice(0, 16) || 'Anon'
+  if (nameBlocked(name)) name = 'Anon'
   if (await nameTaken(name)) name = `${name.slice(0, 11)}_guest`
   return { playerId: pid, name, avatar: String(msg.avatar ?? '🐸').slice(0, 8), verified: false }
 }

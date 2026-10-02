@@ -135,7 +135,16 @@ async function heartbeat() {
   const uid = me()
   if (!supabase || !uid) return
   await supabase.from('presence').upsert({ user_id: uid, last_seen: new Date().toISOString(), room: useGame.getState().online?.code ?? null })
+  // Time played, for the admin's player counters (needs supabase/006_activity.sql; quietly does nothing without it).
+  // Only while the game is actually on screen, and only the time since the last beat.
+  const now = Date.now()
+  const secs = Math.round((now - lastBeat) / 1000)
+  lastBeat = now
+  if (document.visibilityState === 'visible' && secs > 0 && secs <= 120) {
+    void supabase.rpc('track_activity', { secs, in_world: !!useGame.getState().online?.round.world }).then(() => {}, () => {})
+  }
 }
+let lastBeat = Date.now()
 
 let timers: ReturnType<typeof setInterval>[] = []
 let unsubRoom: (() => void) | null = null

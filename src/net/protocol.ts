@@ -17,6 +17,17 @@ export const WORLD_BROKE_BELOW = 250
 export const WORLD_RESTART_BALANCE = 1_000
 export const WORLD_RESTART_EVERY_MS = 24 * 3600_000
 
+/** A chat message someone reported, as the admin sees it. */
+export interface ChatReport {
+  id: number
+  at: number // real time (ms)
+  by: { id: string; name: string }
+  target: { id: string; name: string }
+  text: string
+  context: string[] // the reported player's messages around it
+  count: number // how many different players reported this message
+}
+
 /** One player on the World leaderboards. */
 export interface BoardRow {
   id: string
@@ -129,6 +140,8 @@ export type ClientMsg =
   | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[]; addrs?: string[]; cbVolume?: number; cbAuto?: 'off' | 'coin' | 'usdc' }
   | { t: 'candles'; tokenId: string }
   | { t: 'board' } // World: ask for the leaderboards
+  // Report a chat message to the admins (`from` + `time` + `text` say which one).
+  | { t: 'report'; from: string; time: number; text: string }
   // Wallets (rooms). `seq` numbers every wallet message so the game knows which server answers are up to date.
   | { t: 'order'; seq: number; ref: number; order: OrderMsg }
   | { t: 'op'; seq: number; op: OpMsg }

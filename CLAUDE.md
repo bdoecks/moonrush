@@ -31,6 +31,8 @@ npx tsc --noEmit -p tsconfig.server.json    # the server
 npx tsx scripts/p2c-test.ts                 # 20 checks: server-run money (orders, cooking, bots, fees, cashback)
 npx tsx scripts/world-test.ts               # World rules: always on, guests watch, wallets kept, admin reset
 npx tsx scripts/bots-test.ts 2              # World bots over 2 simulated hours
+npx tsx scripts/safety-test.ts              # chat safety: filter, rate limit, mute, reports
+npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
 npx vite build                              # production build
 ```
@@ -106,16 +108,18 @@ Done: accounts (Supabase), friends and global leaderboard, admin panel, server-r
 the World saved across restarts, the World in admin preview, World bots, admin wallet resets, World leaderboards
 (net worth and this week's profit, `boardRows` / `sendBoard` in `server/room.ts`, `WorldBoard.tsx`), bankruptcy
 restart (op `bankrupt`: under $250 net worth, back to $1,000, once per 24h, losses carried in `pnlCarry`), Market
-Lighthouse, Convert, Instant Trade settings, Trenches display settings.
+Lighthouse, Convert, Instant Trade settings, Trenches display settings, phone layout, chat safety
+(`server/moderation.ts`: word filter, no links in the World, rate limit, strikes → auto-mute, reports, admin mute),
+player counters (`supabase/006_activity.sql`, `track_activity` / `activity_summary`, admin Switches & stats tab).
 
 Next, in order:
-1. Phone layout: the app lays out wider than a phone screen.
-2. Phase 3 safety before strangers: chat limits, reporting, blocked words, admin mute.
-3. Launch: Render Starter plan so the server never sleeps, then turn the `world` flag on.
+1. Launch: Render Starter plan so the server never sleeps, then turn the `world` flag on.
+2. Watch the player counters for a few weeks (the number that matters: how many come back the next day).
+3. If people come back: monetization, starting with cosmetics and a supporter pass. Never let in-game money cash
+   out to real money, and rename real third-party brand names (pump.fun, Raydium…) before charging anyone.
 4. Phase 4: ops and monitoring.
 
-Known gaps: cashback tier still comes from the client's reported volume (bounded 10–30%); the app lays out wider
-than a phone screen; real referral links (the old fake referrals are off, `REFERRALS_ENABLED`).
+Known gaps: cashback tier still comes from the client's reported volume (bounded 10–30%); real referral links (the old fake referrals are off, `REFERRALS_ENABLED`).
 
 ## Working with the owner
 
