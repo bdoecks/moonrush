@@ -17,6 +17,7 @@ import { FlowStats } from './token/FlowStats'
 import { RiskPanel } from './token/RiskPanel'
 import { TradePanel } from './token/TradePanel'
 import { Kbd, Pct } from './ui'
+import { LighthouseButton } from './Lighthouse'
 
 // ─── Bottom dock (tablet/desktop) ────────────────────────────────────────────
 export function Dock() {
@@ -169,6 +170,7 @@ export function StatusBar() {
       <span className="num">tick {tick}</span>
       <span className="num">{nTokens} tokens</span>
       <span className="num">{speed}× speed</span>
+      <LighthouseButton />
       <NativePrices />
       <PnlButton className="ml-auto h-5" />
       <span>Fictional tokens · virtual money · no real transactions</span>

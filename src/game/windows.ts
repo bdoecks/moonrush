@@ -1,10 +1,18 @@
 // Rolling 1m / 5m / 24h volume and txns, as exponentially-decaying sums (the 1h window is Token.volume/buys/sells).
-// A sum that decays by 1/N per tick holds about N ticks' worth of activity: 10 ticks = 1 minute, 50 = 5 minutes.
+// A sum that decays by 1/N per tick holds about N ticks' worth of activity, so N follows the market's clock:
+// Classic ticks are 6 game-seconds (10 ticks = 1 minute), Realistic ticks are 1 second (60 ticks = 1 minute).
 import type { Token, Win, WinStats } from '../types'
 
-const K1M = 1 - 1 / 10
-const K5M = 1 - 1 / 50
-const K24H = 1 - 1 / 14400
+let K1M = 1 - 1 / 10
+let K5M = 1 - 1 / 50
+let K24H = 1 - 1 / 14400
+
+/** Set by the market engine's `setClock`: how many game-seconds one tick is. */
+export function setWinClock(secPerTick: number) {
+  K1M = 1 - secPerTick / 60
+  K5M = 1 - secPerTick / 300
+  K24H = 1 - secPerTick / 86400
+}
 
 /** Estimate windows for a token that has none yet (new saves, fresh history) from its 1h numbers. */
 export function seedWin(t: Pick<Token, 'volume' | 'buys' | 'sells' | 'createdAt'>, now: number): WinStats {

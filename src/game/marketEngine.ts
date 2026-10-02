@@ -5,7 +5,7 @@ import type { Archetype, Candle, Chain, CookSpec, DevTrade, NativeQuote, MarketE
 import { TF_SECONDS, TIMEFRAMES } from '../types'
 import { clamp, Rng } from '../utils/rng'
 import { LAUNCHPADS, padFromId, padsFor } from '../data/launchpads'
-import { addWin, getWin, stepWin } from './windows'
+import { addWin, getWin, setWinClock, stepWin } from './windows'
 import { creatorRate, tradeFee } from './tradingEngine'
 import { curveAt, curveK, curveLiquidityUsd, gradMcapUsd, gradPriceNative, launchMcapUsd, migratedLiquidityUsd, migrationPriceNative, startPriceNative } from './curve'
 
@@ -22,6 +22,7 @@ export function setClock(secPerTick: number) {
   SIM_SEC_PER_TICK = secPerTick
   HOUR_TICKS = 3600 / secPerTick
   DECAY_1H = 1 - 1 / HOUR_TICKS
+  setWinClock(secPerTick)
 }
 export const SUPPLY = 1_000_000_000
 const MAX_CANDLES = 200
