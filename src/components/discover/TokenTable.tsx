@@ -52,7 +52,7 @@ export function TokenTable({ tokens, tf, sortKey, sortDir, onSort, cursor }: Pro
   const arrow = (k: SortKey) => sortKey === k && (sortDir === 'desc' ? <ChevronDown size={11} /> : <ChevronUp size={11} />)
   return (
     <div className="h-full overflow-auto">
-      <table className="w-full min-w-[980px] border-separate border-spacing-0 text-[12px]">
+      <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[12px] sm:min-w-[980px]">
         <thead className="sticky top-0 z-10 bg-panel">
           <tr>
             <th className="sticky left-0 z-20 w-8 border-b border-line bg-panel" />
@@ -135,12 +135,12 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
 
       {/* Pair info: picture, ticker + name, then age, chain and how many are watching. */}
       <td className={clsx('sticky left-8 z-[1] border-b border-line/60 px-2', py, active ? 'bg-raise' : 'bg-bg group-hover:bg-panel2')}>
-        <div className="flex min-w-[230px] items-center gap-2.5">
-          <TokenIcon token={t} size={compact ? 28 : 40} />
+        <div className="flex min-w-[132px] items-center gap-2 sm:min-w-[230px] sm:gap-2.5">
+          <TokenIcon token={t} size={compact ? 28 : 36} />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="text-[13px] font-bold text-ink">{t.ticker}</span>
-              <span className="max-w-[120px] truncate text-[11px] text-dim">{t.name}</span>
+              <span className="hidden max-w-[120px] truncate text-[11px] text-dim sm:inline">{t.name}</span>
               {held && <span className="rounded bg-accent/15 px-1 text-[9px] font-bold text-accent">HELD</span>}
               {t.hype > 75 && <span title="Social activity is spiking">🔥</span>}
             </div>
@@ -150,10 +150,10 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
               {t.status === 'bonding' && <span className="num rounded bg-warn/10 px-1 text-[9px] font-semibold text-warn" title="Bonding curve progress">{t.bondingProgress.toFixed(0)}%</span>}
               {t.status === 'rugged' && <span className="rounded bg-down/15 px-1 text-[9px] font-bold text-down">RUGGED</span>}
               {t.status === 'dead' && <span className="rounded bg-line2 px-1 text-[9px] font-bold text-muted">DEAD</span>}
-              <span className="flex items-center gap-0.5 text-dim" title="Watching (simulated)"><Eye size={10} /><span className="num">{watchers}</span></span>
+              <span className="hidden items-center gap-0.5 text-dim sm:flex" title="Watching (simulated)"><Eye size={10} /><span className="num">{watchers}</span></span>
             </div>
           </div>
-          <HideButton id={t.id} ticker={t.ticker} className={clsx('ml-auto', !hidden && 'md:opacity-0 md:group-hover:opacity-100')} />
+          <HideButton id={t.id} ticker={t.ticker} className={clsx('ml-auto hidden sm:block', !hidden && 'md:opacity-0 md:group-hover:opacity-100')} />
         </div>
       </td>
 

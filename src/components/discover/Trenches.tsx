@@ -266,7 +266,7 @@ export const Card = memo(function Card({ t, now, preview, col }: { t: Token; now
 
       {/* Holder / risk pills */}
       {audit && (
-        <div className="mt-1.5 flex min-h-[18px] flex-wrap items-center gap-1">
+        <div className={clsx('mt-1.5 flex min-h-[18px] flex-wrap items-center gap-1', !preview && 'pr-[84px] md:pr-0')}>
           {show('top10') && <Metric icon={<UserRound size={10} />} label="Top 10 holders" value={`${top10Of(t).toFixed(0)}%`} bad={top10Of(t) > 40} />}
           {show('dev') && <Metric icon={<ChefHat size={10} />} label="Dev holdings" value={`${devPctOf(t).toFixed(1)}%`} bad={devPctOf(t) > 8} />}
           {show('snipers') && <Metric icon={<Crosshair size={10} />} label="Snipers" value={String(t.snipers)} bad={t.snipers > 10} />}

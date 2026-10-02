@@ -138,13 +138,14 @@ export function TickerStrip() {
   return (
     // Only for screens too narrow for the top bar to hold everything: status and search move down here, and on
     // phones (no tab row) the chain filter too. Wide screens don't get this bar at all.
-    <div className={clsx('flex h-7 shrink-0 items-center border-b border-line bg-bg', !SHOW_MOVERS && 'xl:hidden')}>
-      <div className="flex items-center gap-1.5 px-2 lg:hidden">
+    <div className={clsx('no-scrollbar flex h-7 shrink-0 items-center overflow-x-auto border-b border-line bg-bg', !SHOW_MOVERS && 'xl:hidden')}>
+      <div className="flex shrink-0 items-center gap-1.5 px-2 lg:hidden">
         <MarketStatus />
         <RunClock />
       </div>
       <div className="flex h-full shrink-0 items-center border-r border-line px-2 md:hidden"><ChainSwitcher /></div>
-      <div className="flex h-full shrink-0 items-center border-r border-line px-1.5 xl:hidden"><GlobalSearch small className="w-40 transition-[width] focus-within:w-64 sm:w-48" /></div>
+      {/* The search box takes whatever room is left on a phone (and never forces the page wider). */}
+      <div className="flex h-full min-w-[96px] flex-1 items-center border-r border-line px-1.5 sm:flex-none xl:hidden"><GlobalSearch small className="w-full transition-[width] sm:w-48 sm:focus-within:w-64" /></div>
       {SHOW_MOVERS && <div className="hidden h-full items-center border-r border-line px-2 text-[9px] font-bold tracking-[0.2em] text-dim lg:flex">MOVERS 5M</div>}
       {SHOW_MOVERS && <div className="relative min-w-0 flex-1 overflow-hidden">
         <div className="marquee flex w-max gap-5 px-3">

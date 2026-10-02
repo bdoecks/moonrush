@@ -19,7 +19,8 @@ import { FriendsButton } from './Friends'
 
 const UNITS = ['usd', 'sol', 'bsc', 'hood'] as const
 
-export function Logo({ small }: { small?: boolean }) {
+/** `markOnPhone`: on a phone show only the moon mark (the top bar needs the room). */
+export function Logo({ small, markOnPhone }: { small?: boolean; markOnPhone?: boolean }) {
   return (
     <div className="flex items-center gap-2 select-none">
       <div className="relative grid size-7 place-items-center rounded-md bg-accent/10 ring-1 ring-accent/40">
@@ -29,7 +30,7 @@ export function Logo({ small }: { small?: boolean }) {
           <path d="M6 27 L13 20" stroke="var(--accent)" strokeWidth="2.6" strokeLinecap="round" />
         </svg>
       </div>
-      <div className="leading-none">
+      <div className={clsx('leading-none', markOnPhone && 'hidden sm:block')}>
         <div className="font-display text-[15px] font-bold tracking-[0.12em]">
           MOON<span className="text-accent">RUSH</span>
         </div>
@@ -150,8 +151,8 @@ export function TopBar() {
 
   return (
     <header className="shrink-0 border-b border-line bg-panel">
-    <div className="flex h-12 items-center gap-3 px-3">
-      <div className="shrink-0"><Logo /></div>
+    <div className="flex h-12 items-center gap-2 px-2 sm:gap-3 sm:px-3">
+      <div className="shrink-0"><Logo markOnPhone /></div>
       <GlobalSearch className="hidden w-52 shrink-0 transition-[width] focus-within:w-72 xl:block" />
       <div className="ml-auto hidden lg:flex items-center gap-2">
         <MarketStatus />
@@ -159,7 +160,7 @@ export function TopBar() {
       </div>
       <div className="shrink-0"><RoomChip /></div>
 
-      <div className="ml-auto lg:ml-3 flex min-w-0 items-center gap-4 overflow-hidden whitespace-nowrap">
+      <div className="ml-auto lg:ml-3 flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap sm:gap-4">
         <div className="text-right">
           <button onClick={cycleUnit} className="block w-full text-right text-[9px] uppercase tracking-wider text-dim hover:text-ink" title="Show in USD / SOL / BNB / ETH">Portfolio · {unit === 'usd' ? 'USD' : CHAINS[unit].native}</button>
           <FlashNum value={cv ? Math.round(cv.total * 1000) : Math.round(v.equity)} className="text-[14px] font-bold"><span title={cv ? `Your ${CHAINS[unit as Chain].native} wallet plus your ${CHAINS[unit as Chain].name} coins. USD bank (${fmtUsd(v.portfolio.cash)}) not included.` : undefined}>{cv ? coin(cv.total) : money(v.equity)}</span></FlashNum>
