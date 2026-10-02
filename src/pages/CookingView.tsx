@@ -10,8 +10,8 @@ import { useWallets } from '../hooks/useWallets'
 import { BUNDLE_WALLET_FEE, bundleDetectChance, STAGGER_FEE } from '../game/devTools'
 import { EmptyState, Segmented, TokenIcon } from '../components/ui'
 import { COOK_EMOJIS, NARRATIVES, narrativeLabel } from '../data/narratives'
-import { COOK_FEE, cookQuality, SUPPLY, vampBoost } from '../game/marketEngine'
-import { COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND, selectSpeed, useGame, validateCook } from '../game/store'
+import { COOK_FEE, cookAllowance, cookQuality, secPerTickOf, SUPPLY, vampBoost } from '../game/marketEngine'
+import { COOK_COOLDOWN_TICKS, GRAD_BONUS, selectSpeed, useGame, validateCook } from '../game/store'
 import { creatorRate, previewBuy, SWAP_FEE } from '../game/tradingEngine'
 import { curveAt, curveLiquidityUsd, gradMcapUsd, gradRaise, launchMcapUsd } from '../game/curve'
 import { defaultPad, LAUNCHPADS, padsFor } from '../data/launchpads'
@@ -59,6 +59,8 @@ export function CookingView() {
   const launches = useGame((s) => s.launches)
   const lastCookTick = useGame((s) => s.lastCookTick)
   const running = useGame((s) => s.runStatus === 'running')
+  const world = useGame((s) => !!s.online?.round.world)
+  const engine = useGame((s) => s.market.engine)
   const speed = useGame(selectSpeed)
   const cook = useGame((s) => s.cook)
   const select = useGame((s) => s.select)
@@ -121,10 +123,11 @@ export function CookingView() {
   const cost = usdCosts + (autoSwap ? devShortUsd / (1 - SWAP_FEE) : 0)
   const devBlocked = devShortUsd > 0 && (!autoSwap || cost > cash + 1e-9)
   const cooldown = Math.max(0, COOK_COOLDOWN_TICKS - (tick - lastCookTick))
+  const allow = cookAllowance(world, launches.map((l) => l.launchedTick), tick, secPerTickOf({ engine }))
   const error = validateCook(spec, tokens)
   const blocker = !running
     ? 'Start a round to cook'
-    : error ?? (launches.length >= MAX_COOKS_PER_ROUND ? `Max ${MAX_COOKS_PER_ROUND} launches this round` : cooldown > 0 ? `Kitchen cooling down (${cooldown}s)` : usdCosts > cash + 1e-9 ? `Need ${fmtUsd(usdCosts)} USD` : devBlocked ? `Not enough ${chainMeta.native}` : null)
+    : error ?? (allow.blocked ? allow.blocked : cooldown > 0 ? `Kitchen cooling down (${cooldown}s)` : usdCosts > cash + 1e-9 ? `Need ${fmtUsd(usdCosts)} USD` : devBlocked ? `Not enough ${chainMeta.native}` : null)
   // Dev buy is capped at ~$3K; with auto-swap your spare USD counts toward it.
   const spendable = nativeBal + (autoSwap ? (Math.max(0, cash - usdCosts) * (1 - SWAP_FEE)) / px : 0)
   const maxDev = Math.max(0, Math.min(3000 / px, spendable - bundleNative))
@@ -193,7 +196,7 @@ export function CookingView() {
             </button>
           )}
           <div className="ml-auto flex gap-4 text-right">
-            <MiniStat label="Launches">{launches.length}/{MAX_COOKS_PER_ROUND}</MiniStat>
+            <MiniStat label={allow.per === 'hour' ? 'Launches this hour' : 'Launches'}>{allow.used}/{allow.max}</MiniStat>
             <MiniStat label="Creator earnings"><span className="text-up">{fmtUsd(totalEarned)}</span></MiniStat>
             <MiniStat label="Kitchen">{cooldown > 0 ? <span className="text-warn">{cooldown}s</span> : <span className="text-up">Ready</span>}</MiniStat>
           </div>

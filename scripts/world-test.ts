@@ -2,6 +2,7 @@
 import { Room } from '../server/room'
 import { WORLD_CODE, WORLD_START_BALANCE, type ServerMsg } from '../src/net/protocol'
 import { BOT_ROSTER } from '../server/bots'
+import { cookAllowance } from '../src/game/marketEngine'
 
 const ok = (cond: boolean, what: string) => console.log(`${cond ? 'PASS' : 'FAIL'} ${what}`)
 const sock = (box: ServerMsg[]) => ({ readyState: 1, send: (d: string) => box.push(JSON.parse(d)), close() {} }) as never
@@ -109,6 +110,15 @@ const t1 = Date.now()
 for (let i = 0; i < 3000; i++) b.tick()
 const live = b.market.tokens.filter((t) => t.status === 'bonding' || t.status === 'graduated').length
 ok(b.market.tokens.length < 400, `after 3000 more ticks: ${b.market.tokens.length} coins (${live} live), ${((Date.now() - t1) / 3000).toFixed(1)} ms/tick`)
+// Launch limits: per round in rooms, per rolling hour in the World (it never ends a round).
+{
+  const ten = Array.from({ length: 10 }, (_, i) => 1000 + i * 60)
+  ok(cookAllowance(false, Array(8).fill(0), 5000, 1).blocked !== null && cookAllowance(false, Array(7).fill(0), 5000, 1).blocked === null, 'rooms: 8 launches per round')
+  ok(cookAllowance(true, Array.from({ length: 9 }, (_, i) => i), 100_000, 1).blocked === null, 'World: 9 old launches do not count against you')
+  const full = cookAllowance(true, ten, 1700, 1)
+  ok(!!full.blocked && full.used === 10 && /next one in \d+ min/.test(full.blocked), `World: 10 in the last hour blocks the 11th ("${full.blocked}")`)
+  ok(cookAllowance(true, ten, 1000 + 3600, 1).blocked === null, 'World: the oldest launch ages out after an hour')
+}
 world.dispose()
 back.dispose()
 process.exit(0)

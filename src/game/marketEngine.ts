@@ -1056,6 +1056,21 @@ export const COOK_FEE = 25
 export const GRAD_BONUS = 250 // USD paid to a coin's creator when it graduates
 export const COOK_COOLDOWN_TICKS = 30
 export const MAX_COOKS_PER_ROUND = 8
+// The World never ends a round, so a per-round cap would be a cap for life. There it's launches per hour instead.
+export const WORLD_COOKS_PER_HOUR = 10
+
+/** How many launches you have left: per round, or in the World per rolling hour of game time. */
+export function cookAllowance(world: boolean, launchTicks: number[], tick: number, secPerTick: number) {
+  if (!world) {
+    const used = launchTicks.length
+    return { used, max: MAX_COOKS_PER_ROUND, per: 'round', blocked: used >= MAX_COOKS_PER_ROUND ? `Max ${MAX_COOKS_PER_ROUND} launches per round` : null }
+  }
+  const hour = 3600 / secPerTick
+  const recent = launchTicks.filter((t) => tick - t < hour).sort((a, b) => a - b)
+  const used = recent.length
+  const waitMin = used >= WORLD_COOKS_PER_HOUR ? Math.max(1, Math.ceil(((recent[0] + hour - tick) * secPerTick) / 60)) : 0
+  return { used, max: WORLD_COOKS_PER_HOUR, per: 'hour', blocked: waitMin ? `${WORLD_COOKS_PER_HOUR} launches an hour: next one in ${waitMin} min` : null }
+}
 
 /**
  * How appealing a launch looks to the (simulated) market, 0..1. Deterministic; the actual launch adds luck.

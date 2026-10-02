@@ -2,7 +2,7 @@
 // The market code is the same the single-player game runs. The server is the judge of every player's wallets: orders,
 // cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
-import { adminMarket, type AdminMarketAction, rebuildCandlesFor, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookToken, GRAD_BONUS, MAX_COOKS_PER_ROUND, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
+import { adminMarket, type AdminMarketAction, rebuildCandlesFor, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
 import { BOT_BUST_USD, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, mirrorWallet, pickCoin, STYLE, type BotBrain } from './bots'
 import { generatedLaunch } from '../src/data/tokens'
 import { valuePortfolio } from '../src/game/portfolioEngine'
@@ -65,6 +65,7 @@ interface Member {
   cbAuto?: 'off' | 'coin' | 'usdc'
   cooks?: number // coins cooked this round
   lastCookTick?: number
+  cookTicks?: number[] // the World: when their recent launches were (the hourly limit)
   brain?: BotBrain // World bots only
   // World leaderboards: where this week's profit is measured from, and bankruptcy restarts.
   weekBase?: { week: number; pnl: number }
@@ -165,7 +166,7 @@ export class Room {
       lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()], reports: this.reports.slice(0, 100),
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: m.info.bot ? m.info.online : false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
-        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, brain: m.brain,
+        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, brain: m.brain,
         weekBase: m.weekBase, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
       })),
     }
@@ -473,6 +474,7 @@ export class Room {
       m.cashback = undefined
       m.cooks = 0
       m.lastCookTick = undefined
+      m.cookTicks = undefined
     }
     this.broadcast({ t: 'round', round: this.round, market: this.netMarket(), wallets: round(this.wallets) as SimWallet[] })
     for (const m of this.members.values()) this.sendWallet(m)
@@ -640,7 +642,8 @@ export class Room {
     const money = msg.money
     if (!w || !money || !msg.token?.id) return fail('No round running')
     if (this.market.tokens.some((x) => x.id === msg.token.id)) return fail('That coin already exists')
-    if ((me.cooks ?? 0) >= MAX_COOKS_PER_ROUND) return fail(`Max ${MAX_COOKS_PER_ROUND} launches per round`)
+    const limit = cookAllowance(this.world, this.world ? (me.cookTicks ?? []) : Array(me.cooks ?? 0).fill(0), this.market.tick, secPerTickOf(this.market))
+    if (limit.blocked) return fail(limit.blocked)
     if (this.market.tick - (me.lastCookTick ?? -999) < COOK_COOLDOWN_TICKS) return fail('Kitchen cooling down')
     const chain = msg.token.chain
     const px = nativePrice(this.market, chain)
@@ -654,6 +657,7 @@ export class Room {
 
     me.cooks = (me.cooks ?? 0) + 1
     me.lastCookTick = this.market.tick
+    if (this.world) me.cookTicks = [...(me.cookTicks ?? []).filter((t) => this.market.tick - t < 3600 / secPerTickOf(this.market)), this.market.tick]
     me.wallet = { ...w, cash: w.cash - usdCosts, feesPaid: w.feesPaid + COOK_FEE + bundleFees }
     const token: NetToken = { ...msg.token, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, tape: msg.token.tape ?? [], status: 'bonding', creatorFees: 0 }
     this.market = { ...this.market, tokens: [token, ...this.market.tokens] }

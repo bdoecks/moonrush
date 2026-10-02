@@ -11,7 +11,7 @@ import { createChallenges, evaluateChallenges, type ChallengeContext } from './c
 import { rollEvents } from './eventEngine'
 import { createRivals, tickRivals } from './leaderboardEngine'
 import { freshSeason, isRanked, placementPoints, seasonNumber, tierFor, type SeasonState } from './season'
-import { candleStore, COOK_FEE, cookToken, COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, SUPPLY, tickMarket, walletName } from './marketEngine'
+import { candleStore, COOK_FEE, cookAllowance, cookToken, COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, SUPPLY, tickMarket, walletName } from './marketEngine'
 import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
 import { lengthTicks, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS, type RoundLength } from './progression'
@@ -1496,7 +1496,8 @@ export const useGame = create<GameState>()((set, get) => {
       if (s.runStatus !== 'running') return fail('Start a round to launch tokens')
       const err = validateCook(spec, s.market.tokens)
       if (err) return fail(err)
-      if (s.launches.length >= MAX_COOKS_PER_ROUND) return fail(`Max ${MAX_COOKS_PER_ROUND} launches per round`)
+      const limit = cookAllowance(!!s.online?.round.world, s.launches.map((l) => l.launchedTick), s.market.tick, secPerTickOf(s.market))
+      if (limit.blocked) return fail(limit.blocked)
       if (s.market.tick - s.lastCookTick < COOK_COOLDOWN_TICKS) return fail(`Kitchen cooling down — ${COOK_COOLDOWN_TICKS - (s.market.tick - s.lastCookTick)}s`)
       // Launch fee + marketing are paid in USD; the dev buy is paid in the chain's coin (auto-swapped if enabled).
       const bundle = spec.bundle ?? { wallets: 0, perWallet: 0, stagger: false }
