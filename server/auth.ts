@@ -50,9 +50,11 @@ export async function isAdmin(token: string | undefined): Promise<boolean> {
   if (!token) return false
   const hit = adminCache.get(token)
   if (hit && hit.until > Date.now()) return hit.ok
-  const v = await verifyToken(token)
-  let ok = false
-  if (v) {
+  // Only a clear answer from the database is remembered: a slow or failed check (Supabase busy, the server just
+  // restarted) used to be remembered as "no" for 5 minutes and locked the admin out. Now it's simply asked again.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const v = await verifyToken(token)
+    if (!v) continue
     try {
       const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/is_admin`, {
         method: 'POST',
@@ -60,13 +62,15 @@ export async function isAdmin(token: string | undefined): Promise<boolean> {
         body: '{}',
         signal: AbortSignal.timeout(TIMEOUT),
       })
-      ok = res.ok && (await res.json()) === true
+      if (!res.ok) continue
+      const ok = (await res.json()) === true
+      adminCache.set(token, { ok, until: Date.now() + 5 * 60_000 })
+      return ok
     } catch {
-      ok = false
+      // try once more
     }
   }
-  adminCache.set(token, { ok, until: Date.now() + 5 * 60_000 })
-  return ok
+  return false
 }
 
 /** Banned accounts can't join rooms. */
