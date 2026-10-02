@@ -2,6 +2,7 @@ import clsx from 'clsx'
 import { Bell, BellOff, ChevronDown, ChevronUp, Crown, Send, Timer, X } from 'lucide-react'
 import { SendFundsModal } from '../components/SendFunds'
 import { GlobalBoard } from '../components/GlobalBoard'
+import { WorldBoard } from '../components/WorldBoard'
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { EmptyState, TokenIcon } from '../components/ui'
 import { ChainBadge } from '../components/chain'
@@ -51,7 +52,8 @@ export function LeaderboardView() {
   const [key, setKey] = useState<Key>('rank')
   const [dir, setDir] = useState<1 | -1>(1)
   const [profileId, setProfileId] = useState<string | null>(null)
-  const [board, setBoard] = useState<'round' | 'global'>('round')
+  const inWorld = useGame((s) => !!s.online?.round.world)
+  const [board, setBoard] = useState<'world' | 'round' | 'global'>(inWorld ? 'world' : 'round')
   const roomCode = useGame((s) => s.online?.code)
   const setView = useGame((s) => s.setView)
   useEffect(() => checkSeason(), [checkSeason])
@@ -100,16 +102,17 @@ export function LeaderboardView() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-[1400px] space-y-3 p-3">
-        <SeasonHero points={points} rounds={season?.id === seasonNumber() ? season.rounds : 0} bestRank={season?.id === seasonNumber() ? season.bestRank : null} firsts={season?.id === seasonNumber() ? season.firsts : 0} badges={badges ?? []} />
+        {/* The weekly season belongs to ranked rounds; the World has its own boards. */}
+        {!(board === 'world' && inWorld) && <SeasonHero points={points} rounds={season?.id === seasonNumber() ? season.rounds : 0} bestRank={season?.id === seasonNumber() ? season.bestRank : null} firsts={season?.id === seasonNumber() ? season.firsts : 0} badges={badges ?? []} />}
 
         <div className="flex gap-1">
-          {(['round', 'global'] as const).map((b) => (
+          {((inWorld ? ['world', 'round', 'global'] : ['round', 'global']) as ('world' | 'round' | 'global')[]).map((b) => (
             <button key={b} onClick={() => setBoard(b)} className={clsx('rounded-md border px-3 py-1 text-[12px] font-bold', board === b ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')}>
-              {b === 'round' ? '🏁 This round' : '🌐 Global season'}
+              {b === 'world' ? '🌍 World' : b === 'round' ? (inWorld ? '🟢 Online now' : '🏁 This round') : '🌐 Global season'}
             </button>
           ))}
         </div>
-        {board === 'global' ? <GlobalBoard /> : <>
+        {board === 'world' && inWorld ? <WorldBoard /> : board === 'global' ? <GlobalBoard /> : <>
         {/* Round status */}
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-line bg-panel px-4 py-2.5">
           <div>

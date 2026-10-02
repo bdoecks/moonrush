@@ -9,6 +9,7 @@ import { valuePortfolio } from '../src/game/portfolioEngine'
 import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
 import { POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
+import { seasonNumber } from '../src/game/season'
 import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
 import { accountOf } from '../src/game/accounts'
 import { nativePrice } from '../src/game/tradingEngine'
@@ -20,7 +21,7 @@ import { airdropFeePerWallet, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBot
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
-import { WORLD_START_BALANCE, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
+import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, type BoardMsg, type BoardRow, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
@@ -64,6 +65,11 @@ interface Member {
   cooks?: number // coins cooked this round
   lastCookTick?: number
   brain?: BotBrain // World bots only
+  // World leaderboards: where this week's profit is measured from, and bankruptcy restarts.
+  weekBase?: { week: number; pnl: number }
+  lastRestart?: number // real time (ms)
+  restarts?: number
+  pnlCarry?: number // profit / loss from before their last restart (a restart doesn't wipe your record)
 }
 
 /** A coin a player cooked: who, the dev wallet that pays its bot and earns its fees, and its creator-fee vault. */
@@ -150,6 +156,7 @@ export class Room {
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: m.info.bot ? m.info.online : false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
         cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, brain: m.brain,
+        weekBase: m.weekBase, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry,
       })),
     }
   }
@@ -249,7 +256,7 @@ export class Room {
   handle(playerId: string, msg: ClientMsg) {
     const me = this.members.get(playerId)
     if (!me) return
-    if (me.info.spectator && msg.t !== 'candles') return // watching only
+    if (me.info.spectator && msg.t !== 'candles' && msg.t !== 'board') return // watching only
     switch (msg.t) {
       case 'start':
         if (this.world) return this.sendTo(playerId, { t: 'error', message: 'The World never stops: no new rounds here' })
@@ -285,6 +292,8 @@ export class Room {
         if (msg.cbAuto === 'off' || msg.cbAuto === 'coin' || msg.cbAuto === 'usdc') me.cbAuto = msg.cbAuto
         this.playersDirty = true
         return
+      case 'board':
+        return this.sendBoard(me)
       case 'candles':
         return this.sendTo(playerId, { t: 'candles', tokenId: msg.tokenId, candles: candleStore.get(msg.tokenId) ?? null })
       case 'event': {
@@ -464,6 +473,8 @@ export class Room {
       } else if (o.kind === 'transfer') {
         const r = runTransfer(w, String(o.fromId), String(o.toId), o.chain, Number(o.amount) || 0, this.market.tick)
         if (r.ok) me.wallet = r.portfolio
+      } else if (o.kind === 'bankrupt') {
+        return this.bankrupt(me)
       } else if (o.kind === 'claimFees') {
         // Creator fees: each coin's vault goes to its dev wallet.
         const only = Array.isArray(o.tokenIds) ? new Set(o.tokenIds.map(String)) : null
@@ -977,7 +988,8 @@ export class Room {
         this.playersDirty = true
         const liveBags = Object.keys(m.wallet!.positions).filter((id) => { const t = byId.get(id); return t && (t.status === 'bonding' || t.status === 'graduated') })
         if (!liveBags.length && v.equity < BOT_BUST_USD) {
-          // Broke: start over small, like a real player would.
+          // Broke: start over small, like a real player would (the loss stays on their record).
+          m.pnlCarry = (m.pnlCarry ?? 0) + (v.equity - m.wallet!.startBalance)
           m.wallet = freshWallet(BOT_RESTART_USD, m.layout)
           b.entries = {}
           b.cooked = {}
@@ -1084,6 +1096,70 @@ export class Room {
     return true
   }
 
+  // ─── World leaderboards and bankruptcy ───────────────────────────────────────
+  private boardCache: { at: number; rows: BoardRow[] } | null = null
+
+  /** Everyone with a wallet here, valued now (kept for a few seconds: it's asked for often). */
+  private boardRows(): BoardRow[] {
+    if (this.boardCache && Date.now() - this.boardCache.at < 8000) return this.boardCache.rows
+    const byId = new Map(this.market.tokens.map((t) => [t.id, t]))
+    const week = seasonNumber()
+    const rows: BoardRow[] = []
+    for (const m of this.members.values()) {
+      if (m.info.spectator || !m.wallet) continue
+      const equity = valuePortfolio(m.wallet, byId, this.market).equity
+      // Deposits, gifts and transfers move startBalance, so this is trading profit; losses from before a restart carry over.
+      const pnl = equity - m.wallet.startBalance + (m.pnlCarry ?? 0)
+      // A new week (or a new player) starts counting from where they stand now.
+      if (m.weekBase?.week !== week) m.weekBase = { week, pnl: m.weekBase ? pnl : 0 }
+      rows.push({
+        id: m.info.id, name: m.info.name, avatar: m.info.avatar, level: m.info.level, online: m.info.online, verified: m.info.verified, bot: m.info.bot,
+        equity, pnl, week: pnl - m.weekBase.pnl, restarts: m.restarts ?? m.brain?.busts ?? 0,
+      })
+    }
+    this.boardCache = { at: Date.now(), rows }
+    return rows
+  }
+
+  private sendBoard(me: Member) {
+    if (!this.world) return
+    const rows = this.boardRows()
+    const worth = [...rows].sort((a, b) => b.equity - a.equity)
+    const weekly = [...rows].sort((a, b) => b.week - a.week)
+    const mine = rows.find((r) => r.id === me.info.id)
+    const next = (me.lastRestart ?? 0) + WORLD_RESTART_EVERY_MS
+    const msg: BoardMsg = {
+      t: 'board', week: seasonNumber(), total: rows.length, worth: round(worth.slice(0, 100)) as BoardRow[], weekly: round(weekly.slice(0, 100)) as BoardRow[],
+      ...(mine ? { me: { row: round(mine) as BoardRow, worthRank: worth.indexOf(mine) + 1, weekRank: weekly.indexOf(mine) + 1, restartAt: next > Date.now() ? next : null } } : {}),
+    }
+    this.sendTo(me.info.id, msg)
+  }
+
+  /** Broke in the World: wipe the wallet and start over small. Only when nearly out, and once a day. */
+  private bankrupt(me: Member) {
+    const say = (message: string) => this.sendTo(me.info.id, { t: 'error', message })
+    const w = this.walletOf(me)
+    if (!this.world || !w) return say('Restarts are only for the World')
+    const equity = valuePortfolio(w, new Map(this.market.tokens.map((t) => [t.id, t])), this.market).equity
+    if (equity >= WORLD_BROKE_BELOW) {
+      this.sendWallet(me)
+      return say(`A restart is for when you're broke: your net worth has to be under $${WORLD_BROKE_BELOW}`)
+    }
+    const wait = (me.lastRestart ?? 0) + WORLD_RESTART_EVERY_MS - Date.now()
+    if (wait > 0) {
+      this.sendWallet(me)
+      return say(`You can restart once every 24 hours. Next one in ${Math.ceil(wait / 3600_000)}h`)
+    }
+    me.pnlCarry = (me.pnlCarry ?? 0) + (equity - w.startBalance) // what you lost stays on your record
+    me.wallet = freshWallet(WORLD_RESTART_BALANCE, me.layout)
+    me.cashback = undefined
+    me.lastRestart = Date.now()
+    me.restarts = (me.restarts ?? 0) + 1
+    for (const c of this.cooked.values()) if (c.pid === me.info.id) c.vault = 0
+    this.boardCache = null
+    this.sendTo(me.info.id, { t: 'wallet', ack: me.ack, state: { ...walletStateOf(me.wallet), cashback: { sol: 0, bsc: 0, hood: 0 } }, reset: true, note: `Fresh start: you're back in with $${WORLD_RESTART_BALANCE.toLocaleString('en-US')}. Next restart available in 24 hours.` })
+  }
+
   /** Gifts an admin sent to signed-in players here: claimed by the server and added to their round's wallet. */
   async pullGifts() {
     if (this.round.state !== 'running') return
@@ -1108,6 +1184,9 @@ export class Room {
       if (m.info.spectator || (playerId && m.info.id !== playerId)) continue
       m.wallet = freshWallet(this.startBalance(), m.layout)
       m.cashback = undefined
+      m.weekBase = undefined
+      m.pnlCarry = undefined
+      this.boardCache = null
       for (const c of this.cooked.values()) if (c.pid === m.info.id) c.vault = 0
       if (m.brain) {
         // A bot starts over too: fresh memory, and its public wallet shows the reset.
@@ -1127,7 +1206,12 @@ export class Room {
     const m = this.members.get(playerId)
     if (!m) return false
     const w = this.walletOf(m)
-    if (w) m.wallet = addFunds(w, asset, amount)
+    // A gift counts as money put in (like a deposit), so it doesn't show up as trading profit on the leaderboards.
+    if (w) {
+      const usd = asset === 'usd' ? amount : amount * nativePrice(this.market, asset)
+      const next = addFunds(w, asset, amount)
+      m.wallet = { ...next, startBalance: next.startBalance + usd }
+    }
     this.sendTo(playerId, { t: 'grant', usd: asset === 'usd' ? amount : 0, asset, amount })
     this.sendWallet(m)
     return true

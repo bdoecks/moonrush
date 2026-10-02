@@ -12,6 +12,34 @@ export const MP_PATH = '/mp'
 export const WORLD_CODE = 'WORLD'
 /** What a new player starts with in the World (USD). */
 export const WORLD_START_BALANCE = 10_000
+/** Going broke in the World: below this net worth you can restart with `WORLD_RESTART_BALANCE`, once every `WORLD_RESTART_EVERY_MS`. */
+export const WORLD_BROKE_BELOW = 250
+export const WORLD_RESTART_BALANCE = 1_000
+export const WORLD_RESTART_EVERY_MS = 24 * 3600_000
+
+/** One player on the World leaderboards. */
+export interface BoardRow {
+  id: string
+  name: string
+  avatar: string
+  level: number
+  online: boolean
+  verified?: boolean
+  bot?: boolean
+  equity: number // net worth now (USD + coins + bags)
+  pnl: number // all-time profit: net worth minus everything put in
+  week: number // profit since this week began (or since they joined, if later)
+  restarts: number // bankruptcy restarts taken
+}
+/** The World leaderboards: the top of each list, where you stand, and when you may next restart. */
+export interface BoardMsg {
+  t: 'board'
+  week: number // the week number (same as the season)
+  total: number // players ranked
+  worth: BoardRow[] // by net worth
+  weekly: BoardRow[] // by this week's profit
+  me?: { row: BoardRow; worthRank: number; weekRank: number; restartAt: number | null } // restartAt: real time (ms) you can next restart, null = now
+}
 
 export interface RoomPlayer {
   id: string
@@ -78,6 +106,7 @@ export type OpMsg =
   | { kind: 'convert'; from: Asset; to: Asset; amount: number; fromWallet: string; toWallet: string } // any asset / wallet → any asset / wallet
   | { kind: 'claimFees'; tokenIds?: string[] } // creator fees from your coins' vaults, into each coin's dev wallet
   | { kind: 'cashback'; chains: Chain[]; as: 'coin' | 'usdc' }
+  | { kind: 'bankrupt' } // World: broke, start over with the restart balance (once a day)
 
 /** What a launch costs and buys: the server charges it and runs the dev buy / bundle on your wallet. */
 export interface CookMoney {
@@ -99,6 +128,7 @@ export type ClientMsg =
   | { t: 'bot'; tokenId: string; bot: VolumeBot | null }
   | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[]; addrs?: string[]; cbVolume?: number; cbAuto?: 'off' | 'coin' | 'usdc' }
   | { t: 'candles'; tokenId: string }
+  | { t: 'board' } // World: ask for the leaderboards
   // Wallets (rooms). `seq` numbers every wallet message so the game knows which server answers are up to date.
   | { t: 'order'; seq: number; ref: number; order: OrderMsg }
   | { t: 'op'; seq: number; op: OpMsg }
@@ -143,7 +173,8 @@ export type ServerMsg =
   | { t: 'notice'; text: string }
   // Your wallets as the server has them, after it handled your message number `ack` (and the order `ref`'s fills).
   // `reset`: an admin wiped your wallet back to the start (applied right away, trade history cleared).
-  | { t: 'wallet'; ack: number; state: WalletState; ref?: number; fills?: import('../types').Trade[]; failures?: string[]; reset?: boolean }
+  | { t: 'wallet'; ack: number; state: WalletState; ref?: number; fills?: import('../types').Trade[]; failures?: string[]; reset?: boolean; note?: string }
+  | BoardMsg
   | { t: 'kicked'; reason: string }
   | { t: 'grant'; usd: number; asset?: 'usd' | 'sol' | 'bsc' | 'hood'; amount?: number }
   | { t: 'sendResult'; ref: number; ok: boolean; error?: string; toName?: string }

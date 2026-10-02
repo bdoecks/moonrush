@@ -17,6 +17,7 @@ import { accessToken, accountPlayerId, useAccount } from './account'
 import { giveLocal } from '../game/gifts'
 import { diffWallet, layoutOf, mergeWalletState } from '../game/orders'
 import { cashbackOf } from '../game/rewardsEngine'
+import { useWorldBoard } from './worldBoard'
 import { MP_PATH, WORLD_CODE, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TransferMsg } from './protocol'
 
 const STATUS_MS = 2000
@@ -241,7 +242,8 @@ function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
   if (msg.reset) {
     const fresh = newPortfolio(msg.state.startBalance ?? s.portfolio.startBalance)
     quietly(() => s.patchState({ portfolio: mergeWalletState({ ...fresh, accounts: msg.state.accounts, active: msg.state.active }, msg.state), launches: [], copies: [], sideQueue: [], rewards: { ...s.rewards, cashback: { ...cashbackOf(s.rewards), pending: { sol: 0, bsc: 0, hood: 0 } } } }))
-    s.notify({ title: 'WALLET RESET', body: `An admin reset your wallet. You're starting fresh with ${fmtUsd(msg.state.cash, 0)}.`, tone: 'warn', icon: '🔄' }, 'alert')
+    s.notify(msg.note ? { title: 'FRESH START', body: msg.note, tone: 'info', icon: '🌱' } : { title: 'WALLET RESET', body: `An admin reset your wallet. You're starting fresh with ${fmtUsd(msg.state.cash, 0)}.`, tone: 'warn', icon: '🔄' }, 'alert')
+    useGame.getState().requestBoard()
     return
   }
   let p = s.portfolio
@@ -320,6 +322,8 @@ function onMessage(msg: ServerMsg) {
       return onRecv(msg)
     case 'wallet':
       return onWallet(msg)
+    case 'board':
+      return useWorldBoard.setState({ board: msg })
     case 'notice':
       return st.notify({ title: 'ANNOUNCEMENT', body: msg.text, tone: 'info', icon: '📢' }, 'alert')
     case 'kicked':

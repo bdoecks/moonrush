@@ -322,6 +322,10 @@ export interface GameState {
   swapAssets: (from: Asset, to: Asset, amount: number, walletId?: string) => boolean
   /** Convert any asset in one wallet into any asset in another (USD is the shared bank). */
   convertAssets: (from: Asset, to: Asset, amount: number, fromWallet: string, toWallet: string) => boolean
+  /** World: ask the server for the leaderboards. */
+  requestBoard: () => void
+  /** World: you're broke; ask the server for a fresh start (it checks you really are, and the once-a-day limit). */
+  bankruptRestart: () => void
   // Multi-wallet (GMGN-style)
   createWallet: (name: string, emoji: string) => string | null
   updateWallet: (id: string, patch: { name?: string; emoji?: string }) => void
@@ -1683,6 +1687,14 @@ export const useGame = create<GameState>()((set, get) => {
       s.notify({ title: 'SWAPPED', body: `${label(from, amount)} → ${label(to, res.received)}`, tone: 'info', icon: '🔄' }, 'click')
       persist()
       return true
+    },
+    requestBoard: () => {
+      if (get().online?.round.world) netHooks.send?.({ t: 'board' })
+    },
+    bankruptRestart: () => {
+      const s = get()
+      if (!s.online?.round.world || watchingOnly()) return
+      netHooks.op?.({ kind: 'bankrupt' })
     },
     convertAssets: (from, to, amount, fromWallet, toWallet) => {
       if (watchingOnly()) return false

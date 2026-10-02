@@ -26,6 +26,7 @@ import { TrackView } from './pages/TrackView'
 import { AdminView } from './pages/AdminView'
 import { NoticeBanner } from './components/NoticeBanner'
 import { WatchBanner } from './components/Multiplayer'
+import { BrokeBanner } from './components/WorldBoard'
 import { AdminFloat } from './components/AdminFloat'
 import { watchFlags } from './game/flags'
 import { DiscoverView } from './pages/DiscoverView'
@@ -105,6 +106,7 @@ export default function App() {
       <TopBar />
       <NoticeBanner />
       <WatchBanner />
+      <BrokeBanner />
       <AdminFloat />
       <TickerStrip />
       <div className="flex min-h-0 flex-1">

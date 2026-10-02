@@ -103,13 +103,16 @@ Every line of the test scripts prints PASS or FAIL. Add checks there when you ad
 ## Where the project is
 
 Done: accounts (Supabase), friends and global leaderboard, admin panel, server-run money (Phase 2), rooms and
-the World saved across restarts, the World in admin preview, World bots, admin wallet resets.
+the World saved across restarts, the World in admin preview, World bots, admin wallet resets, World leaderboards
+(net worth and this week's profit, `boardRows` / `sendBoard` in `server/room.ts`, `WorldBoard.tsx`), bankruptcy
+restart (op `bankrupt`: under $250 net worth, back to $1,000, once per 24h, losses carried in `pnlCarry`), Market
+Lighthouse, Convert, Instant Trade settings, Trenches display settings.
 
 Next, in order:
-1. World leaderboards: all-time net worth, and this week's profit.
-2. Bankruptcy restart in the World (back to $1,000, at most once every 24h).
+1. Phone layout: the app lays out wider than a phone screen.
+2. Phase 3 safety before strangers: chat limits, reporting, blocked words, admin mute.
 3. Launch: Render Starter plan so the server never sleeps, then turn the `world` flag on.
-4. Phase 3 safety: chat limits, reporting, anti-spam. Phase 4: ops and monitoring.
+4. Phase 4: ops and monitoring.
 
 Known gaps: cashback tier still comes from the client's reported volume (bounded 10–30%); the app lays out wider
 than a phone screen; real referral links (the old fake referrals are off, `REFERRALS_ENABLED`).

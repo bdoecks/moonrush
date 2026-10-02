@@ -56,6 +56,45 @@ back.join(sock(back2), { t: 'hello', name: 'Player', avatar: '🐸', level: 1, p
 const wal = back2.find((m) => m.t === 'wallet') as Extract<ServerMsg, { t: 'wallet' }>
 ok(wal?.state.cash === cashAfter && wal.state.startBalance === WORLD_START_BALANCE, 'rejoining gets the same wallet and start balance')
 
+// Leaderboards: everyone with a wallet is ranked (bots too), by net worth and by this week's profit.
+type Board = Extract<ServerMsg, { t: 'board' }>
+const askBoard = (): Board => {
+  back2.length = 0
+  ;(back as unknown as { boardCache: unknown }).boardCache = null
+  b.handle('u-aaa', { t: 'board' })
+  return back2.find((m) => m.t === 'board') as Board
+}
+const b1 = askBoard()
+ok(!!b1 && b1.total === 7 && b1.worth.length === 7 && b1.worth.every((r, i) => i === 0 || b1.worth[i - 1].equity >= r.equity), `board ranks all ${b1?.total} wallets by net worth`)
+ok(!!b1.me && b1.me.row.id === 'u-aaa' && b1.me.worthRank >= 1 && b1.me.restartAt === null, `you're on it: #${b1.me?.worthRank} net worth, #${b1.me?.weekRank} this week`)
+ok(b1.worth.filter((r) => r.bot).length === 6, 'bots are on the board, flagged as bots')
+// An admin gift is money put in: net worth goes up, profit doesn't.
+const pnlBefore = b1.me!.row.pnl
+back.grant('u-aaa', 5000, 'usd')
+const b2 = askBoard()
+ok(Math.abs(b2.me!.row.equity - b1.me!.row.equity - 5000) < 60 && Math.abs(b2.me!.row.pnl - pnlBefore) < 60, `a $5,000 gift raises net worth, not profit (pnl ${pnlBefore.toFixed(0)} → ${b2.me!.row.pnl.toFixed(0)})`)
+// Bankruptcy restart: refused while you still have money…
+back2.length = 0
+b.handle('u-aaa', { t: 'op', seq: 50, op: { kind: 'bankrupt' } })
+ok(back2.some((m) => m.t === 'error' && /broke/.test(m.message)) && (b.members.get('u-aaa')!.wallet!.cash > 1000), 'restart refused while not broke')
+// …allowed once you're broke, back to $1,000, with the loss kept on your record…
+const mw = b.members.get('u-aaa')! as unknown as { wallet: { cash: number; startBalance: number; accounts: { balances: Record<string, number>; positions: object }[]; balances: Record<string, number>; positions: object } }
+const startBal = mw.wallet.startBalance
+mw.wallet = { ...mw.wallet, cash: 40, balances: { sol: 0, bsc: 0, hood: 0 }, positions: {}, accounts: mw.wallet.accounts.map((a) => ({ ...a, balances: { sol: 0, bsc: 0, hood: 0 }, positions: {} })) } as never
+const broke = askBoard()
+back2.length = 0
+b.handle('u-aaa', { t: 'op', seq: 51, op: { kind: 'bankrupt' } })
+const rs = back2.find((m) => m.t === 'wallet') as Extract<ServerMsg, { t: 'wallet' }>
+const after = askBoard()
+ok(!!rs?.reset && rs.state.cash === 1000 && /Fresh start/.test(rs.note ?? ''), 'broke player restarts with $1,000 and is told')
+ok(Math.abs(after.me!.row.pnl - (40 - startBal)) < 1 && Math.abs(after.me!.row.week - broke.me!.row.week) < 1 && after.me!.row.restarts === 1, `the loss stays on the record: all-time ${after.me!.row.pnl.toFixed(0)}, this week ${after.me!.row.week.toFixed(0)}`)
+ok(after.me!.restartAt !== null && after.me!.restartAt! > Date.now() + 23 * 3600_000, 'next restart is about 24 hours away')
+// …and not again within a day, even if broke again.
+mw.wallet = { ...(b.members.get('u-aaa')!.wallet as object), cash: 5 } as never
+back2.length = 0
+b.handle('u-aaa', { t: 'op', seq: 52, op: { kind: 'bankrupt' } })
+ok(back2.some((m) => m.t === 'error' && /24 hours/.test(m.message)) && b.members.get('u-aaa')!.wallet!.cash === 5, 'a second restart inside 24 hours is refused')
+
 // Admin reset: the player's wallet goes back to the start, and they're told right away.
 back2.length = 0
 ok(back.resetWallets('u-aaa') === 1, 'admin reset finds the player')
