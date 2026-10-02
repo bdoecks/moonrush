@@ -1,4 +1,4 @@
-// World bots: a handful of labeled (🤖) players who trade the World next to real people. Each has a style, a real
+// World bots: a crowd of labeled (🤖) players who trade the World next to real people. Each has a style, a real
 // server wallet (same rules as everyone), comes and goes like a person, chats, posts calls, cooks coins, and goes
 // broke sometimes. Each also has a public "mirror" wallet so players can track and copy-trade it.
 import type { SimWallet, Token, WalletStyle } from '../src/types'
@@ -37,6 +37,21 @@ export const BOT_ROSTER: BotSpec[] = [
   { id: 'bot-dan', name: 'DiamondDan 🤖', avatar: '💎', style: 'diamond', always: false, followers: 21_000, rep: 60 },
   { id: 'bot-dana', name: 'DegenDana 🤖', avatar: '🦍', style: 'degen', always: true, followers: 9_000, rep: 40 },
   { id: 'bot-carl', name: 'ChefCarl 🤖', avatar: '👨‍🍳', style: 'chef', always: true, followers: 30_000, rep: 50 },
+  // The second wave: enough of a crowd that the tape, the chat and the leaderboard always have someone on them.
+  { id: 'bot-kai', name: 'KaiTrenches 🤖', avatar: '⛏️', style: 'sniper', always: true, followers: 7_500, rep: 52 },
+  { id: 'bot-otto', name: 'ScalpOtto 🤖', avatar: '⚡', style: 'scalper', always: true, followers: 3_200, rep: 47 },
+  { id: 'bot-tess', name: 'TessTenX 🤖', avatar: '🚀', style: 'degen', always: true, followers: 15_000, rep: 44 },
+  { id: 'bot-mia', name: 'MoonMia 🤖', avatar: '🌙', style: 'degen', always: false, followers: 6_000, rep: 42 },
+  { id: 'bot-rex', name: 'RugRex 🤖', avatar: '🦖', style: 'sniper', always: false, followers: 2_800, rep: 38 },
+  { id: 'bot-luna', name: 'LunaLong 🤖', avatar: '🌕', style: 'diamond', always: false, followers: 18_000, rep: 62 },
+  { id: 'bot-bea', name: 'BagholderBea 🤖', avatar: '🎒', style: 'diamond', always: false, followers: 1_900, rep: 35 },
+  { id: 'bot-zed', name: 'ZedApe 🤖', avatar: '🐵', style: 'degen', always: false, followers: 5_400, rep: 41 },
+  { id: 'bot-ivy', name: 'IvyWhale 🤖', avatar: '🐳', style: 'whale', always: false, followers: 36_000, rep: 66 },
+  { id: 'bot-moe', name: 'MoeMomentum 🤖', avatar: '📈', style: 'whale', always: false, followers: 22_000, rep: 58 },
+  { id: 'bot-gus', name: 'GasFeeGus 🤖', avatar: '⛽', style: 'scalper', always: false, followers: 2_100, rep: 43 },
+  { id: 'bot-fin', name: 'FinFlipper 🤖', avatar: '🐬', style: 'scalper', always: false, followers: 4_600, rep: 49 },
+  { id: 'bot-pip', name: 'PipSniper 🤖', avatar: '🏹', style: 'sniper', always: false, followers: 8_800, rep: 54 },
+  { id: 'bot-nori', name: 'ChefNori 🤖', avatar: '🍣', style: 'chef', always: false, followers: 11_000, rep: 46 },
 ]
 
 /** How each style trades: seconds between entry decisions, bag size (USD, share of cash), max bags, exits. */
@@ -90,15 +105,22 @@ export function pickCoin(style: BotStyle, tokens: Token[], now: number, held: Se
 
 // ─── Chat ────────────────────────────────────────────────────────────────────
 const LINES: Record<string, string[]> = {
-  buy: ['aped $T 🦍', 'in $T, lfg', 'bought some $T, chart looks clean', 'small bag of $T 👀', '$T sending? im in'],
-  snipe: ['sniped $T at launch 🎯', 'first block on $T', 'early on $T, lets see'],
+  buy: ['aped $T 🦍', 'in $T, lfg', 'bought some $T, chart looks clean', 'small bag of $T 👀', '$T sending? im in', 'starter bag of $T', 'ok fine i bought $T', '$T dip looked too good', 'adding $T here'],
+  snipe: ['sniped $T at launch 🎯', 'first block on $T', 'early on $T, lets see', 'got $T under 10k mc', '$T fresh out the oven, im in'],
   whale: ['loaded up on $T 🐋', 'size in $T. dont fade me', 'accumulating $T'],
-  win: ['took profit on $T +P% 💰', '$T paid +P%, ty', 'out of $T +P%. easy', 'secured the bag on $T (+P%)'],
-  loss: ['cut $T -P% 🩸', '$T rugged me -P%', 'paper handed $T -P%, next', 'stop loss hit on $T'],
+  win: ['took profit on $T +P% 💰', '$T paid +P%, ty', 'out of $T +P%. easy', 'secured the bag on $T (+P%)', '+P% on $T, ill take it', '$T printed. +P%', 'sold $T +P%, watch it double now lol'],
+  loss: ['cut $T -P% 🩸', '$T rugged me -P%', 'paper handed $T -P%, next', 'stop loss hit on $T', '$T -P%. pain', 'never buying $T again (-P%)', 'exit liquidity on $T again 🤡'],
   cook: ['just cooked $T 🍳 dev is based', '$T is live, fair launch fr', 'new coin $T, get in early 👨‍🍳'],
   devsell: ['took some off $T, still believe 🫡', 'dev wallet needs gas money, $T'],
   bust: ['rekt 💀 starting over with $1k', 'account blown. back to $1k', 'gg. $0. restarting'],
-  idle: ['market kinda slow rn', 'who is in something good?', 'sol trenches cooking today', 'anyone watching the graduates?', 'gm', 'lfg world 🌍', 'patience pays'],
+  idle: ['market kinda slow rn', 'who is in something good?', 'sol trenches cooking today', 'anyone watching the graduates?', 'gm', 'lfg world 🌍', 'patience pays', 'new pairs looking spicy', 'whats the play', 'need one good runner today', 'who cooked that last one lol', 'leaderboard looking tight this week', 'anyone else get rugged this morning', 'trenches never sleep'],
+  // Calling out what the market is doing.
+  hype: ['$T up P% in 5m 👀', 'who is in $T?? +P%', '$T is sending rn (+P%)', 'missed $T, already +P% 😭', '$T chart is crazy'],
+  // Answers to real players, so nobody talks to an empty room.
+  gm: ['gm', 'gm 🫡', 'gm gm', 'gm, what are we buying'],
+  reply: ['fr', 'lol true', 'real', 'same tbh', 'facts', '👀', 'lfg', 'wagmi', 'big if true', 'haha', 'not financial advice 🤖'],
+  coin: ['watching $T too 👀', '$T? might take a look', 'how early are you on $T', 'careful with $T, check the dev', 'i like $T ngl'],
+  ask: ['new pairs in trenches are moving', 'check the final stretch column', 'im mostly sniping launches today', 'top gainers on discover, 5m', 'depends, how much risk you want lol'],
 }
 
 export function chatLine(kind: keyof typeof LINES, rng: Rng, ticker = '', pct = 0) {

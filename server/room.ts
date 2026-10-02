@@ -134,6 +134,8 @@ export class Room {
   private sentTokens = new Map<string, Record<string, string>>() // coin → field → JSON last sent (for diffs)
   private sentWallets = new Map<string, string>() // wallet → JSON last sent (without trades)
   private playersDirty = false
+  private lastBotChat = -999 // tick of the last bot chat line (the crowd doesn't all talk at once)
+  private botReply: { at: number; text: string } | null = null // a bot's answer to a real player, a few seconds later
   private timer: ReturnType<typeof setInterval>
 
   /** The public World: one round that never ends, never pauses, and keeps everyone's wallet. */
@@ -375,6 +377,14 @@ export class Room {
     meter.lastAt = now
     this.chatLog = [...this.chatLog, { from: me.info.id, name: me.info.name, text, time: now }].slice(-120)
     this.broadcast({ t: 'chat', from: me.info.id, name: me.info.name, avatar: me.info.avatar, text, time: now })
+    // The World: a bot often answers a real player a few seconds later (a greeting, the coin they named, a question).
+    if (this.world && !me.brain && !this.botReply && Math.random() < 0.6) {
+      const rng = new Rng((Math.random() * 2 ** 32) >>> 0)
+      const named = text.match(/\$([A-Za-z0-9]{2,12})/)?.[1]?.toUpperCase()
+      const coin = named && this.market.tokens.find((t) => t.ticker.toUpperCase() === named)
+      const line = /\b(gm|good morning|hello|hey|hi|yo|sup)\b/i.test(text) ? chatLine('gm', rng) : coin ? chatLine('coin', rng, coin.ticker) : text.includes('?') ? chatLine('ask', rng) : chatLine('reply', rng)
+      this.botReply = { at: this.market.tick + rng.int(2, 7), text: line }
+    }
   }
 
   /** A player reports a chat message: it must be a real recent one; repeat reports of it are counted together. */
@@ -986,9 +996,11 @@ export class Room {
     return r.fills[0]
   }
 
-  private botChat(m: Member, text: string) {
-    if (this.market.tick - (m.brain?.lastChat ?? -999) < 90) return
+  private botChat(m: Member, text: string, reply = false) {
+    // Each bot keeps quiet for a while after talking, and the crowd leaves gaps between lines; answers skip the wait.
+    if (!reply && (this.market.tick - (m.brain?.lastChat ?? -999) < 90 || this.market.tick - this.lastBotChat < 20)) return
     m.brain!.lastChat = this.market.tick
+    this.lastBotChat = this.market.tick
     this.broadcast({ t: 'chat', from: m.info.id, name: m.info.name, avatar: m.info.avatar, text, time: Date.now() })
   }
 
@@ -1003,6 +1015,18 @@ export class Room {
   private botTick(rng: Rng, actions: WalletAction[]) {
     if (!this.world) return
     const tick = this.market.tick
+    const byId = new Map(this.market.tokens.map((t) => [t.id, t]))
+    // Chat that isn't about a bot's own trade: an answer owed to a real player, or a shout about a coin that's running.
+    if ((this.botReply && tick >= this.botReply.at) || tick % 45 === 0) {
+      const awake = BOT_ROSTER.map((s) => this.members.get(s.id)).filter((m): m is Member => !!m?.brain && m.info.online)
+      const m = awake.length ? awake[rng.int(0, awake.length - 1)] : undefined
+      if (m && this.botReply && tick >= this.botReply.at) this.botChat(m, this.botReply.text, true)
+      else if (m && rng.chance(0.3)) {
+        const hot = this.market.tokens.filter((t) => (t.status === 'bonding' || t.status === 'graduated') && t.change['5m'] > 40 && t.liquidity > 5_000).sort((a, b) => b.change['5m'] - a.change['5m'])[0]
+        if (hot) this.botChat(m, chatLine('hype', rng, hot.ticker, hot.change['5m'] / 100))
+      }
+      if (this.botReply && tick >= this.botReply.at) this.botReply = null
+    }
     for (const spec of BOT_ROSTER) {
       const m = this.members.get(spec.id)
       const b = m?.brain
@@ -1017,7 +1041,6 @@ export class Room {
       const w = this.walletOf(m)
       if (!w) continue
       const st = STYLE[b.style]
-      const byId = new Map(this.market.tokens.map((t) => [t.id, t]))
       const bags = Object.values(w.accounts?.[0]?.positions ?? {})
 
       // Exits (the chef handles its own coins below).
@@ -1085,7 +1108,7 @@ export class Room {
     }
   }
 
-  /** ChefCarl: launches a coin every so often, shills it, dumps part of the dev bag when it runs, claims fees. */
+  /** The chefs: each launches a coin every so often, shills it, dumps part of the dev bag when it runs, claims fees. */
   private chefTick(m: Member, rng: Rng, actions: WalletAction[]) {
     const b = m.brain!
     const tick = this.market.tick

@@ -1,6 +1,7 @@
 // World check: always running, never pauses, guests only watch, players keep their wallet, it saves and comes back.
 import { Room } from '../server/room'
 import { WORLD_CODE, WORLD_START_BALANCE, type ServerMsg } from '../src/net/protocol'
+import { BOT_ROSTER } from '../server/bots'
 
 const ok = (cond: boolean, what: string) => console.log(`${cond ? 'PASS' : 'FAIL'} ${what}`)
 const sock = (box: ServerMsg[]) => ({ readyState: 1, send: (d: string) => box.push(JSON.parse(d)), close() {} }) as never
@@ -65,9 +66,9 @@ const askBoard = (): Board => {
   return back2.find((m) => m.t === 'board') as Board
 }
 const b1 = askBoard()
-ok(!!b1 && b1.total === 7 && b1.worth.length === 7 && b1.worth.every((r, i) => i === 0 || b1.worth[i - 1].equity >= r.equity), `board ranks all ${b1?.total} wallets by net worth`)
+ok(!!b1 && b1.total === BOT_ROSTER.length + 1 && b1.worth.length === b1.total && b1.worth.every((r, i) => i === 0 || b1.worth[i - 1].equity >= r.equity), `board ranks all ${b1?.total} wallets by net worth`)
 ok(!!b1.me && b1.me.row.id === 'u-aaa' && b1.me.worthRank >= 1 && b1.me.restartAt === null, `you're on it: #${b1.me?.worthRank} net worth, #${b1.me?.weekRank} this week`)
-ok(b1.worth.filter((r) => r.bot).length === 6, 'bots are on the board, flagged as bots')
+ok(b1.worth.filter((r) => r.bot).length === BOT_ROSTER.length, 'bots are on the board, flagged as bots')
 // An admin gift is money put in: net worth goes up, profit doesn't.
 const pnlBefore = b1.me!.row.pnl
 back.grant('u-aaa', 5000, 'usd')
