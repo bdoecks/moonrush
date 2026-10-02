@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { AlertTriangle, Lock } from 'lucide-react'
+import { AlertTriangle, Lock, Share2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSelectedToken } from '../../hooks/useDerived'
 import { useGame } from '../../game/store'
@@ -8,6 +8,7 @@ import { slotSetting } from '../../game/store'
 import { TradeSettingsChip, TradeSettingsModal } from './TradeSettings'
 import { useActiveBalance, useActivePosition } from '../../hooks/useWallets'
 import { WalletSelector } from '../wallets'
+import { shareToken } from '../ShareCard'
 import { CHAINS, fmtNative } from '../../data/chains'
 import { ChainBadge } from '../chain'
 import { fmtCompact, fmtNum, fmtPct, fmtPrice, fmtUsd, toneClass } from '../../utils/format'
@@ -277,7 +278,7 @@ export function TradePanel({ className }: { className?: string }) {
       {pos && (
         <div className="rounded-md border border-line bg-panel2 p-2 text-[11px]">
           <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-dim">
-            <span>Your position</span>
+            <span className="flex items-center gap-1.5">Your position <button type="button" onClick={() => shareToken(t.id)} title="Share this as a picture" aria-label="Share your position" className="rounded text-dim hover:text-accent"><Share2 size={11} /></button></span>
             <span className={clsx('num font-bold normal-case', toneClass(posPnl))}>{fmtPct(posValue / pos.costBasis - 1)}</span>
           </div>
           <div className="grid grid-cols-3 gap-2">

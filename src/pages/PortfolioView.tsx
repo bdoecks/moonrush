@@ -2,13 +2,14 @@ import clsx from 'clsx'
 import { Check as CheckIcon, Coins, Copy, Search, Share2, X } from 'lucide-react'
 import { FundWalletsModal } from '../components/FundWallets'
 import { HiddenToggle, HideButton } from '../components/HideButton'
+import { shareToken, useShare } from '../components/ShareCard'
 import { useHidden } from '../game/hidden'
 import { tradePx } from '../game/chainPnl'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ChainBadge, WalletChip } from '../components/chain'
 import { LifetimeStats, PnlCalendar } from '../components/portfolio/PnlCalendar'
-import { EmptyState, Modal, Segmented, TokenIcon } from '../components/ui'
+import { EmptyState, Segmented, TokenIcon } from '../components/ui'
 import { useTokenMap, useValuation } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK, SUPPLY } from '../game/marketEngine'
 import { levelFromXp, MODES, titleFor } from '../game/progression'
@@ -139,7 +140,6 @@ export function PortfolioView() {
   const setWalletsOpen = useGame((s) => s.setWalletsOpen)
   const [period, setPeriod] = useState<Period>('ALL')
   const [tab, setTab] = useState<Tab>('holding')
-  const [share, setShare] = useState(false)
   const [funding, setFunding] = useState<string[] | null>(null) // wallets to pre-select ([] = default)
   // GMGN-style: show money in USD or in each coin's own chain coin; look at all wallets or one.
   const [unit, setUnitState] = useState<Unit>(() => load<Unit>('pfUnit') ?? 'usd')
@@ -195,6 +195,19 @@ export function PortfolioView() {
   const worst = [...inWindow].sort((a, b) => a.total - b.total)[0]
   const dist = BUCKETS.map((b) => ({ ...b, n: traded.filter((r) => b.test(r.totalPct)).length }))
   const lvl = levelFromXp(xp).level
+  const sharePnl = () =>
+    useShare.getState().open({
+      title: 'My PnL',
+      sub: `${traded.length} coin${traded.length === 1 ? '' : 's'} traded · ${(winRate * 100).toFixed(0)}% win rate`,
+      pnl: v.stats.totalPnl,
+      pct: v.stats.totalPnlPct,
+      stats: [
+        ['Realized', `${realizedWin >= 0 ? '+' : '-'}${fmtCompact(Math.abs(realizedWin))}`],
+        ['Win rate', `${(winRate * 100).toFixed(0)}%`],
+        ['Coins', String(traded.length)],
+        ...(best && best.total > 0 ? [['Best', `$${best.ticker} ${fmtPct(best.totalPct)}`] as [string, string]] : []),
+      ],
+    })
   const windowBuys = windowTrades.filter((t) => t.side === 'buy')
   const boughtUsd = windowBuys.reduce((a, t) => a + t.value, 0)
   const soldUsd = windowTrades.filter((t) => t.side === 'sell').reduce((a, t) => a + t.value - t.fee, 0)
@@ -251,7 +264,7 @@ export function PortfolioView() {
           <Segmented value={unit} onChange={setUnit} options={[{ value: 'usd', label: 'USD' }, { value: 'native', label: 'SOL · BNB · ETH' }]} />
           <Segmented value={period} onChange={setPeriod} options={[{ value: '1H', label: '1H' }, { value: '24H', label: '24H' }, { value: 'ALL', label: 'All' }]} />
           <button onClick={() => setFunding([])} className="flex items-center gap-1 rounded-md border border-accent/50 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent hover:bg-accent/20"><Coins size={12} /> Fund wallets</button>
-          <button onClick={() => setShare(true)} className="flex items-center gap-1 rounded-md border border-line2 px-2.5 py-1 text-[11px] font-semibold text-muted hover:text-ink"><Share2 size={12} /> Share PnL</button>
+          <button onClick={sharePnl} className="flex items-center gap-1 rounded-md border border-line2 px-2.5 py-1 text-[11px] font-semibold text-muted hover:text-ink"><Share2 size={12} /> Share PnL</button>
         </div>
       </div>
 
@@ -386,7 +399,6 @@ export function PortfolioView() {
         </div>
       </div>
       {funding && <FundWalletsModal initialTo={funding.length ? funding : undefined} onClose={() => setFunding(null)} />}
-      {share && <ShareCard onClose={() => setShare(false)} realized={realizedWin} total={v.stats.totalPnl} totalPct={v.stats.totalPnlPct} winRate={winRate} traded={traded.length} best={best} period={period} />}
     </div>
   )
 }
@@ -679,7 +691,7 @@ function Holding({ rows, equity, m, positions, scope }: { rows: TokenPnl[]; equi
           const share = equity > 0 ? r.value / equity : 0
           return (
             <tr key={r.tokenId} className={clsx('group hover:bg-panel2', hiddenIds.includes(r.tokenId) && 'opacity-50')}>
-              <td className={td}><span className="flex items-center gap-1"><TokenCell r={r} /><HideButton id={r.tokenId} ticker={r.ticker} className={clsx(!hiddenIds.includes(r.tokenId) && 'opacity-0 group-hover:opacity-100')} /></span></td>
+              <td className={td}><span className="flex items-center gap-1"><TokenCell r={r} /><HideButton id={r.tokenId} ticker={r.ticker} className={clsx(!hiddenIds.includes(r.tokenId) && 'opacity-0 group-hover:opacity-100')} /><button onClick={() => shareToken(r.tokenId)} title={`Share your $${r.ticker} PnL`} aria-label={`Share your ${r.ticker} PnL`} className="rounded p-0.5 text-dim opacity-60 hover:text-accent md:opacity-0 md:group-hover:opacity-100"><Share2 size={12} /></button></span></td>
               <td className={clsx(td, 'text-right num')}><div className="font-semibold">{m(r.value, r.chain)}</div><div className="text-[10px] text-dim">{fmtNum(r.qty)} · {((r.qty / SUPPLY) * 100).toFixed(2)}% supply</div></td>
               <td className={clsx(td, 'text-right')}>
                 <div className="num">{(share * 100).toFixed(1)}%</div>
@@ -749,7 +761,7 @@ function RecentPnl({ rows, m }: { rows: TokenPnl[]; m: Money }) {
         <tbody>
           {sorted.map((r) => (
             <tr key={r.tokenId} className={clsx('group hover:bg-panel2', hiddenIds.includes(r.tokenId) && 'opacity-50')}>
-              <td className={td}><span className="flex items-center gap-1"><TokenCell r={r} /><HideButton id={r.tokenId} ticker={r.ticker} className={clsx(!hiddenIds.includes(r.tokenId) && 'opacity-0 group-hover:opacity-100')} /></span></td>
+              <td className={td}><span className="flex items-center gap-1"><TokenCell r={r} /><HideButton id={r.tokenId} ticker={r.ticker} className={clsx(!hiddenIds.includes(r.tokenId) && 'opacity-0 group-hover:opacity-100')} /><button onClick={() => shareToken(r.tokenId)} title={`Share your $${r.ticker} PnL`} aria-label={`Share your ${r.ticker} PnL`} className="rounded p-0.5 text-dim opacity-60 hover:text-accent md:opacity-0 md:group-hover:opacity-100"><Share2 size={12} /></button></span></td>
               <td className={clsx(td, 'text-right num text-muted')}>{fmtAge((tick - r.lastTick) * SIM_SEC_PER_TICK)}</td>
               <td className={clsx(td, 'text-right num', toneClass(r.unrealized))}>{r.qty > 0 ? m(r.unrealized, r.chain, true) : '--'}</td>
               <td className={clsx(td, 'text-right num', toneClass(r.realized))}>{r.sells ? m(r.realized, r.chain, true, r.realizedN) : '--'}</td>
@@ -973,33 +985,5 @@ function EquityChart() {
           </ResponsiveContainer>
         )}
     </>
-  )
-}
-
-function ShareCard({ onClose, realized, total, totalPct, winRate, traded, best, period }: { onClose: () => void; realized: number; total: number; totalPct: number; winRate: number; traded: number; best?: TokenPnl; period: Period }) {
-  const notify = useGame((s) => s.notify)
-  const up = total >= 0
-  const text = `MOONRUSH (simulated) · ${period === 'ALL' ? 'this round' : period}: ${up ? '+' : '-'}${fmtUsd(Math.abs(total))} (${fmtPct(totalPct)}) · realized ${realized >= 0 ? '+' : '-'}${fmtUsd(Math.abs(realized))} · win rate ${(winRate * 100).toFixed(0)}%${best && best.total > 0 ? ` · best $${best.ticker} ${fmtPct(best.totalPct)}` : ''}`
-  return (
-    <Modal title="Share PnL" onClose={onClose}>
-      <div className={clsx('relative overflow-hidden rounded-xl border p-5', up ? 'border-up/40 bg-[radial-gradient(circle_at_20%_0%,rgba(25,217,137,0.25),transparent_60%),#0c0e11]' : 'border-down/40 bg-[radial-gradient(circle_at_20%_0%,rgba(255,77,106,0.25),transparent_60%),#0c0e11]')}>
-        <div className="font-display text-[13px] font-bold tracking-[0.2em]">MOON<span className="text-accent">RUSH</span></div>
-        <div className="mt-4 text-[11px] text-muted">{period === 'ALL' ? 'This round' : period} PnL</div>
-        <div className={clsx('num text-[40px] font-bold leading-none', up ? 'text-up' : 'text-down')}>{fmtPct(totalPct)}</div>
-        <div className={clsx('num mt-1 text-[16px] font-semibold', up ? 'text-up' : 'text-down')}>{up ? '+' : '-'}{fmtUsd(Math.abs(total))}</div>
-        <div className="mt-4 grid grid-cols-3 gap-2 text-[11px]">
-          <div><div className="text-dim">Realized</div><div className={clsx('num', toneClass(realized))}>{fmtCompact(realized)}</div></div>
-          <div><div className="text-dim">Win rate</div><div className="num">{(winRate * 100).toFixed(0)}%</div></div>
-          <div><div className="text-dim">Tokens</div><div className="num">{traded}</div></div>
-        </div>
-        {best && best.total > 0 && <div className="mt-3 text-[11px] text-muted">Best: <span className="font-bold text-ink">${best.ticker}</span> <span className="text-up">{fmtPct(best.totalPct)}</span></div>}
-        <div className="absolute right-4 top-4 text-[40px] opacity-80">{up ? '🚀' : '💀'}</div>
-        <div className="mt-4 text-[9px] text-dim">Simulated trading game · virtual money · fictional tokens</div>
-      </div>
-      <div className="mt-3 flex gap-2">
-        <button onClick={() => { navigator.clipboard?.writeText(text).catch(() => {}); notify({ title: 'COPIED', body: 'PnL summary copied to clipboard', tone: 'info', icon: '📋' }) }} className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md bg-accent text-[12px] font-bold text-accent-ink"><Copy size={13} /> Copy summary</button>
-        <button onClick={onClose} className="flex h-9 items-center gap-1 rounded-md border border-line2 px-3 text-[12px] text-muted hover:text-ink"><X size={13} /> Close</button>
-      </div>
-    </Modal>
   )
 }

@@ -21,6 +21,7 @@ import { CookingView } from './pages/CookingView'
 import { CopyTradeView } from './pages/CopyTradeView'
 import { SniperView } from './pages/SniperView'
 import { PnlCard } from './components/PnlCard'
+import { ShareHost } from './components/ShareCard'
 import { MonitorView } from './pages/MonitorView'
 import { TrackView } from './pages/TrackView'
 import { AdminView } from './pages/AdminView'
@@ -149,6 +150,7 @@ export default function App() {
       <SwapModal />
       <WalletManager />
       <PnlCard />
+      <ShareHost />
     </div>
   )
 }
