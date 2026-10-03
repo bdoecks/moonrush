@@ -38,9 +38,21 @@ npx tsx scripts/charts-test.ts 30           # charts across a restart: short tim
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
 npx vite build                              # production build
+npm run bots                                # UI bots: play every page in hidden Chrome, PDF report (see below)
 ```
 
 Every line of the test scripts prints PASS or FAIL. Add checks there when you add server behaviour.
+
+**UI bots** (`scripts/ui-bots.ts`, solo play only): a checklist bot clicks through every page and main feature, then
+an explorer bot clicks around on its own, favouring buttons it has tried least across runs (memory in
+`bot-reports/explorer-memory.json`). Output: `bot-reports/<date>/report.pdf` for people, `report.json` for Claude.
+Uses the installed Chrome/Edge (`CHROME_PATH` to override). `--clicks N`, `--seed S` to replay, `--show` to watch,
+`--selftest` plants a crash and NaN cash to prove the bots notice. Add a step to `checklistBot` for new features.
+
+**Online bots** (`scripts/online-bots.ts`, `npm run online-bots`): starts the room server (port 8787) and the game
+(port 5197), then two players in separate browser contexts create and join a friends room, trade, cook, send money,
+chat and click around together. After each action each screen is compared with `window.__srvWallet` (the server's
+last wallet answer), and both players' markets are compared tick for tick. `--clicks N`, `--show`, `--selftest`.
 
 ## How it is deployed (read this before pushing)
 
