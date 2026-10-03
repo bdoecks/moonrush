@@ -7,6 +7,8 @@ import { WORLD_CODE, type ServerMsg } from '../src/net/protocol'
 import { ALL_BOTS, BOT_ROSTER } from '../server/bots'
 import { BRAIN, groupFor, PILE_ON_LIMIT } from '../server/brainBots'
 import { valuePortfolio } from '../src/game/portfolioEngine'
+import { SAFE_THEMES } from '../server/trendThemes'
+import { nameBlocked } from '../server/moderation'
 
 const hours = Number(process.argv[2] ?? 3)
 const ok = (cond: boolean, what: string) => console.log(`${cond ? 'PASS' : 'FAIL'} ${what}`)
@@ -37,6 +39,7 @@ const box: ServerMsg[] = []
 const bigDrops = new Map<string, number[]>()
 let worstPile = 0
 let devDumps = 0
+const cooked: string[] = []
 let bad = ''
 const t0 = Date.now()
 for (let i = 0; i < hours * 3600; i++) {
@@ -44,7 +47,10 @@ for (let i = 0; i < hours * 3600; i++) {
   const tick = world.market.tick
   for (const m of box.splice(0)) {
     if (m.t !== 'tick') continue
-    for (const e of m.events) if (e.kind === 'devsell') devDumps++
+    for (const e of m.events) {
+      if (e.kind === 'devsell') devDumps++
+      if (e.kind === 'cook' && e.ticker) cooked.push(e.ticker)
+    }
     for (const a of m.actions) {
       if (!a.walletId.startsWith('bot-') || a.side !== 'sell') continue
       const t = world.market.tokens.find((x) => x.id === a.tokenId)
@@ -87,5 +93,11 @@ ok(devDumps >= hours * 2, `devs dumped their own coins: ${devDumps} dev sells`)
 ok(worstPile <= PILE_ON_LIMIT + 1, `big bot sells on one coin within 10s never went past the limit (worst ${worstPile}, limit ${PILE_ON_LIMIT} planned + 1 old-rule)`)
 ok(!bad, bad ? `impossible money: ${bad}` : 'no bot wallet ever held an impossible amount')
 ok(msPerTick < 50, `the World stays fast with the crowd: ${msPerTick.toFixed(1)} ms per 1-second tick`)
+const trends = BRAIN?.trends ?? []
+ok(trends.length > 0 && trends.every((t) => SAFE_THEMES.has(t.word)), `trends are all approved themes: ${trends.slice(0, 8).map((t) => t.word).join(', ')}`)
+const onTrend = cooked.filter((x) => trends.some((t) => x.includes(t.word.toUpperCase())))
+ok(onTrend.length >= cooked.length * 0.3, `chefs launch coins on real trends: ${onTrend.length} of ${cooked.length}, e.g. ${onTrend.slice(0, 6).join(', ')}`)
+const names = world.market.tokens.filter((t) => t.creatorId?.startsWith('bot-')).map((t) => (t as unknown as { name: string }).name)
+ok(names.every((n) => !nameBlocked(n)), `every bot coin name passes the name filter (${names.length} checked)`)
 world.dispose()
 process.exit(0)

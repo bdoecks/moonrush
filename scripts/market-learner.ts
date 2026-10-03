@@ -16,13 +16,15 @@
 //      sells piling onto the same coin at once.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { SAFE_THEMES, themeOf } from '../server/trendThemes'
+import { nameBlocked } from '../server/moderation'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const DATA = join(ROOT, 'bot-data')
 const SESSIONS = join(DATA, 'sessions')
 
 interface Trade { k: 'trade'; t: number; slot: number; mint: string; buy: boolean; sol: number; tok: number; mcapSol: number; w: string; dev: boolean; creator: string; watched?: string }
-interface Create { k: 'create'; t: number; mint: string; creator: string }
+interface Create { k: 'create'; t: number; mint: string; creator: string; name?: string; symbol?: string }
 interface Complete { k: 'complete'; t: number; mint: string }
 type Row = Trade | Create | Complete
 
@@ -242,8 +244,35 @@ function learn(rows: Row[]) {
       cascadesPerCoin: r3(dumps.cascades / Math.max(1, coinsSeen)), rugShare: r3(dumps.rugs / Math.max(1, coinsSeen)),
     },
     groups: brainGroups,
+    trends: trendsFrom(rows),
   }
   return brain
+}
+
+/**
+ * What real launches are about right now: approved theme words (server/trendThemes.ts) found in launch names, ranked
+ * by how much SOL traded on those coins. Anything not on the approved list (people, brands, politics, crude words)
+ * never gets in, and the game's name filter checks again.
+ */
+function trendsFrom(rows: Row[]) {
+  const volume = new Map<string, number>()
+  for (const r of rows) if (r.k === 'trade') volume.set(r.mint, (volume.get(r.mint) ?? 0) + r.sol)
+  const seen = new Map<string, { launches: number; volumeSol: number }>()
+  for (const r of rows) {
+    if (r.k !== 'create') continue
+    const words = new Set(`${r.name ?? ''} ${r.symbol ?? ''}`.split(/[^A-Za-z]+/).map(themeOf).filter((w): w is string => !!w && !nameBlocked(w)))
+    for (const w of words) {
+      const x = seen.get(w) ?? { launches: 0, volumeSol: 0 }
+      x.launches++
+      x.volumeSol += volume.get(r.mint) ?? 0
+      seen.set(w, x)
+    }
+  }
+  return [...seen.entries()]
+    .filter(([, x]) => x.launches >= 2)
+    .sort((a, b) => b[1].volumeSol - a[1].volumeSol)
+    .slice(0, 30)
+    .map(([word, x]) => ({ word, narrative: SAFE_THEMES.get(word)!, launches: x.launches, volumeSol: r3(x.volumeSol) }))
 }
 
 // ---------- summary for people ----------
@@ -266,6 +295,9 @@ function summary(b: ReturnType<typeof learn>) {
     `- ${pct(b.dumps.coinsWithDevSellShare)} of coins had their dev sell while recording. Dev sells usually come ${b.dumps.devSellAfterSec[2]}s after launch and knock ${pct(-b.dumps.devSellImpact[2])} off the price (worst 10%: ${pct(-b.dumps.devSellImpact[0])}).`,
     `- Big sells (one sell dropping the price 15%+): ${b.dumps.bigSellsPerCoin} per coin, typically ${pct(-b.dumps.bigSellImpact[2])}. Pile-ons (3 big sells within 10s): ${b.dumps.cascadesPerCoin} per coin.`,
     `- ${pct(b.dumps.rugShare)} of coins that got past 60 SOL then lost 70% from their peak.`,
+    ``,
+    `## Trending themes (from real launch names, approved words only)`,
+    b.trends.length ? b.trends.slice(0, 15).map((t) => `${t.word} (${t.launches} launches, ${Math.round(t.volumeSol)} SOL traded)`).join(', ') : 'none yet',
     ``,
     `## Each style and skill level`,
   ]

@@ -4,7 +4,7 @@
 import type { WebSocket } from 'ws'
 import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
 import { BOT_BUST_USD, BOT_BY_ID, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, inVoice, mirrorWallet, pickCoin, STYLE, type BotBrain, type BotSpec } from './bots'
-import { BUY_PACE, buysPerMinute, DEV_DUMP_CHANCE, devDumpAfter, draw, eye, safety, groupFor, PILE_ON_LIMIT, planExit, SIZE_SCALE, situation, type BrainGroup } from './brainBots'
+import { BUY_PACE, buysPerMinute, DEV_DUMP_CHANCE, devDumpAfter, draw, eye, safety, TREND_SHARE, trendCoin, groupFor, PILE_ON_LIMIT, planExit, SIZE_SCALE, situation, type BrainGroup } from './brainBots'
 import { generatedLaunch } from '../src/data/tokens'
 import { valuePortfolio } from '../src/game/portfolioEngine'
 import { rollEvents } from '../src/game/eventEngine'
@@ -1314,14 +1314,16 @@ export class Room {
     const px = nativePrice(this.market, 'sol')
     const cashLike = w.cash + (w.balances.sol ?? 0) * px
     if (cashLike < 300) return
-    const base = generatedLaunch(this.market.launched + rng.int(50, 5000))
+    // Most launches ride what the real market is launching right now (approved themes only); the rest are random.
+    const trend = rng.chance(TREND_SHARE) ? trendCoin(rng, (x) => this.market.tokens.some((t) => t.ticker === x)) : null
+    const base = trend ?? generatedLaunch(this.market.launched + rng.int(50, 5000))
     let ticker = base.ticker
     for (let k = 2; k < 9 && this.market.tokens.some((t) => t.ticker === ticker); k++) ticker = `${base.ticker}${k}`
     const narratives: Narrative[] = ['dogs', 'cats', 'frogs', 'ai', 'food', 'space', 'absurd', 'retro']
     const marketing = rng.int(0, 150)
     const spec: CookSpec = {
       chain: 'sol', pad: 'pump', tax: { buy: 0, sell: 0 }, name: base.name, ticker, emoji: base.emoji, hue: rng.int(0, 359), description: '',
-      narrative: narratives[rng.int(0, narratives.length - 1)], socials: { x: true, tg: rng.chance(0.5), web: rng.chance(0.3) }, style: 'fair',
+      narrative: trend?.narrative ?? narratives[rng.int(0, narratives.length - 1)], socials: { x: true, tg: rng.chance(0.5), web: rng.chance(0.3) }, style: 'fair',
       marketing, devBuy: Math.min(rng.range(0.5, 2), (cashLike * 0.4) / px), bundle: { wallets: 0, perWallet: 0, stagger: false },
     }
     const cooked = cookToken(this.market, rng, spec)
@@ -1340,9 +1342,9 @@ export class Room {
     const dumps = me ? DEV_DUMP_CHANCE[me.tier] : 0.5
     b.cooked[id] = { mcap: after.mcap, tick, dumpAt: rng.chance(dumps) ? tick + Math.round(devDumpAfter(rng) * (me?.persona.patience ?? 1)) : undefined }
     this.playerEvents.push({ by: m.info.id, id: tick * 100 + 97, tick, time: this.market.time, kind: 'cook', tokenId: id, ticker, text: `${m.info.avatar} ${m.info.name} cooked ${ticker}`, icon: '🍳', tone: 'info' })
-    this.botChat(m, chatLine('cook', rng, ticker))
+    this.botChat(m, trend && rng.chance(0.5) ? `${trend.theme} szn. just cooked $${ticker} 🍳` : chatLine('cook', rng, ticker))
     b.lastPost = tick - 900 // always shills its own launch
-    this.botPost(m, after, `${ticker} just launched on pump 🍳 early`)
+    this.botPost(m, after, trend ? `${ticker} just launched, ${trend.theme} meta is running 🍳 early` : `${ticker} just launched on pump 🍳 early`)
   }
 
   // ─── Admin ─────────────────────────────────────────────────────────────────

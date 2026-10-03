@@ -1,6 +1,6 @@
 {
  "v": 1,
- "learnedAt": "2026-10-03T21:15:57.877Z",
+ "learnedAt": "2026-10-03T22:56:49.231Z",
  "trades": 139517,
  "coins": 2701,
  "wallets": 20048,
@@ -2211,5 +2211,187 @@
    "holdsToEnd": 0,
    "cutsLosers": 1
   }
- }
+ },
+ "trends": [
+  {
+   "word": "agent",
+   "narrative": "ai",
+   "launches": 24,
+   "volumeSol": 2530.312
+  },
+  {
+   "word": "artificial",
+   "narrative": "ai",
+   "launches": 4,
+   "volumeSol": 1051.287
+  },
+  {
+   "word": "horse",
+   "narrative": "absurd",
+   "launches": 8,
+   "volumeSol": 1033.239
+  },
+  {
+   "word": "bot",
+   "narrative": "ai",
+   "launches": 11,
+   "volumeSol": 978.369
+  },
+  {
+   "word": "renter",
+   "narrative": "absurd",
+   "launches": 23,
+   "volumeSol": 969.081
+  },
+  {
+   "word": "mink",
+   "narrative": "absurd",
+   "launches": 9,
+   "volumeSol": 932.085
+  },
+  {
+   "word": "trencher",
+   "narrative": "absurd",
+   "launches": 9,
+   "volumeSol": 926.165
+  },
+  {
+   "word": "cat",
+   "narrative": "cats",
+   "launches": 55,
+   "volumeSol": 859.173
+  },
+  {
+   "word": "squirrel",
+   "narrative": "absurd",
+   "launches": 8,
+   "volumeSol": 582.575
+  },
+  {
+   "word": "cache",
+   "narrative": "absurd",
+   "launches": 6,
+   "volumeSol": 544.943
+  },
+  {
+   "word": "rogue",
+   "narrative": "absurd",
+   "launches": 6,
+   "volumeSol": 491.568
+  },
+  {
+   "word": "rocket",
+   "narrative": "space",
+   "launches": 54,
+   "volumeSol": 282.655
+  },
+  {
+   "word": "chill",
+   "narrative": "absurd",
+   "launches": 4,
+   "volumeSol": 116.532
+  },
+  {
+   "word": "pump",
+   "narrative": "absurd",
+   "launches": 7,
+   "volumeSol": 116.029
+  },
+  {
+   "word": "giga",
+   "narrative": "absurd",
+   "launches": 3,
+   "volumeSol": 86.566
+  },
+  {
+   "word": "dog",
+   "narrative": "dogs",
+   "launches": 11,
+   "volumeSol": 72.866
+  },
+  {
+   "word": "tiger",
+   "narrative": "cats",
+   "launches": 14,
+   "volumeSol": 72.689
+  },
+  {
+   "word": "model",
+   "narrative": "ai",
+   "launches": 2,
+   "volumeSol": 66.939
+  },
+  {
+   "word": "bull",
+   "narrative": "absurd",
+   "launches": 2,
+   "volumeSol": 32.73
+  },
+  {
+   "word": "sword",
+   "narrative": "absurd",
+   "launches": 7,
+   "volumeSol": 32.396
+  },
+  {
+   "word": "monkey",
+   "narrative": "absurd",
+   "launches": 5,
+   "volumeSol": 29.87
+  },
+  {
+   "word": "moon",
+   "narrative": "space",
+   "launches": 9,
+   "volumeSol": 29.701
+  },
+  {
+   "word": "frog",
+   "narrative": "frogs",
+   "launches": 6,
+   "volumeSol": 23.783
+  },
+  {
+   "word": "banana",
+   "narrative": "food",
+   "launches": 4,
+   "volumeSol": 15.601
+  },
+  {
+   "word": "wizard",
+   "narrative": "absurd",
+   "launches": 4,
+   "volumeSol": 15.601
+  },
+  {
+   "word": "pixel",
+   "narrative": "retro",
+   "launches": 3,
+   "volumeSol": 13.986
+  },
+  {
+   "word": "bird",
+   "narrative": "absurd",
+   "launches": 3,
+   "volumeSol": 11.774
+  },
+  {
+   "word": "clown",
+   "narrative": "absurd",
+   "launches": 2,
+   "volumeSol": 7.164
+  },
+  {
+   "word": "bro",
+   "narrative": "absurd",
+   "launches": 2,
+   "volumeSol": 6.951
+  },
+  {
+   "word": "toad",
+   "narrative": "frogs",
+   "launches": 2,
+   "volumeSol": 6.941
+  }
+ ]
 }

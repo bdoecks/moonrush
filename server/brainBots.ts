@@ -4,7 +4,7 @@
 // style and skill level, never anyone's wallet. Without the file the bots fall back to their old fixed rules.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Token } from '../src/types'
+import type { Narrative, Token } from '../src/types'
 import type { Rng } from '../src/utils/rng'
 
 export type Tier = 'pro' | 'good' | 'average' | 'bad' | 'degen'
@@ -32,6 +32,7 @@ export interface MarketBrain {
   buckets: { age: string[]; mcap: string[]; move: string[] }
   dumps: { coinsWithDevSellShare: number; devSellAfterSec: Spread; devSellImpact: Spread; cascadesPerCoin: number; rugShare: number }
   groups: Record<string, BrainGroup>
+  trends?: { word: string; narrative: Narrative; launches: number; volumeSol: number }[] // approved themes only (server/trendThemes.ts)
 }
 
 const FILE = join(import.meta.dirname, 'data', 'market-brain.json')
@@ -137,3 +138,30 @@ export const DEV_DUMP_CHANCE: Record<Tier, number> = { pro: 0.3, good: 0.4, aver
 
 /** How many big sells by bots may land on one coin within 10 seconds (real pile-ons happen; bots mustn't all join). */
 export const PILE_ON_LIMIT = 2
+
+// ─── Trend coins ─────────────────────────────────────────────────────────────
+/** Share of chef launches that ride a current real-market trend (the rest get the game's usual random names). */
+export const TREND_SHARE = 0.6
+const ICON: Partial<Record<string, string>> = { horse: '🐴', squirrel: '🐿️', mink: '🦦', cat: '🐱', dog: '🐶', frog: '🐸', agent: '🕵️', bot: '🤖', robot: '🤖', artificial: '🧠', rocket: '🚀', moon: '🌙', alien: '👽', pizza: '🍕', burger: '🍔', banana: '🍌', ghost: '👻', wizard: '🧙', dragon: '🐉', shark: '🦈', whale: '🐋', ape: '🦍', monkey: '🐒', owl: '🦉', duck: '🦆', penguin: '🐧', hamster: '🐹', panda: '🐼', goblin: '👺', ninja: '🥷', pirate: '🏴‍☠️', cowboy: '🤠', clown: '🤡', rogue: '🗡️', trencher: '⛏️', renter: '🏠', cache: '📦', chill: '🧊', giga: '💪', pump: '⛽' }
+const BY_NARRATIVE: Record<Narrative, string> = { dogs: '🐶', cats: '🐱', frogs: '🐸', ai: '🤖', food: '🍔', space: '🚀', absurd: '🌀', retro: '👾' }
+
+/**
+ * A coin idea from the trends: a theme picked by how much the real market traded it, dressed up the way pump.fun names
+ * go ("Baby Horse", "HORSEAI"…). Never a real launch's name, only the approved theme word. Null when there are no trends.
+ */
+export function trendCoin(rng: Rng, taken: (ticker: string) => boolean): { name: string; ticker: string; emoji: string; narrative: Narrative; theme: string } | null {
+  const trends = BRAIN?.trends ?? []
+  if (!trends.length) return null
+  // Square root of volume: the hottest theme comes up most, but not every time.
+  let r = rng.next() * trends.reduce((a, t) => a + Math.sqrt(t.volumeSol + 1), 0)
+  const t = trends.find((x) => (r -= Math.sqrt(x.volumeSol + 1)) <= 0) ?? trends[0]
+  const W = t.word[0].toUpperCase() + t.word.slice(1)
+  const U = t.word.toUpperCase()
+  const looks: [string, string][] = [[W, U], [`Baby ${W}`, `B${U}`], [`${W} Inu`, `${U}INU`], [`${W}AI`, `${U}AI`], [`Based ${W}`, `BASED${U}`], [`Giga ${W}`, `G${U}`], [`${W} Coin`, `${U}C`], [`Lil ${W}`, `L${U}`], [`${W} Wif Hat`, `${U}WIF`], [`Super ${W}`, `S${U}`]]
+  for (let k = 0; k < 12; k++) {
+    const [name, base] = looks[rng.int(0, looks.length - 1)]
+    const ticker = (k < 6 ? base : `${base}${k}`).slice(0, 10)
+    if (!taken(ticker)) return { name, ticker, emoji: ICON[t.word] ?? BY_NARRATIVE[t.narrative], narrative: t.narrative, theme: t.word }
+  }
+  return null
+}
