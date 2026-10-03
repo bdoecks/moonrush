@@ -15,7 +15,8 @@
     "server:dev": "tsx watch server/index.ts",
     "play-online": "node scripts/play-online.mjs",
     "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
-    "record": "tsx scripts/market-recorder.ts"
+    "record": "tsx scripts/market-recorder.ts",
+    "learn": "tsx scripts/market-learner.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
