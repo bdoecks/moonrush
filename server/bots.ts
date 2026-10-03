@@ -2,9 +2,11 @@
 // server wallet (same rules as everyone), comes and goes like a person, chats, posts calls, cooks coins, and goes
 // broke sometimes. Each also has a public "mirror" wallet so players can track and copy-trade it.
 import type { SimWallet, Token, WalletStyle } from '../src/types'
-import type { Rng } from '../src/utils/rng'
+import { Rng } from '../src/utils/rng'
+import type { ExitPlan, Tier } from './brainBots'
 
-export type BotStyle = 'sniper' | 'whale' | 'scalper' | 'diamond' | 'degen' | 'chef'
+// Dumpers trade like snipers but sell big into the first pump; chefs launch coins and dump the dev bag.
+export type BotStyle = 'sniper' | 'whale' | 'scalper' | 'diamond' | 'degen' | 'dumper' | 'chef'
 
 export interface BotBrain {
   style: BotStyle
@@ -16,43 +18,121 @@ export interface BotBrain {
   lastChat: number
   lastPost: number
   lastCook: number
-  cooked: Record<string, { mcap: number; tick: number }> // coins they launched: launch MC and tick
+  cooked: Record<string, { mcap: number; tick: number; dumpAt?: number }> // coins they launched: launch MC, tick, planned dev dump
   busts: number
+  plans?: Record<string, ExitPlan> // bags bought from the market brain: how this bot means to get out
+  streak?: number // wins (+) or losses (-) in a row: moves its mood
 }
+
+/** What makes one bot different from another of the same style and level. */
+export interface Persona {
+  size: number // bet size × (0.6 careful … 1.6 big)
+  react: number // seconds between looks at the market
+  patience: number // hold time × (0.6 jumpy … 1.6 patient)
+  mistake: number // chance a decision is a bad one (chasing a top, selling too early)
+  tilt: 'chase' | 'scared' // after a losing streak: bets bigger, or gets small
+}
+/** How a bot talks in chat. */
+export interface Voice { caps: 'lower' | 'normal' | 'shout'; emoji: string[]; emojiRate: number; catchphrase: string; short: boolean }
 
 export interface BotSpec {
   id: string
   name: string
   avatar: string
   style: BotStyle
+  tier: Tier
   always: boolean // always online
   followers: number
   rep: number
+  persona: Persona
+  voice: Voice
 }
 
-export const BOT_ROSTER: BotSpec[] = [
-  { id: 'bot-sam', name: 'SniperSam 🤖', avatar: '🎯', style: 'sniper', always: true, followers: 12_000, rep: 55 },
-  { id: 'bot-wendy', name: 'WhaleWendy 🤖', avatar: '🐋', style: 'whale', always: false, followers: 48_000, rep: 68 },
-  { id: 'bot-pete', name: 'PaperPete 🤖', avatar: '📄', style: 'scalper', always: false, followers: 4_000, rep: 45 },
-  { id: 'bot-dan', name: 'DiamondDan 🤖', avatar: '💎', style: 'diamond', always: false, followers: 21_000, rep: 60 },
-  { id: 'bot-dana', name: 'DegenDana 🤖', avatar: '🦍', style: 'degen', always: true, followers: 9_000, rep: 40 },
-  { id: 'bot-carl', name: 'ChefCarl 🤖', avatar: '👨‍🍳', style: 'chef', always: true, followers: 30_000, rep: 50 },
-  // The second wave: enough of a crowd that the tape, the chat and the leaderboard always have someone on them.
-  { id: 'bot-kai', name: 'KaiTrenches 🤖', avatar: '⛏️', style: 'sniper', always: true, followers: 7_500, rep: 52 },
-  { id: 'bot-otto', name: 'ScalpOtto 🤖', avatar: '⚡', style: 'scalper', always: true, followers: 3_200, rep: 47 },
-  { id: 'bot-tess', name: 'TessTenX 🤖', avatar: '🚀', style: 'degen', always: true, followers: 15_000, rep: 44 },
-  { id: 'bot-mia', name: 'MoonMia 🤖', avatar: '🌙', style: 'degen', always: false, followers: 6_000, rep: 42 },
-  { id: 'bot-rex', name: 'RugRex 🤖', avatar: '🦖', style: 'sniper', always: false, followers: 2_800, rep: 38 },
-  { id: 'bot-luna', name: 'LunaLong 🤖', avatar: '🌕', style: 'diamond', always: false, followers: 18_000, rep: 62 },
-  { id: 'bot-bea', name: 'BagholderBea 🤖', avatar: '🎒', style: 'diamond', always: false, followers: 1_900, rep: 35 },
-  { id: 'bot-zed', name: 'ZedApe 🤖', avatar: '🐵', style: 'degen', always: false, followers: 5_400, rep: 41 },
-  { id: 'bot-ivy', name: 'IvyWhale 🤖', avatar: '🐳', style: 'whale', always: false, followers: 36_000, rep: 66 },
-  { id: 'bot-moe', name: 'MoeMomentum 🤖', avatar: '📈', style: 'whale', always: false, followers: 22_000, rep: 58 },
-  { id: 'bot-gus', name: 'GasFeeGus 🤖', avatar: '⛽', style: 'scalper', always: false, followers: 2_100, rep: 43 },
-  { id: 'bot-fin', name: 'FinFlipper 🤖', avatar: '🐬', style: 'scalper', always: false, followers: 4_600, rep: 49 },
-  { id: 'bot-pip', name: 'PipSniper 🤖', avatar: '🏹', style: 'sniper', always: false, followers: 8_800, rep: 54 },
-  { id: 'bot-nori', name: 'ChefNori 🤖', avatar: '🍣', style: 'chef', always: false, followers: 11_000, rep: 46 },
-]
+// ─── The crowd: 100 bots, each its own person ───────────────────────────────
+// Made from a fixed seed, so every restart gives the same names and personalities (wallets are saved per id). Don't
+// reorder these lists: that would rename the crowd and leave the old bots' saved wallets behind.
+const FIRST = ['jay', 'mo', 'lexi', 'dre', 'kenzo', 'rina', 'theo', 'nova', 'bash', 'ivy', 'ozzy', 'pia', 'remy', 'tara', 'vic', 'yuki', 'zane', 'cleo', 'dex', 'faye', 'gio', 'hana', 'ike', 'juno', 'kip', 'lola', 'milo', 'nia', 'otis', 'quin', 'rio', 'sage', 'tobi', 'uma', 'vik', 'wren', 'xan', 'yara', 'zuri', 'ash', 'bo', 'cass', 'dax', 'eli', 'fitz', 'gwen', 'hux', 'iris', 'jett', 'kai']
+const TRADE = ['apes', 'flips', 'snipes', 'holds', 'jeets', 'pumps', 'bags', 'scalps', 'moons', 'rugs', 'chads', 'cooks', 'dumps', 'trenches', 'degens', 'grinds', 'bids', 'fades', 'charts', 'yolos']
+const STYLE_WORDS: Record<BotStyle, string[]> = {
+  sniper: ['sniper', 'firstblock', 'early', 'launchhunter', 'zerosec'],
+  whale: ['whale', 'bigbag', 'deeppockets', 'sizeking', 'heavybid'],
+  scalper: ['scalp', 'quickflip', 'inout', 'tapemaxi', 'fastfinger'],
+  diamond: ['diamond', 'neverselling', 'hodl', 'convicted', 'longterm'],
+  degen: ['degen', 'fullport', 'yolo', 'gambler', 'sendit'],
+  dumper: ['jeet', 'dumpster', 'exitliq', 'takeprofit', 'rugpuller'],
+  chef: ['chef', 'cooker', 'devmode', 'launcher', 'kitchen'],
+}
+const AVATARS = ['🦊', '🐸', '🐺', '🦁', '🐯', '🐻', '🐼', '🐨', '🐙', '🦈', '🐬', '🦄', '🐲', '👽', '🤠', '😎', '🧙', '🥷', '🧛', '👻', '💀', '🤡', '🎩', '🎲', '🎰', '🔥', '⚡', '🌊', '🌵', '🍄', '🌶️', '🍕', '🍩', '🧃', '🛸', '🚀', '💎', '🪙', '📈', '🧨']
+const EMOJI = [['🚀', '🔥'], ['💀', '😭'], ['🫡', '💯'], ['👀', '🤔'], ['💰', '🤑'], ['🐸', '🦍'], ['😤', '😮‍💨'], ['🙏', '✨'], ['📉', '🩸'], ['🍀', '🎰']]
+const CATCH = ['lfg', 'ngmi', 'wagmi', 'trust the process', 'not financial advice', 'we ride', 'send it', 'cope', 'ez', 'gg', 'stay poor', 'dyor', 'few understand', 'its so over', 'we are so back', 'probably nothing', 'bullish', 'down bad', 'bag secured', 'up only']
+// How many of each style, and the skill mix: most people lose, a few win big (like the real market).
+const MIX: [BotStyle, number][] = [['sniper', 22], ['scalper', 20], ['degen', 18], ['diamond', 12], ['whale', 8], ['dumper', 10], ['chef', 10]]
+const TIER_POOL: Tier[] = ['pro', 'good', 'good', 'average', 'average', 'average', 'average', 'bad', 'bad', 'degen']
+const MISTAKES: Record<Tier, number> = { pro: 0.02, good: 0.04, average: 0.07, bad: 0.12, degen: 0.2 }
+const FOLLOWERS: Record<Tier, [number, number]> = { pro: [20_000, 60_000], good: [8_000, 25_000], average: [1_500, 9_000], bad: [500, 4_000], degen: [200, 3_000] }
+const REP: Record<Tier, [number, number]> = { pro: [60, 75], good: [52, 64], average: [42, 54], bad: [32, 44], degen: [25, 40] }
+
+function makeRoster(): BotSpec[] {
+  const rng = new Rng(0x6d6f6f6e) // fixed: same crowd every boot
+  const out: BotSpec[] = []
+  const used = new Set<string>()
+  let n = 0
+  for (const [si, [style, count]] of MIX.entries()) {
+    for (let i = 0; i < count; i++, n++) {
+      // Each style walks the whole skill pool, starting at a different place, so every style gets every level.
+      const tier = TIER_POOL[(i + si * 3) % TIER_POOL.length]
+      let handle = ''
+      for (let k = 0; !handle || used.has(handle); k++) {
+        const first = FIRST[rng.int(0, FIRST.length - 1)]
+        const pattern = rng.int(0, 3)
+        const word = pattern === 0 ? TRADE[rng.int(0, TRADE.length - 1)] : STYLE_WORDS[style][rng.int(0, STYLE_WORDS[style].length - 1)]
+        handle = pattern === 1 ? `${word}${first}` : pattern === 2 ? `${first}_${word}` : pattern === 3 ? `${first}${word}${rng.int(1, 99)}` : `${first}${word}`
+        if (k > 20) handle = `${handle}${n}`
+      }
+      used.add(handle)
+      const sniperish = style === 'sniper' || style === 'dumper'
+      out.push({
+        id: `bot-${handle.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+        name: `${handle} 🤖`,
+        avatar: AVATARS[rng.int(0, AVATARS.length - 1)],
+        style, tier,
+        always: rng.chance(0.12),
+        followers: rng.int(...FOLLOWERS[tier]),
+        rep: rng.int(...REP[tier]),
+        persona: {
+          size: Math.round(rng.range(0.6, 1.6) * 100) / 100,
+          react: sniperish ? rng.int(2, 6) : style === 'scalper' ? rng.int(3, 10) : rng.int(6, 25),
+          patience: Math.round(rng.range(0.6, 1.6) * 100) / 100,
+          mistake: MISTAKES[tier] * rng.range(0.6, 1.4),
+          tilt: tier === 'pro' || tier === 'good' ? (rng.chance(0.8) ? 'scared' : 'chase') : rng.chance(0.7) ? 'chase' : 'scared',
+        },
+        voice: {
+          caps: rng.chance(0.55) ? 'lower' : rng.chance(0.75) ? 'normal' : 'shout',
+          emoji: EMOJI[rng.int(0, EMOJI.length - 1)],
+          emojiRate: Math.round(rng.range(0, 0.7) * 100) / 100,
+          catchphrase: CATCH[rng.int(0, CATCH.length - 1)],
+          short: rng.chance(0.35),
+        },
+      })
+    }
+  }
+  return out
+}
+
+/** Everyone in the crowd; WORLD_BOTS (e.g. 20) runs fewer of them. */
+export const ALL_BOTS: BotSpec[] = makeRoster()
+export const BOT_ROSTER: BotSpec[] = ALL_BOTS.slice(0, Math.max(0, Math.min(ALL_BOTS.length, Number(process.env.WORLD_BOTS ?? ALL_BOTS.length) || 0)))
+export const BOT_BY_ID = new Map(BOT_ROSTER.map((s) => [s.id, s]))
+
+/** A chat line said the way this bot talks. */
+export function inVoice(spec: BotSpec | undefined, text: string, rng: Rng) {
+  if (!spec) return text
+  const v = spec.voice
+  let s = v.short && text.length > 28 && rng.chance(0.5) ? text.split(/[,.]/)[0] : text
+  if (rng.chance(0.08)) s = `${s}, ${v.catchphrase}`
+  if (rng.chance(v.emojiRate)) s = `${s} ${v.emoji[rng.int(0, v.emoji.length - 1)]}`
+  return v.caps === 'lower' ? s.toLowerCase() : v.caps === 'shout' && rng.chance(0.4) ? s.toUpperCase() : s
+}
 
 /** How each style trades: seconds between entry decisions, bag size (USD, share of cash), max bags, exits. */
 export const STYLE: Record<BotStyle, { every: [number, number]; size: [number, number]; share: number; maxBags: number; tp: number; sl: number | null; hold: number | null; mirror: WalletStyle }> = {
@@ -61,6 +141,7 @@ export const STYLE: Record<BotStyle, { every: [number, number]; size: [number, n
   scalper: { every: [15, 45], size: [150, 500], share: 0.2, maxBags: 2, tp: 0.12, sl: 0.08, hold: 180, mirror: 'degen' },
   diamond: { every: [90, 240], size: [300, 800], share: 0.15, maxBags: 5, tp: 3, sl: null, hold: null, mirror: 'smart' },
   degen: { every: [30, 90], size: [100, 100], share: 0.35, maxBags: 3, tp: 1, sl: 0.5, hold: 1200, mirror: 'degen' },
+  dumper: { every: [20, 60], size: [150, 600], share: 0.25, maxBags: 3, tp: 0.3, sl: 0.3, hold: 300, mirror: 'sniper' },
   chef: { every: [900, 1800], size: [0, 0], share: 0, maxBags: 0, tp: 0, sl: null, hold: null, mirror: 'fresh' },
 }
 
@@ -89,6 +170,7 @@ export function pickCoin(style: BotStyle, tokens: Token[], now: number, held: Se
   const pick = (list: Token[]) => (list.length ? list[rng.int(0, Math.min(list.length, 4) - 1)] : undefined)
   switch (style) {
     case 'sniper':
+    case 'dumper':
       return pick(ok.filter((t) => t.status === 'bonding' && now - t.createdAt < 120).sort((a, b) => b.createdAt - a.createdAt))
     case 'whale':
       return pick(ok.filter((t) => t.status === 'graduated' && t.mcap > 200_000 && t.change['5m'] > 0).sort((a, b) => b.mcap - a.mcap))

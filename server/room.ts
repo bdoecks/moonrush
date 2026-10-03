@@ -3,7 +3,8 @@
 // cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
 import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
-import { BOT_BUST_USD, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, mirrorWallet, pickCoin, STYLE, type BotBrain } from './bots'
+import { BOT_BUST_USD, BOT_BY_ID, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, inVoice, mirrorWallet, pickCoin, STYLE, type BotBrain, type BotSpec } from './bots'
+import { BUY_PACE, buysPerMinute, DEV_DUMP_CHANCE, devDumpAfter, draw, eye, safety, groupFor, PILE_ON_LIMIT, planExit, SIZE_SCALE, situation, type BrainGroup } from './brainBots'
 import { generatedLaunch } from '../src/data/tokens'
 import { valuePortfolio } from '../src/game/portfolioEngine'
 import { rollEvents } from '../src/game/eventEngine'
@@ -962,6 +963,14 @@ export class Room {
   private ensureBots() {
     if (!this.world) return
     const rng = new Rng((Math.random() * 2 ** 32) >>> 0)
+    // Bots no longer in the crowd (the original 20, or ones WORLD_BOTS turned off) leave the World with their wallets.
+    for (const [id, m] of this.members) {
+      if (m.info.bot && !BOT_BY_ID.has(id)) {
+        this.members.delete(id)
+        this.wallets = this.wallets.filter((x) => x.id !== id)
+        this.playersDirty = true
+      }
+    }
     for (const spec of BOT_ROSTER) {
       if (!this.members.has(spec.id)) {
         this.members.set(spec.id, {
@@ -1043,7 +1052,10 @@ export class Room {
     const all = !m.wallet.accounts?.[0]?.positions[t.id]
     this.realized(m, r.fills)
     this.mirrorFill(m, nt, r.fills[0], all ? 'all' : 'partial', actions)
-    if (all) delete m.brain!.entries[t.id]
+    if (all) {
+      delete m.brain!.entries[t.id]
+      if (m.brain!.plans) delete m.brain!.plans[t.id]
+    }
     return r.fills[0]
   }
 
@@ -1052,7 +1064,89 @@ export class Room {
     if (!reply && (this.market.tick - (m.brain?.lastChat ?? -999) < 90 || this.market.tick - this.lastBotChat < 20)) return
     m.brain!.lastChat = this.market.tick
     this.lastBotChat = this.market.tick
-    this.broadcast({ t: 'chat', from: m.info.id, name: m.info.name, avatar: m.info.avatar, text, time: Date.now() })
+    const said = inVoice(BOT_BY_ID.get(m.info.id), text, new Rng((Math.random() * 2 ** 32) >>> 0)) // each bot talks its own way
+    this.broadcast({ t: 'chat', from: m.info.id, name: m.info.name, avatar: m.info.avatar, text: said, time: Date.now() })
+  }
+
+  /** A bot looks at the market and maybe buys, the way real traders of its style and level did (server/brainBots.ts). */
+  private brainEntry(m: Member, spec: BotSpec, g: BrainGroup, held: number, rng: Rng, actions: WalletAction[]) {
+    const b = m.brain!
+    const p = spec.persona
+    const every = Math.max(1, Math.round(p.react * rng.range(0.7, 1.3)))
+    b.nextAct = this.market.tick + every
+    const w = this.walletOf(m)
+    if (!w || held >= STYLE[b.style].maxBags) return
+    // Mood: a winning run makes anyone bolder; a losing run makes "chase" types bet bigger and "scared" ones smaller.
+    const s = b.streak ?? 0
+    const mood = s >= 3 ? 1.25 : s <= -3 ? (p.tilt === 'chase' ? 1.5 : 0.6) : 1
+    // How likely a wallet like this opens a bag in this many seconds, from the recordings.
+    if (!rng.chance(Math.min(0.9, (buysPerMinute(g) / 60) * every * mood * BUY_PACE))) return
+    const solUsd = nativePrice(this.market, 'sol')
+    const now = this.market.time
+    const open = w.accounts?.[0]?.positions ?? {}
+    const live = this.market.tokens.filter((t) => (t.status === 'bonding' || t.status === 'graduated') && t.liquidity > 1_000 && !open[t.id])
+    if (!live.length) return
+    let t: Token | undefined
+    if (rng.chance(p.mistake)) t = [...live].sort((a, c) => c.change['5m'] - a.change['5m'])[0] // FOMO into whatever is already up the most
+    else {
+      // Weigh coins by how much more often real traders like this bought in that kind of moment.
+      const pool = live.length > 40 ? [...live.slice(0, 20), ...Array.from({ length: 20 }, () => live[rng.int(0, live.length - 1)])] : live
+      const safe = pool.map(safety)
+      const order = [...safe].sort((a, c) => a - c)
+      const rank = (v: number) => (order.indexOf(v) + 1) / order.length // 1 = the safest coin in view
+      const weights = pool.map((x, i) => (g.buyLift[situation(x, now, solUsd)] ?? 0.15) * eye(spec.tier, rank(safe[i]), x))
+      let r = rng.next() * weights.reduce((a, c) => a + c, 0)
+      t = pool.find((_, i) => (r -= weights[i]) <= 0) ?? pool[pool.length - 1]
+    }
+    const cashLike = w.cash + Object.entries(w.balances).reduce((a, [c, n]) => a + n * nativePrice(this.market, c as Chain), 0)
+    const usd = Math.min(draw(g.buySizeSol, rng) * SIZE_SCALE * p.size * mood * solUsd, cashLike * 0.35, t.liquidity * 0.03)
+    if (usd < 20) return
+    const f = this.botBuy(m, t, usd, actions)
+    if (!f) return
+    const plan = planExit(g, rng, p.patience)
+    // Dumpers sell their whole bag into the first decent pump.
+    if (b.style === 'dumper') Object.assign(plan, { target: Math.min(plan.target, rng.range(1.1, 1.5)), frac: 1, holdToEnd: false })
+    ;(b.plans ??= {})[t.id] = plan
+    if (rng.chance(0.25)) this.botChat(m, chatLine(b.style === 'sniper' || b.style === 'dumper' ? 'snipe' : b.style === 'whale' ? 'whale' : 'buy', rng, t.ticker))
+    if (rng.chance(0.06)) this.botPost(m, t, `${t.ticker} ${rng.chance(0.5) ? 'looks ready 🚀' : 'is the play today'}`)
+  }
+
+  /** A bag bought from the market brain: get out the way real traders like this one did. */
+  private brainExit(m: Member, spec: BotSpec, t: Token, qty: number, pnl: number, age: number, plan: NonNullable<BotBrain['plans']>[string], rng: Rng, actions: WalletAction[]) {
+    const b = m.brain!
+    const x = pnl + 1
+    const paperHands = rng.chance(spec.persona.mistake * 0.02) // now and then, out early for no good reason
+    const due = x >= plan.target || (!plan.holdToEnd && age >= plan.after) || (plan.holdToEnd && age >= plan.after * 8) || (plan.cutsLoss && x <= (plan.stop ?? 0.5)) || paperHands
+    if (!due) return
+    const part = plan.frac >= 1 ? qty : qty * plan.frac
+    // A big sell (a tenth of the coin's pool or more) waits if other bots just dumped this coin: real pile-ons happen,
+    // but the bots mustn't all crash one coin together.
+    const big = part * t.price >= t.liquidity * 0.1
+    if (big && !this.mayDump(t.id)) {
+      plan.after = age + rng.int(3, 10)
+      return
+    }
+    if (!this.botSell(m, t, part, actions)) return
+    if (big) this.noteDump(t.id)
+    if (b.plans?.[t.id]) {
+      // Sold part of it: the rest goes later, and only higher.
+      Object.assign(plan, { frac: 1, after: age + Math.max(5, plan.after * rng.range(0.3, 1)), target: Math.max(plan.target, x * 1.15) })
+      return
+    }
+    b.streak = x >= 1 ? Math.max(1, (b.streak ?? 0) + 1) : Math.min(-1, (b.streak ?? 0) - 1)
+    if (rng.chance(0.3)) this.botChat(m, chatLine(x >= 1 ? 'win' : 'loss', rng, t.ticker, pnl))
+  }
+
+  /** Bots' big sells per coin in the last 10 seconds (the pile-on limit). */
+  private bigSells = new Map<string, number[]>()
+  private mayDump(id: string) {
+    const recent = (this.bigSells.get(id) ?? []).filter((at) => this.market.tick - at < 10)
+    this.bigSells.set(id, recent)
+    return recent.length < PILE_ON_LIMIT
+  }
+  private noteDump(id: string) {
+    this.bigSells.set(id, [...(this.bigSells.get(id) ?? []), this.market.tick])
+    if (this.bigSells.size > 300) for (const [k, v] of this.bigSells) if (!v.some((at) => this.market.tick - at < 10)) this.bigSells.delete(k)
   }
 
   private botPost(m: Member, t: Token, text: string) {
@@ -1101,6 +1195,8 @@ export class Room {
         if (t.status !== 'bonding' && t.status !== 'graduated') {
           if (b.entries[t.id]) {
             delete b.entries[t.id]
+            if (b.plans) delete b.plans[t.id]
+            b.streak = Math.min(-1, (b.streak ?? 0) - 1)
             if (rng.chance(0.4)) this.botChat(m, chatLine('loss', rng, t.ticker, -0.9))
           }
           continue
@@ -1108,13 +1204,22 @@ export class Room {
         const e = (b.entries[t.id] ??= { tick, peak: t.price })
         e.peak = Math.max(e.peak, t.price)
         const pnl = t.price / Math.max(1e-18, pos.avgEntry) - 1
+        const plan = b.plans?.[t.id]
+        if (plan) {
+          this.brainExit(m, spec, t, pos.qty, pnl, tick - e.tick, plan, rng, actions)
+          continue
+        }
         const exit = pnl >= st.tp || (st.sl !== null && pnl <= -st.sl) || (st.hold !== null && tick - e.tick > st.hold)
         if (!exit || !rng.chance(0.5)) continue
         const f = this.botSell(m, t, pos.qty, actions)
         if (f && rng.chance(0.3)) this.botChat(m, chatLine(pnl >= 0 ? 'win' : 'loss', rng, t.ticker, pnl))
       }
 
+      const learned = b.style === 'chef' ? null : groupFor(b.style, spec.tier)
       if (b.style === 'chef') this.chefTick(m, rng, actions)
+      // Only bags in coins still trading count toward a bot's limit: a bag in a dead coin can't be sold, and would
+      // otherwise leave the bot unable to buy anything again.
+      else if (learned && tick >= b.nextAct) this.brainEntry(m, spec, learned, bags.filter((p) => { const x = byId.get(p.tokenId); return x && (x.status === 'bonding' || x.status === 'graduated') }).length, rng, actions)
       else if (tick >= b.nextAct) {
         b.nextAct = tick + rng.int(st.every[0], st.every[1])
         if (bags.length < st.maxBags) {
@@ -1175,10 +1280,19 @@ export class Room {
       }
       const ran = t.mcap >= c.mcap * 2.5 && rng.chance(0.02)
       const old = tick - c.tick > 1800
-      if (!ran && !old) continue
-      const frac = old ? 1 : rng.range(0.3, 0.6)
+      const dump = c.dumpAt !== undefined && tick >= c.dumpAt // the planned dev dump, timed like real devs'
+      if (!ran && !old && !dump) continue
+      const frac = old ? 1 : dump ? rng.range(0.5, 1) : rng.range(0.3, 0.6)
+      if (dump && !this.mayDump(id)) {
+        c.dumpAt = tick + rng.int(3, 10)
+        continue
+      }
       const f = this.botSell(m, t, held * frac, actions)
       if (!f) continue
+      if (dump) {
+        c.dumpAt = undefined
+        this.noteDump(id)
+      }
       if (old) delete b.cooked[id]
       else c.mcap = t.mcap // next dump only after another run
       this.playerEvents.push({ by: m.info.id, id: tick * 100 + 96, tick, time: this.market.time, kind: 'devsell', tokenId: t.id, ticker: t.ticker, text: `Dev (${m.info.name}) sold ${Math.round(frac * 100)}% of their ${t.ticker} bag`, icon: '🧑‍💻', tone: 'down' })
@@ -1221,7 +1335,10 @@ export class Room {
     this.botBuy(m, t, spec.devBuy * px, actions)
     const after = this.market.tokens.find((x) => x.id === id)!
     this.cooked.get(id)!.feeMark = after.creatorFees ?? 0
-    b.cooked[id] = { mcap: after.mcap, tick }
+    // Some devs dump their bag soon after launch, as on pump.fun; the worse the chef, the likelier.
+    const me = BOT_BY_ID.get(m.info.id)
+    const dumps = me ? DEV_DUMP_CHANCE[me.tier] : 0.5
+    b.cooked[id] = { mcap: after.mcap, tick, dumpAt: rng.chance(dumps) ? tick + Math.round(devDumpAfter(rng) * (me?.persona.patience ?? 1)) : undefined }
     this.playerEvents.push({ by: m.info.id, id: tick * 100 + 97, tick, time: this.market.time, kind: 'cook', tokenId: id, ticker, text: `${m.info.avatar} ${m.info.name} cooked ${ticker}`, icon: '🍳', tone: 'info' })
     this.botChat(m, chatLine('cook', rng, ticker))
     b.lastPost = tick - 900 // always shills its own launch

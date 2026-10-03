@@ -36,6 +36,7 @@ npx tsx scripts/kol-test.ts                 # KOL copy traders: followers copy a
 npx tsx scripts/charts-test.ts 30           # charts across a restart: short timeframes rebuilt from the real 1m candles
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
+npx tsx scripts/crowd-test.ts 3             # the 100 World bots: skill shows in results, dev dumps, pile-on limit, speed
 npx vite build                              # production build
 ```
 
@@ -54,6 +55,15 @@ bad / degen by return) and styles (sniper, scalper, whale, diamond, degen, dumpe
 per style/level, buy lift by situation (age × market cap × last-minute move), size, exit multiple and timing, plus
 market-wide dump stats (dev sells, big sells, pile-ons, rugs). Only aggregates, no wallet ids. Coins whose launch was
 not recorded are left out of the age-based odds. Summary for people: `bot-data/brain-summary.md`.
+
+**World bots** (`server/bots.ts`, `server/brainBots.ts`): 100 bots made from a fixed seed (`makeRoster`; don't reorder its
+lists, wallets are saved per id), each with a style, skill level (pro → degen), persona (bet size, reaction time,
+patience, mistake rate, tilt) and chat voice. Trading bots play from `server/data/market-brain.json` (copy
+`bot-data/brain.json` there after `npm run learn` to update): buy odds by situation × a level-based eye for coin safety (`safety`: risk score, dev and top-10 share, holders, liquidity, recent pump; measured to predict dying coins in the World), sizes
+(real SOL × `SIZE_SCALE`), exits from the real exit spread, moods from streaks. Chefs launch coins and dump on real
+dev-sell timing (`DEV_DUMP_CHANCE` by level). Big bot sells on one coin are capped at `PILE_ON_LIMIT` per 10s. Bots not in
+the roster (the original 20) are removed from the World with their wallets on boot. `WORLD_BOTS=20` on Render runs fewer.
+Without the brain file the bots fall back to the old `STYLE` rules.
 
 ## How it is deployed (read this before pushing)
 
@@ -85,7 +95,8 @@ not recorded are left out of the age-based odds. Summary for people: `bot-data/b
 | `src/net/client.ts` | Browser side of rooms: connect, apply ticks, reconcile wallets. |
 | `server/index.ts` | HTTP + WebSocket, identity, room lifecycle, saving, World boot. |
 | `server/room.ts` | One room: shared market tick, players, **every player's wallet**, cooking, bots, fees, cashback, admin actions. |
-| `server/bots.ts` | World bots: roster, styles, coin picking, chat lines. |
+| `server/bots.ts` | World bots: the 100-bot roster (personas, voices), styles, fallback coin picking, chat lines. |
+| `server/brainBots.ts` | The market brain the World bots trade from (`server/data/market-brain.json`). |
 | `server/persist.ts` | Saving rooms / the World to Supabase, gifts. |
 | `server/auth.ts`, `server/admin.ts` | Token checks, bans, the admin API. |
 | `src/components`, `src/pages` | UI. |
