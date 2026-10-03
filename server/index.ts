@@ -149,8 +149,11 @@ wss.on('connection', (ws: WebSocket) => {
       if (!room) return fail('No room with that code')
       if (!room.world && !room.members.has(msg.playerId) && room.members.size >= 12) return fail('Room is full (12 players)')
     }
+    if (!room.join(ws, { ...msg, name })) {
+      room = null
+      return fail('That player is already in this room on another device')
+    }
     playerId = msg.playerId
-    room.join(ws, { ...msg, name })
   }
   ws.on('close', () => room?.leave(playerId, ws))
 })

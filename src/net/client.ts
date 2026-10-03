@@ -67,6 +67,21 @@ export function playerId(): string {
 }
 export const mpSaveKey = () => `mpSave:${playerId()}`
 
+/**
+ * This browser's private key for a guest player id. Ids are public (everyone in a room sees them), so the server
+ * lets a guest back into their seat only with the key it saw first. Never sent anywhere but the hello.
+ */
+function seatKey(pid: string): string {
+  let k = load<string>(`mpKey:${pid}`)
+  if (!k) {
+    const bytes = new Uint8Array(18)
+    crypto.getRandomValues(bytes)
+    k = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+    save(`mpKey:${pid}`, k)
+  }
+  return k
+}
+
 export const mpProfile = () => ({ name: load<string>('mpName') ?? '', avatar: load<string>('mpAvatar') ?? '🐸' })
 export const setMpProfile = (name: string, avatar: string) => {
   save('mpName', name)
@@ -121,7 +136,7 @@ function open(opts: { create?: boolean; room?: string; name: string; avatar: str
   sock.onopen = async () => {
     const s = useGame.getState()
     const token = await accessToken()
-    send({ t: 'hello', name: opts.name, avatar: opts.avatar, level: levelFromXp(s.profile.xp).level, playerId: playerId(), room: opts.room, create: opts.create, token })
+    send({ t: 'hello', name: opts.name, avatar: opts.avatar, level: levelFromXp(s.profile.xp).level, playerId: playerId(), room: opts.room, create: opts.create, token, key: seatKey(playerId()) })
   }
   sock.onmessage = (e) => {
     let msg: ServerMsg
