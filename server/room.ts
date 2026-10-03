@@ -19,6 +19,7 @@ import { nativePrice } from '../src/game/tradingEngine'
 import { cashbackUsd } from '../src/game/rewardsEngine'
 import { claimGifts } from './persist'
 import { CHAINS } from '../src/data/chains'
+import { LAUNCHPADS } from '../src/data/launchpads'
 import { walletAddress } from '../src/utils/address'
 import { airdropFeePerWallet, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
@@ -718,6 +719,8 @@ export class Room {
     if (limit.blocked) return fail(limit.blocked)
     if (this.market.tick - (me.lastCookTick ?? -999) < COOK_COOLDOWN_TICKS) return fail('Kitchen cooling down')
     const chain = msg.token.chain
+    const pad = LAUNCHPADS[msg.token.pad]
+    if (!(chain in CHAINS) || !pad || pad.chain !== chain) return fail('Unknown chain or launchpad')
     const px = nativePrice(this.market, chain)
     const devWallet = accountOf(w, String(money.devWallet)) ? String(money.devWallet) : w.accounts?.[0]?.id ?? 'w-main'
     const b = money.bundle && money.bundle.wallets > 0 ? { wallets: Math.min(50, Math.round(money.bundle.wallets)), perWallet: Math.max(0, Number(money.bundle.perWallet) || 0), stagger: !!money.bundle.stagger } : null
@@ -732,9 +735,25 @@ export class Room {
     this.devStat(me, 'cooked', 1)
     if (this.world) me.cookTicks = [...(me.cookTicks ?? []).filter((t) => this.market.tick - t < 3600 / secPerTickOf(this.market)), this.market.tick]
     me.wallet = { ...w, cash: w.cash - usdCosts, feesPaid: w.feesPaid + COOK_FEE + bundleFees }
-    const token: NetToken = { ...msg.token, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, devAddr: walletAddress(me.info.id, devWallet, 'sol'), tape: msg.token.tape ?? [], status: 'bonding', creatorFees: 0 }
+    // The server builds the coin itself, the same way the game does, from the player's choices. Only the look comes
+    // from the message: a coin sent whole could carry any price, liquidity or hidden "always pump, never rug" sim.
+    const c0 = msg.token
+    const str = (s: unknown, n: number) => String(s ?? '').slice(0, n)
+    const taxPct = (n: unknown) => (Number.isFinite(n) ? Math.min(0.1, Math.max(0, Number(n))) : 0)
+    const spec: CookSpec = {
+      chain, pad: c0.pad, tax: { buy: taxPct(c0.tax?.buy), sell: taxPct(c0.tax?.sell) }, image: c0.image ? str(c0.image, 200_000) : undefined,
+      name: str(c0.name, 32), ticker: str(c0.ticker, 12), emoji: str(c0.emoji, 8), hue: Number(c0.hue) || 0, description: str(c0.description, 140),
+      narrative: c0.narrative as Narrative, socials: { x: !!c0.socials?.x, tg: !!c0.socials?.tg, web: !!c0.socials?.web },
+      style: money.style === 'hyped' || money.style === 'stealth' ? money.style : 'fair', marketing, devBuy: Math.max(0, Number(money.devBuy) || 0),
+      bundle: b ?? { wallets: 0, perWallet: 0, stagger: false }, vampOf: c0.vampOf?.id,
+    }
+    const built = cookToken(this.market, new Rng((Math.random() * 2 ** 32) >>> 0), spec).token
+    const token: NetToken = { ...built, id: str(c0.id, 64), creator: 'you', creatorId: me.info.id, creatorName: me.info.name, devAddr: walletAddress(me.info.id, devWallet, 'sol'), status: 'bonding', creatorFees: 0 }
     this.market = { ...this.market, tokens: [token, ...this.market.tokens] }
-    if (msg.candles) candleStore.set(token.id, msg.candles)
+    // cookToken drew the coin's first candle under its own id; move it to the id the game knows the coin by.
+    const firstCandles = candleStore.get(built.id)
+    candleStore.delete(built.id)
+    if (firstCandles) candleStore.set(token.id, firstCandles)
     this.freshIds.add(token.id)
     this.cooked.set(token.id, { pid: me.info.id, walletId: devWallet, chain, vault: 0, feeMark: 0, grad: false })
 
