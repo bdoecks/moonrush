@@ -320,20 +320,28 @@ export class Room {
         else this.bots.delete(msg.tokenId)
         return
       }
-      case 'status':
+      case 'status': {
+        // The room ranks players by these, so in a round they come from the wallet the server holds, not from what
+        // the game reports (a modified game could claim any score). Before a round, only sane numbers are kept.
+        const w = this.walletOf(me)
+        const num = (n: unknown) => (Number.isFinite(n) ? Math.max(0, Number(n)) : 0)
+        const score = w
+          ? { equity: valuePortfolio(w, new Map(this.market.tokens.map((t) => [t.id, t])), this.market).equity, startEquity: w.startBalance, trades: w.trades.length, wins: w.trades.filter((x) => x.side === 'sell' && (x.pnl ?? 0) > 0).length }
+          : { equity: num(msg.equity), startEquity: num(msg.startEquity), trades: Math.round(num(msg.trades)), wins: Math.round(num(msg.wins)) }
         me.info = {
-          ...me.info, equity: msg.equity, startEquity: msg.startEquity, trades: msg.trades, wins: msg.wins, level: msg.level, finished: msg.finished,
+          ...me.info, ...score, level: Math.min(999, Math.max(1, Math.round(num(msg.level)) || 1)), finished: !!msg.finished,
           ...(Number.isFinite(msg.seasonPoints) ? { seasonPoints: Math.max(0, Math.round(msg.seasonPoints!)) } : {}),
           ...(Array.isArray(msg.holdings)
             ? { holdings: msg.holdings.slice(0, 30).filter((h) => h && typeof h.tokenId === 'string' && h.qty > 0).map((h) => ({ tokenId: h.tokenId, qty: +h.qty || 0, cost: +h.cost || 0, openedAt: +h.openedAt || 0 })) }
             : {}),
         }
-        me.protect = msg.protect.slice(0, 200)
+        if (Array.isArray(msg.protect)) me.protect = msg.protect.filter((id) => typeof id === 'string').slice(0, 200)
         if (Array.isArray(msg.addrs)) me.addrs = msg.addrs.filter((a) => typeof a === 'string').slice(0, 12).map((a) => a.slice(0, 24))
         if (Number.isFinite(msg.cbVolume)) me.cbVolume = Math.max(0, Number(msg.cbVolume))
         if (msg.cbAuto === 'off' || msg.cbAuto === 'coin' || msg.cbAuto === 'usdc') me.cbAuto = msg.cbAuto
         this.playersDirty = true
         return
+      }
       case 'board':
         return this.sendBoard(me, msg.list)
       case 'candles':
