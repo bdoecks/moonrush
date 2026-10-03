@@ -586,64 +586,166 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   dead: { label: 'Dead', cls: 'text-dim bg-panel2' },
 }
 
+const hueOf = (str: string) => [...str].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 360
+
+/** The dev's track record at a glance (GMGN / Axiom dev panel): who they are, a trust score, every coin they made. */
 function DevTokenTab({ token }: { token: Token }) {
   const now = useGame((s) => s.market.time)
   const launches = useGame((s) => s.launches)
   const tokens = useGame((s) => s.market.tokens)
+  const notify = useGame((s) => s.notify)
+  const select = useGame((s) => s.select)
   const book = bookOf(token, now)
   const yours = token.creator === 'you'
-  const others = yours
+  const creatorName = (token as Token & { creatorName?: string }).creatorName
+  type Coin = { id?: string; ticker: string; name: string; emoji: string; ago: number; athMc: number; mc: number; status: string; holders: number; current?: boolean }
+  const others: Coin[] = yours
     ? launches.filter((l) => l.tokenId !== token.id).map((l) => {
         const live = tokens.find((x) => x.id === l.tokenId)
-        return { ticker: l.ticker, name: l.name, emoji: l.emoji, ago: now - l.launchedTime, athMc: l.peakMcap, mc: live?.mcap ?? l.lastMcap, status: live?.status ?? l.status, holders: live?.holders ?? 0 }
+        return { id: live?.id, ticker: l.ticker, name: l.name, emoji: l.emoji, ago: now - l.launchedTime, athMc: l.peakMcap, mc: live?.mcap ?? l.lastMcap, status: live?.status ?? l.status, holders: live?.holders ?? 0 }
       })
     : devHistory(token)
-  const all = [{ ticker: token.ticker, name: token.name, emoji: token.emoji, ago: now - token.createdAt, athMc: token.ath, mc: token.mcap, status: token.status as string, holders: token.holders, current: true }, ...others]
-  const migrated = all.filter((c) => c.status === 'migrated' || c.status === 'graduated').length
-  const rugged = all.filter((c) => c.status === 'rugged').length
-  const devAddr = yours ? 'You' : displayAddress(book.devWallet, token.chain)
+  const all: Coin[] = [{ id: token.id, ticker: token.ticker, name: token.name, emoji: token.emoji, ago: now - token.createdAt, athMc: token.ath, mc: token.mcap, status: token.status as string, holders: token.holders, current: true }, ...others]
+  const n = all.length
+  const count = (...st: string[]) => all.filter((c) => st.includes(c.status)).length
+  const migrated = count('migrated', 'graduated')
+  const rugged = count('rugged')
+  const onCurve = count('bonding')
+  const dead = n - migrated - rugged - onCurve
+  const best = all.reduce((b, c) => (c.athMc > b.athMc ? c : b), all[0])
+  const devAddr = displayAddress(book.devWallet, token.chain)
+  const devName = yours ? 'You' : creatorName ?? 'Dev wallet'
+  // What the dev did on this coin.
+  const dt = token.devTrades ?? []
+  const devBought = dt.filter((d) => d.side === 'buy').reduce((x, d) => x + d.usd, 0)
+  const devSold = dt.filter((d) => d.side === 'sell').reduce((x, d) => x + d.usd, 0)
+  const devPct = token.devPct
+  // A simple trust score: launches that made it count for the dev, rugs and a heavy dev bag against.
+  const score = Math.round(Math.max(0, Math.min(100, 55 + (migrated / n) * 55 - (rugged / n) * 75 - Math.max(0, devPct - 5) * 2.5 - (devSold > devBought * 0.6 && devSold > 0 ? 12 : 0) + (n === 1 ? -5 : 0))))
+  const verdict = score >= 70 ? { label: 'Trusted builder', cls: 'text-up', ring: '#19d989' } : score >= 45 ? { label: 'Mixed record', cls: 'text-warn', ring: '#ffb020' } : { label: 'High risk', cls: 'text-down', ring: '#ff4d6a' }
+  const tags: { label: string; cls: string }[] = []
+  if (yours) tags.push({ label: '⭐ Your coin', cls: 'border-accent/40 bg-accent/10 text-accent' })
+  if (creatorName?.includes('🤖')) tags.push({ label: '🤖 Bot dev', cls: 'border-info/40 bg-info/10 text-info' })
+  if (rugged >= 3) tags.push({ label: '⚠ Serial rugger', cls: 'border-down/40 bg-down/10 text-down' })
+  if (migrated >= 2) tags.push({ label: '🏆 Proven builder', cls: 'border-up/40 bg-up/10 text-up' })
+  if (n === 1) tags.push({ label: '🌱 First coin', cls: 'border-line2 bg-panel2 text-muted' })
+  if (devPct > 10) tags.push({ label: '🎒 Heavy dev bag', cls: 'border-warn/40 bg-warn/10 text-warn' })
+  if (devSold > 0 && devSold >= devBought * 0.6) tags.push({ label: '📤 Dev selling', cls: 'border-down/40 bg-down/10 text-down' })
+  const copy = () => {
+    navigator.clipboard?.writeText(devAddr).catch(() => {})
+    notify({ title: 'COPIED', body: `Dev address ${devAddr} (fictional)`, tone: 'info', icon: '📋' })
+  }
+  const pct = (x: number) => `${Math.round((x / n) * 100)}%`
+  const C = 2 * Math.PI * 22
+
   return (
-    <>
-      <Toolbar>
-        <span className="flex shrink-0 items-center gap-1.5 px-1 text-[11px] text-dim">
-          🧑‍💻 Dev <span className="num font-semibold text-ink">{devAddr}</span>
-          <span className="mx-1 h-3 w-px bg-line2" />
-          Created <span className="num text-ink">{all.length}</span>
-          · Migrated <span className="num text-up">{migrated}</span>
-          · Rugged <span className={clsx('num', rugged ? 'text-down' : 'text-ink')}>{rugged}</span>
-          · Holds <span className="num text-ink">{token.devPct.toFixed(2)}%</span> of this coin
-        </span>
-        {!yours && rugged >= 3 && <span className="ml-auto shrink-0 rounded bg-down/10 px-2 py-0.5 text-[10px] font-bold text-down">⚠ Serial rugger</span>}
-      </Toolbar>
-      <table className="w-full min-w-[640px] text-[12px]">
-        <thead className="sticky top-8 z-[1] bg-panel">
-          <tr>
-            <th className={clsx(th, 'text-left')}>Token</th>
-            <th className={clsx(th, 'text-left')}>Launched</th>
-            <th className={clsx(th, 'text-left')}>Status</th>
-            <th className={clsx(th, 'text-right')}>ATH MC</th>
-            <th className={clsx(th, 'text-right')}>MC</th>
-            <th className={clsx(th, 'text-right')}>Holders</th>
-          </tr>
-        </thead>
-        <tbody>
-          {all.map((c, i) => (
-            <tr key={`${c.ticker}-${i}`} className={clsx(row, 'current' in c && 'bg-accent/5')}>
-              <td className={td}>
-                <span className="mr-1.5">{c.emoji}</span>
-                <span className="font-semibold text-ink">${c.ticker}</span>
-                <span className="ml-1.5 text-[11px] text-dim">{c.name}</span>
-                {'current' in c && <span className="ml-2 rounded bg-accent/10 px-1 text-[9px] font-bold text-accent">THIS COIN</span>}
-              </td>
-              <td className={clsx(td, 'num text-muted')}>{fmtAge(c.ago)} ago</td>
-              <td className={td}><span className={clsx('rounded px-1.5 py-0.5 text-[10px] font-semibold', STATUS[c.status]?.cls)}>{STATUS[c.status]?.label ?? c.status}</span></td>
-              <td className={clsx(td, 'num text-right text-ink')}>{fmtCompact(c.athMc)}</td>
-              <td className={clsx(td, 'num text-right text-muted')}>{fmtCompact(c.mc)}</td>
-              <td className={clsx(td, 'num text-right text-muted')}>{fmtNum(c.holders)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
+    <div className="@container space-y-3 p-3">
+      <div className="grid gap-3 @3xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        {/* Who the dev is, and the verdict */}
+        <div className="relative overflow-hidden rounded-lg border border-line bg-panel2 p-3" style={{ backgroundImage: `radial-gradient(circle at 0% 0%, ${verdict.ring}22, transparent 60%)` }}>
+          <div className="flex items-start gap-3">
+            <div className="grid size-12 shrink-0 place-items-center rounded-full text-[22px] ring-2 ring-white/10" style={{ background: `radial-gradient(circle at 30% 25%, hsl(${hueOf(devAddr)} 75% 55%), hsl(${(hueOf(devAddr) + 50) % 360} 70% 22%))` }}>🧑‍💻</div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 truncate text-[14px] font-bold text-ink">{devName}</div>
+              <button onClick={copy} className="num mt-0.5 flex items-center gap-1 text-[11px] text-dim hover:text-ink" title="Copy the dev's (fictional) address">{devAddr} <span className="text-[10px]">⧉</span></button>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {tags.length ? tags.map((t) => <span key={t.label} className={clsx('whitespace-nowrap rounded border px-1.5 py-px text-[10px] font-semibold', t.cls)}>{t.label}</span>) : <span className="text-[10px] text-dim">No red flags on record</span>}
+              </div>
+            </div>
+            <div className="relative grid size-[56px] shrink-0 place-items-center" title="Dev score: launches that migrated count for the dev; rugs, a heavy dev bag and dev selling count against">
+              <svg viewBox="0 0 52 52" className="absolute inset-0 -rotate-90">
+                <circle cx="26" cy="26" r="22" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="5" />
+                <circle cx="26" cy="26" r="22" fill="none" stroke={verdict.ring} strokeWidth="5" strokeLinecap="round" strokeDasharray={`${Math.max(0.03, score / 100) * C} ${C}`} />
+              </svg>
+              <div className="text-center leading-none">
+                <div className={clsx('num text-[17px] font-bold', verdict.cls)}>{score}</div>
+                <div className="mt-0.5 text-[7px] font-bold tracking-wider text-dim">SCORE</div>
+              </div>
+            </div>
+          </div>
+          <div className={clsx('mt-2 text-[11px] font-semibold', verdict.cls)}>{verdict.label}<span className="font-normal text-dim"> · {n} coin{n > 1 ? 's' : ''} launched</span></div>
+        </div>
+
+        {/* The numbers */}
+        <div className="grid grid-cols-2 gap-2 @md:grid-cols-3">
+          <Tile label="Migrated" value={<span className="text-up">{migrated}</span>} sub={`${pct(migrated)} of launches`} />
+          <Tile label="Rugged" value={<span className={rugged ? 'text-down' : 'text-ink'}>{rugged}</span>} sub={`${pct(rugged)} of launches`} />
+          <Tile label="Best ATH" value={fmtCompact(best.athMc)} sub={<span className="truncate">${best.ticker}{best.current ? ' (this coin)' : ''}</span>} />
+          <Tile label="Dev holds" value={<span className={devPct > 10 ? 'text-warn' : 'text-ink'}>{devPct.toFixed(2)}%</span>} sub={<span className="mt-1 block h-1 overflow-hidden rounded-full bg-line2"><span className={clsx('block h-full', devPct > 10 ? 'bg-warn' : 'bg-info')} style={{ width: `${Math.min(100, devPct * 4)}%` }} /></span>} />
+          <Tile label="Dev bought" value={<span className="text-up">{devBought ? fmtCompact(devBought) : '--'}</span>} sub={`on $${token.ticker}`} />
+          <Tile label="Dev sold" value={<span className={devSold ? 'text-down' : 'text-ink'}>{devSold ? fmtCompact(devSold) : '--'}</span>} sub={devSold === 0 ? 'hasn’t sold' : devSold >= devBought ? 'sold it all or more' : `${Math.round((devSold / Math.max(1, devBought)) * 100)}% of buys`} />
+        </div>
+      </div>
+
+      {/* Track record bar */}
+      <div>
+        <div className="flex h-2 overflow-hidden rounded-full bg-line2">
+          {[[migrated, 'bg-up'], [onCurve, 'bg-info'], [dead, 'bg-dim'], [rugged, 'bg-down']].map(([v, cls], i) => (v as number) > 0 && <span key={i} className={cls as string} style={{ width: `${((v as number) / n) * 100}%` }} />)}
+        </div>
+        <div className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-dim">
+          <span><span className="mr-1 inline-block size-1.5 rounded-full bg-up" />Migrated {migrated}</span>
+          <span><span className="mr-1 inline-block size-1.5 rounded-full bg-info" />On curve {onCurve}</span>
+          <span><span className="mr-1 inline-block size-1.5 rounded-full bg-dim" />Dead {dead}</span>
+          <span><span className="mr-1 inline-block size-1.5 rounded-full bg-down" />Rugged {rugged}</span>
+        </div>
+      </div>
+
+      {/* Every coin the dev made */}
+      <div className="overflow-hidden rounded-lg border border-line">
+        <div className="grid grid-cols-[minmax(0,1fr)_78px_76px] @lg:grid-cols-[minmax(0,1fr)_90px_minmax(110px,1.1fr)_90px_70px] items-center gap-2 border-b border-line bg-panel2 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-dim">
+          <span>Coin</span><span>Status</span><span className="hidden @lg:block">ATH MC</span><span className="text-right">MC</span><span className="hidden text-right @lg:block">Holders</span>
+        </div>
+        {all.map((c, i) => {
+          const st = STATUS[c.status]
+          const fromAth = c.athMc > 0 ? c.mc / c.athMc - 1 : 0
+          const live = c.id && tokens.some((x) => x.id === c.id)
+          return (
+            <div key={`${c.ticker}-${i}`} onClick={() => !c.current && live && c.id && select(c.id)} className={clsx('grid grid-cols-[minmax(0,1fr)_78px_76px] @lg:grid-cols-[minmax(0,1fr)_90px_minmax(110px,1.1fr)_90px_70px] items-center gap-2 border-b border-line/30 px-3 py-2 text-[12px] last:border-0', c.current ? 'bg-accent/5' : live ? 'cursor-pointer hover:bg-panel2/70' : 'hover:bg-panel2/40')}>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className={clsx('grid size-8 shrink-0 place-items-center rounded-md text-[16px] ring-1 ring-white/10', (c.status === 'rugged' || c.status === 'dead') && 'opacity-60 grayscale')} style={{ background: `radial-gradient(circle at 30% 25%, hsl(${hueOf(c.ticker)} 80% 55% / 0.6), hsl(${(hueOf(c.ticker) + 40) % 360} 70% 20%))` }}>{c.emoji}</span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 truncate"><span className="font-bold text-ink">${c.ticker}</span>{c.current && <span className="rounded bg-accent/15 px-1 text-[9px] font-bold text-accent">THIS COIN</span>}</div>
+                  <div className="truncate text-[10px] text-dim">{c.name} · {fmtAge(c.ago)} ago</div>
+                </div>
+              </div>
+              <span><span className={clsx('rounded px-1.5 py-0.5 text-[10px] font-semibold', st?.cls)}>{st?.label ?? c.status}</span></span>
+              <div className="hidden @lg:block">
+                <div className="num text-ink">{fmtCompact(c.athMc)}</div>
+                <div className="mt-1 h-1 overflow-hidden rounded-full bg-line2"><div className="h-full rounded-full bg-gradient-to-r from-info to-up" style={{ width: `${Math.max(3, Math.min(100, (Math.log10(Math.max(1, c.athMc)) / Math.log10(Math.max(10, best.athMc))) * 100))}%` }} /></div>
+              </div>
+              <div className="text-right">
+                <div className="num text-ink">{fmtCompact(c.mc)}</div>
+                <div className={clsx('num text-[10px]', fromAth < -0.5 ? 'text-down' : 'text-dim')}>{fromAth < -0.005 ? `${Math.round(fromAth * 100)}% ATH` : 'at ATH'}</div>
+              </div>
+              <div className="num hidden text-right text-muted @lg:block">{fmtNum(c.holders)}</div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* The dev's moves on this coin */}
+      {dt.length > 0 && (
+        <div>
+          <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-dim">Dev activity on ${token.ticker}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {dt.slice(0, 12).map((d, i) => (
+              <span key={i} className={clsx('num rounded-md border px-2 py-1 text-[11px]', d.side === 'buy' ? 'border-up/30 bg-up/5 text-up' : 'border-down/30 bg-down/5 text-down')}>
+                {d.side === 'buy' ? 'Bought' : 'Sold'} {fmtCompact(d.usd)} <span className="text-dim">· {fmtAge(now - d.time)} ago</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Tile({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-line bg-panel2 px-3 py-2">
+      <div className="text-[10px] font-medium uppercase tracking-wider text-dim">{label}</div>
+      <div className="num mt-0.5 text-[17px] font-bold leading-tight text-ink">{value}</div>
+      {sub && <div className="mt-0.5 truncate text-[10px] text-dim">{sub}</div>}
+    </div>
   )
 }
