@@ -108,7 +108,7 @@ export interface BotRun {
 // ─── Wallets run by the server (rooms) ───────────────────────────────────────
 /** A buy or sell for the server to run on your wallets (it's the judge; your screen shows it instantly). */
 export type OrderMsg =
-  | { side: 'buy'; tokenId: string; walletIds: string[]; usdEach: number; setting?: TradeSetting; autoSwap?: boolean }
+  | { side: 'buy'; tokenId: string; walletIds: string[]; usdEach: number; setting?: TradeSetting; autoSwap?: boolean; kol?: { followers: number; rep: number } } // kol: your followers copy you
   | { side: 'sell'; tokenId: string; legs: { walletId: string; qty: number }[]; setting?: TradeSetting }
 /** A swap inside one wallet, or moving a coin between two of your wallets. */
 export type OpMsg =

@@ -20,7 +20,7 @@ import { emptyBalances, executeBuy, nativePrice, type Asset } from './tradingEng
 import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
 import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
-import { ACCOUNTS, CALL_SETTLE_TICKS, callerKey, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
+import { ACCOUNTS, CALL_SETTLE_TICKS, callerKey, copyBuys, copySells, type CopyBook, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import { WORLD_START_BALANCE, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
 import { payNative, runBuy, runConvert, runGiveAway, runSell, runSwap } from './orders'
@@ -526,6 +526,9 @@ function initialState() {
   }
 }
 
+/** Solo: what your followers' copy bots hold (rooms keep this on the server). */
+const soloCopyBook: CopyBook = {}
+
 export const useGame = create<GameState>()((set, get) => {
   const init = initialState()
 
@@ -576,6 +579,12 @@ export const useGame = create<GameState>()((set, get) => {
     return true
   }
 
+  /** Your follower count and reputation when you're a KOL (your followers copy your buys), else null. */
+  const kolOf = (s: GameState) => {
+    const soc = s.profile.social
+    return soc && soc.followers >= KOL_FOLLOWERS ? { followers: soc.followers, rep: soc.rep } : null
+  }
+
   function buyFrom(walletIds: string[], usd: number, id: string, slot?: number, label?: string): boolean {
     if (watchingOnly()) return false
     const s = get()
@@ -586,7 +595,7 @@ export const useGame = create<GameState>()((set, get) => {
     let market = r.market
     const { fills, failures, firstTimeToken, swappedUsd } = r
     // Rooms: the server runs the same order and its result wins (this one just shows it instantly).
-    if (s.online && netHooks.order) portfolio = tagRef(portfolio, fills.length, netHooks.order({ side: 'buy', tokenId: id, walletIds, usdEach: usd, setting, autoSwap: s.settings.autoSwap }))
+    if (s.online && netHooks.order) portfolio = tagRef(portfolio, fills.length, netHooks.order({ side: 'buy', tokenId: id, walletIds, usdEach: usd, setting, autoSwap: s.settings.autoSwap, ...(kolOf(s) ? { kol: kolOf(s)! } : {}) }))
     if (!fills.length) {
       quietly(() => set({ portfolio }))
       s.notify({ title: failures[0]?.includes('Slippage') ? 'TX FAILED' : 'ORDER REJECTED', body: failures.join(' · ') || 'No wallet selected', tone: 'warn', icon: '⛔' }, 'alert')
@@ -624,6 +633,14 @@ export const useGame = create<GameState>()((set, get) => {
         }
       })
       if (newLinks.length) s.notify({ title: 'WALLET LINKED TO DEV 🔗', body: `Sleuths tied ${newLinks.map((w) => accountOf(portfolio, w)?.name ?? w).join(', ')} to your dev wallet on $${t.ticker}. Hype took a hit (dev % is still only your deployer's bag).`, tone: 'down', icon: '🔗' }, 'alert')
+    }
+    if (!s.online) {
+      const kol = kolOf(s)
+      const wave = kol && copyBuys(market, new Rng((Math.random() * 2 ** 32) >>> 0), market.tokens.find((x) => x.id === id) ?? t, kol, fills.reduce((a, f) => a + f.value, 0), soloCopyBook)
+      if (wave) {
+        market = { ...market, shillQueue: [...(market.shillQueue ?? []), ...wave.queue] }
+        s.notify({ title: 'COPY TRADERS', body: `👥 ${wave.copiers} copy trader${wave.copiers > 1 ? 's are' : ' is'} following your buy of $${t.ticker} (~${fmtUsd(wave.usd, 0)})`, tone: 'info', icon: '👥' })
+      }
     }
     quietly(() => set({
       portfolio, market, launches, events,
@@ -1281,6 +1298,11 @@ export const useGame = create<GameState>()((set, get) => {
       const r = runSell(s.portfolio, s.market, legs, id, { setting })
       let portfolio = r.portfolio
       let market = r.market
+      // Solo: your copy traders sell the same share behind you (in rooms the server does this).
+      if (!s.online && r.fills.length && tokS) {
+        const wave = copySells(market, new Rng((Math.random() * 2 ** 32) >>> 0), market.tokens.find((x) => x.id === id) ?? tokS, frac, soloCopyBook)
+        if (wave) market = { ...market, shillQueue: [...(market.shillQueue ?? []), ...wave.queue] }
+      }
       const { fills, failures } = r
       if (s.online && netHooks.order) portfolio = tagRef(portfolio, fills.length, netHooks.order({ side: 'sell', tokenId: id, legs, setting }))
       if (!fills.length) {

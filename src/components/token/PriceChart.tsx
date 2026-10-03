@@ -80,6 +80,7 @@ export function PriceChart(o: ChartOptions) {
   const hovering = useRef(false)
   const lastTime = useRef(0)
   const [legend, setLegend] = useState<Legend | null>(null)
+  const [tip, setTip] = useState<{ b: Bubble; x: number; y: number } | null>(null) // the marker under the mouse
   const tick = useGame((s) => s.market.tick)
   const trades = useGame((s) => s.portfolio.trades)
   const accent = useGame((s) => s.settings.accent)
@@ -165,6 +166,9 @@ export function PriceChart(o: ChartOptions) {
     setLegend(lastLegend())
 
     const onMove = (p: MouseEventParams<Time>) => {
+      // Over a trade marker: show who traded, how much and at what market cap (like Axiom / GMGN).
+      const hitB = p.point ? bubbles.hit(p.point.x, p.point.y) : null
+      setTip((cur) => (hitB ? { b: hitB, x: p.point!.x, y: p.point!.y } : cur ? null : cur))
       const bar = p.seriesData.get(s) as { open?: number; high?: number; low?: number; close?: number; value?: number } | undefined
       const vb = p.seriesData.get(v) as { value?: number } | undefined
       if (!p.time || !bar) {
@@ -412,19 +416,20 @@ export function PriceChart(o: ChartOptions) {
     const bucket = (time: number) => Math.floor(time / tfs) * tfs
     const closeAt = new Map((data ?? []).map((c) => [c.time, c.close]))
     const barAt = new Map((data ?? []).map((c) => [c.time, c]))
-    const groups = new Map<string, { time: number; side: 'buy' | 'sell'; kind: MarkerKind; label: string; n: number; px: number }>()
+    const groups = new Map<string, { time: number; side: 'buy' | 'sell'; kind: MarkerKind; label: string; n: number; px: number; who: string; usd: number }>()
     // price: the fill price per token, or undefined to pin the bubble at the candle's close (dev trades carry no price).
-    const add = (time: number, side: 'buy' | 'sell', kind: MarkerKind, label: string, price?: number) => {
+    const add = (time: number, side: 'buy' | 'sell', kind: MarkerKind, label: string, price: number | undefined, who: string, usd: number) => {
       if (time < first) return
       const t = bucket(time)
       const px = price ?? closeAt.get(t)
       if (!px) return
-      const key = `${t}|${kind}|${label}|${side}`
+      const key = `${t}|${kind}|${label}|${who}|${side}`
       const g = groups.get(key)
       if (g) {
         g.px = (g.px * g.n + px) / (g.n + 1)
         g.n++
-      } else groups.set(key, { time: t, side, kind, label, n: 1, px })
+        g.usd += usd
+      } else groups.set(key, { time: t, side, kind, label, n: 1, px, who, usd })
     }
     const mine = creatorIsYou
     // On a coin you cooked, only the deployer wallet trades as the dev.
@@ -432,20 +437,20 @@ export function PriceChart(o: ChartOptions) {
     for (const t of trades) {
       if (t.tokenId !== tokenId) continue
       const isDev = mine && devIds.includes(t.walletId ?? firstWallet ?? '')
-      if (isDev ? markerKinds.dev || markerKinds.me : markerKinds.me) add(t.time, t.side, isDev ? 'dev' : 'me', isDev ? 'D' : '', t.price)
+      if (isDev ? markerKinds.dev || markerKinds.me : markerKinds.me) add(t.time, t.side, isDev ? 'dev' : 'me', isDev ? 'D' : '', t.price, isDev ? 'You (dev)' : 'You', t.value)
     }
-    if (markerKinds.dev && !mine) for (const d of devTrades ?? []) add(d.time, d.side, 'dev', 'D')
+    if (markerKinds.dev && !mine) for (const d of devTrades ?? []) add(d.time, d.side, 'dev', 'D', undefined, 'Dev', d.usd)
     if (markerKinds.tracked) {
       for (const w of wallets) {
         if (!tracked.includes(w.id)) continue
-        for (const tr of w.trades) if (tr.tokenId === tokenId) add(tr.time, tr.side, 'tracked', w.avatar, tr.price)
+        for (const tr of w.trades) if (tr.tokenId === tokenId) add(tr.time, tr.side, 'tracked', w.avatar, tr.price, w.name, tr.usd)
       }
     }
     // KOLs and smart money trading this coin (Axiom shows them with their avatars).
     if (markerKinds.kol !== false) {
       for (const w of wallets) {
         if (tracked.includes(w.id) || (w.style !== 'kol' && w.style !== 'smart')) continue
-        for (const tr of w.trades) if (tr.tokenId === tokenId) add(tr.time, tr.side, 'kol', w.avatar, tr.price)
+        for (const tr of w.trades) if (tr.tokenId === tokenId) add(tr.time, tr.side, 'kol', w.avatar, tr.price, w.name, tr.usd)
       }
     }
     // Friends in your room: every main-wallet trade is public (their avatar); side wallets only if you track the address.
@@ -453,8 +458,8 @@ export function PriceChart(o: ChartOptions) {
       const avatar = new Map(online.players.map((p) => [p.id, p.avatar]))
       for (const tr of friendTrades) {
         if (tr.tokenId !== tokenId) continue
-        if (tr.pid) add(tr.time, tr.side, 'friends', avatar.get(tr.pid) ?? '🧑', tr.price)
-        else if (tr.addr && friendWatch.some((w) => w.key === `a:${tr.addr}`)) add(tr.time, tr.side, 'friends', '🕶', tr.price)
+        if (tr.pid) add(tr.time, tr.side, 'friends', avatar.get(tr.pid) ?? '🧑', tr.price, tr.name, tr.usd)
+        else if (tr.addr && friendWatch.some((w) => w.key === `a:${tr.addr}`)) add(tr.time, tr.side, 'friends', '🕶', tr.price, tr.name, tr.usd)
       }
     }
     const b: Bubble[] = [...groups.values()]
@@ -462,7 +467,7 @@ export function PriceChart(o: ChartOptions) {
         const buy = g.side === 'buy'
         const sideColor = buy ? UP : DOWN
         const bar = barAt.get(g.time)
-        const base = { time: g.time, price: g.px * k, low: (bar ? Math.min(bar.low, g.px) : g.px) * k, high: (bar ? Math.max(bar.high, g.px) : g.px) * k, side: g.side, kind: g.kind, n: g.n }
+        const base = { who: g.who, usd: g.usd, mc: g.px * SUPPLY, time: g.time, price: g.px * k, low: (bar ? Math.min(bar.low, g.px) : g.px) * k, high: (bar ? Math.max(bar.high, g.px) : g.px) * k, side: g.side, kind: g.kind, n: g.n }
         if (g.kind === 'kol') return { ...base, text: g.label, color: '#2a1f08', ink: '#fff', ring: sideColor, face: g.label, bg: '#3a2a0c' }
         if (g.kind === 'tracked') return { ...base, text: g.label, color: '#161a22', ink: '#fff', ring: sideColor, face: g.label, bg: '#10263a' }
         if (g.kind === 'friends') return { ...base, text: g.label, color: '#2a1840', ink: '#fff', ring: sideColor, face: g.label, bg: '#2a1840' }
@@ -478,6 +483,7 @@ export function PriceChart(o: ChartOptions) {
   return (
     <div className="relative h-full w-full">
       <div ref={el} className="absolute inset-0" />
+      {tip && <MarkerTip {...tip} width={el.current?.clientWidth ?? 0} />}
       {legend && (
         <div className="pointer-events-none absolute left-2 top-1.5 z-10 space-y-0.5 text-[11px]">
           <div className="flex flex-wrap items-center gap-x-2 num">
@@ -493,6 +499,23 @@ export function PriceChart(o: ChartOptions) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/** Hover card for a trade marker: who, bought / sold how much, at what market cap (Axiom / GMGN style). */
+function MarkerTip({ b, x, y, width }: { b: Bubble; x: number; y: number; width: number }) {
+  const flip = width > 380 && x > width - 190 // near the right edge (the newest candles): open to the left
+  const buy = b.side === 'buy'
+  const face = b.face ?? (b.kind === 'dev' ? '🧑‍💻' : b.text)
+  return (
+    <div className="pointer-events-none absolute z-20 min-w-[150px] rounded-md border border-line2 bg-panel/95 px-2.5 py-1.5 text-[11px] shadow-xl shadow-black/50 backdrop-blur" style={{ ...(flip ? { right: width - x + 14 } : { left: x + 14 }), top: Math.max(4, y - 30) }}>
+      <div className="flex items-center gap-1.5 font-semibold text-ink"><span className="text-[13px] leading-none">{face}</span>{b.who ?? (buy ? 'Buy' : 'Sell')}</div>
+      <div className="num mt-0.5">
+        <span className={buy ? 'text-up' : 'text-down'}>{buy ? 'Bought' : 'Sold'} {fmtCompact(b.usd ?? 0)}</span>
+        {b.n > 1 && <span className="text-dim"> · {b.n} trades</span>}
+      </div>
+      {b.mc ? <div className="num text-dim">at {fmtCompact(b.mc)} MC{b.n > 1 ? ' (avg)' : ''}</div> : null}
     </div>
   )
 }

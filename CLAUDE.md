@@ -32,6 +32,7 @@ npx tsx scripts/p2c-test.ts                 # 20 checks: server-run money (order
 npx tsx scripts/world-test.ts               # World rules: always on, guests watch, wallets kept, admin reset
 npx tsx scripts/bots-test.ts 2              # World bots over 2 simulated hours
 npx tsx scripts/safety-test.ts              # chat safety: filter, rate limit, mute, reports
+npx tsx scripts/kol-test.ts                 # KOL copy traders: followers copy a KOL's buys and sells
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
 npx vite build                              # production build

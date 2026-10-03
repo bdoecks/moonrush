@@ -246,6 +246,7 @@ function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
     useGame.getState().requestBoard()
     return
   }
+  if (msg.note) s.notify({ title: 'COPY TRADERS', body: msg.note, tone: 'info', icon: '👥' }) // e.g. your followers copying your buy
   let p = s.portfolio
   if (msg.ref !== undefined) {
     const mine = p.trades.filter((t) => t.ref === msg.ref)

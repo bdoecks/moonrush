@@ -23,7 +23,13 @@ export interface Bubble {
   ring?: string // outline for avatar markers (their side colour)
   face?: string // avatar style: the trader's avatar (emoji) or initials
   bg?: string // avatar style: circle colour behind the face
+  // For the hover card (Axiom / GMGN show who traded, how much, and at what market cap).
+  who?: string
+  usd?: number // total of the merged trades
+  mc?: number // average market cap at the fills (USD)
 }
+
+type Box = { x: number; y: number; w: number; h: number }
 
 type Target = Parameters<IPrimitivePaneRenderer['draw']>[0]
 type Ctx = CanvasRenderingContext2D
@@ -37,6 +43,7 @@ const DOWN = '#ff4d6a'
 
 export class TradeBubbles implements ISeriesPrimitive<Time> {
   private bubbles: Bubble[] = []
+  private hits: (Box & { b: Bubble })[] = [] // where each marker was last drawn, for hovering
   private style: MarkerStyle = 'avatars'
   private p: SeriesAttachedParameter<Time> | null = null
   private readonly view: IPrimitivePaneView
@@ -64,8 +71,18 @@ export class TradeBubbles implements ISeriesPrimitive<Time> {
     this.p?.requestUpdate()
   }
 
+  /** The marker under a point on the chart (CSS pixels), topmost first, or null. */
+  hit(x: number, y: number): Bubble | null {
+    for (let i = this.hits.length - 1; i >= 0; i--) {
+      const h = this.hits[i]
+      if (x >= h.x - 2 && x <= h.x + h.w + 2 && y >= h.y - 2 && y <= h.y + h.h + 2) return h.b
+    }
+    return null
+  }
+
   private draw(target: Target) {
     const p = this.p
+    this.hits = []
     if (!p || !this.bubbles.length) return
     const ts = p.chart.timeScale()
     target.useMediaCoordinateSpace(({ context: ctx }) => {
@@ -82,13 +99,13 @@ export class TradeBubbles implements ISeriesPrimitive<Time> {
         if (this.style === 'avatars') {
           const y0 = p.series.priceToCoordinate(b.price)
           // Clusters on one bar fan out a little, like Axiom's piles of avatars.
-          if (y0 !== null) drawAvatar(ctx, b, x + (i % 2 ? 7 : 0) * (i ? 1 : 0), y0 + (b.side === 'buy' ? 1 : -1) * i * 9)
+          if (y0 !== null) this.hits.push({ ...drawAvatar(ctx, b, x + (i % 2 ? 7 : 0) * (i ? 1 : 0), y0 + (b.side === 'buy' ? 1 : -1) * i * 9), b })
         } else if (this.style === 'bubbles') {
           const y0 = p.series.priceToCoordinate(b.price)
-          if (y0 !== null) drawBubble(ctx, b, x, y0 + (b.side === 'buy' ? 1 : -1) * i * (R * 2 + 2))
+          if (y0 !== null) this.hits.push({ ...drawBubble(ctx, b, x, y0 + (b.side === 'buy' ? 1 : -1) * i * (R * 2 + 2)), b })
         } else {
           const edge = p.series.priceToCoordinate(b.side === 'buy' ? b.low : b.high)
-          if (edge !== null) drawTag(ctx, b, x, edge, i)
+          if (edge !== null) this.hits.push({ ...drawTag(ctx, b, x, edge, i), b })
         }
       }
     })
@@ -96,7 +113,7 @@ export class TradeBubbles implements ISeriesPrimitive<Time> {
 }
 
 /** GMGN / Axiom tag: under the candle for buys, over it for sells, with a small pointer at the candle. */
-function drawTag(ctx: Ctx, b: Bubble, x: number, edge: number, i: number) {
+function drawTag(ctx: Ctx, b: Bubble, x: number, edge: number, i: number): Box {
   const buy = b.side === 'buy'
   const dir = buy ? 1 : -1 // buys go down (below the low), sells up (above the high)
   const avatar = b.kind === 'tracked' || b.kind === 'friends'
@@ -145,10 +162,11 @@ function drawTag(ctx: Ctx, b: Bubble, x: number, edge: number, i: number) {
 
   if (b.n > 1) countBadge(ctx, b.n, x - w / 2 + 1, top + (buy ? TAG_H - 1 : 1), avatar ? side : b.color)
   ctx.font = FONT
+  return { x: x - w / 2, y: top, w, h: TAG_H }
 }
 
 /** Axiom: the trader's avatar in a circle on the fill price, ringed green (buy) or red (sell), with a side dot. */
-function drawAvatar(ctx: Ctx, b: Bubble, x: number, y: number) {
+function drawAvatar(ctx: Ctx, b: Bubble, x: number, y: number): Box {
   const buy = b.side === 'buy'
   const side = buy ? UP : DOWN
   const r = 10
@@ -185,10 +203,11 @@ function drawAvatar(ctx: Ctx, b: Bubble, x: number, y: number) {
   ctx.fillText(buy ? 'B' : 'S', bx, by + 0.5)
   if (b.n > 1) countBadge(ctx, b.n, x - r * 0.75, y - r * 0.75, side)
   ctx.font = FONT
+  return { x: x - r, y: y - r, w: r * 2, h: r * 2 }
 }
 
 /** Classic: a round badge on the candle at the fill price. */
-function drawBubble(ctx: Ctx, b: Bubble, x: number, y: number) {
+function drawBubble(ctx: Ctx, b: Bubble, x: number, y: number): Box {
   ctx.font = FONT
   const w = Math.max(R * 2, ctx.measureText(b.text).width + 8)
   ctx.beginPath()
@@ -201,6 +220,7 @@ function drawBubble(ctx: Ctx, b: Bubble, x: number, y: number) {
   ctx.fillStyle = b.ink
   ctx.fillText(b.text, x, y + 0.5)
   if (b.n > 1) countBadge(ctx, b.n, x + w / 2 - 1, y - R + 1, b.ring ?? b.color)
+  return { x: x - w / 2, y: y - R, w, h: R * 2 }
 }
 
 /** Merged trades: a small count on the marker's corner. */

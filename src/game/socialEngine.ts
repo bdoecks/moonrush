@@ -115,6 +115,54 @@ export function settleCall(s: SocialProfile, x: number, likes: number): SocialPr
   return { ...s, rep: Math.max(0, Math.min(100, s.rep + repDelta)), followers: Math.max(10, s.followers + followerGain) }
 }
 
+// ─── KOL copy traders ────────────────────────────────────────────────────────
+// Once you're a KOL (10k+ followers), some followers run copy-trade bots on your wallet: they buy a few seconds after
+// you, and sell when you sell. More followers and a better reputation = more of them. They're anonymous wallets on the
+// same curve / pool as everyone, so they push the price up behind your buy and down behind your sell.
+export const COPY_MIN_USD = 20 // smaller buys don't set the copiers off
+export const COPY_GAP_TICKS = 60 // one wave per coin per minute (buying in pieces doesn't summon more)
+
+/** What your copiers hold, per coin: how many tokens, and when they last piled in. */
+export type CopyBook = Record<string, { qty: number; at: number }>
+
+export interface CopyWave {
+  queue: NonNullable<MarketState['shillQueue']>
+  copiers: number
+  usd: number
+}
+
+/** Your followers' copy buys after you buy `usd` of a coin (nothing if you're not a KOL, too small, or too soon). */
+export function copyBuys(m: MarketState, rng: Rng, t: Token, author: { followers: number; rep: number }, usd: number, book: CopyBook): CopyWave | null {
+  if (author.followers < KOL_FOLLOWERS || usd < COPY_MIN_USD || (t.status !== 'bonding' && t.status !== 'graduated')) return null
+  if (m.tick - (book[t.id]?.at ?? -1e9) < COPY_GAP_TICKS) return null
+  const trust = Math.max(0, Math.min(1, author.rep / 100))
+  // 10k followers ≈ a handful; 100k+ ≈ a crowd (capped so one buy can't move a coin forever).
+  const copiers = Math.min(40, rng.poisson((author.followers / 1000) * (0.25 + trust) * 0.5))
+  if (!copiers) return null
+  let total = 0
+  let qty = 0
+  const queue = Array.from({ length: copiers }, () => {
+    const each = Math.max(5, Math.min(usd, 30 * Math.exp(0.8 * rng.gauss()) * (1 + trust))) // never more than you put in
+    total += each
+    qty += (each / Math.max(1e-18, t.price)) * 0.85 // they buy after you, a bit higher
+    return { tokenId: t.id, atTick: m.tick + rng.int(1, 8), usd: each, wallet: walletName(rng) } // copy bots are quick
+  })
+  book[t.id] = { qty: (book[t.id]?.qty ?? 0) + qty, at: m.tick }
+  return { queue, copiers, usd: total }
+}
+
+/** Your copiers sell the same share of their bag as you just sold of yours. */
+export function copySells(m: MarketState, rng: Rng, t: Token, fraction: number, book: CopyBook): CopyWave | null {
+  const held = book[t.id]?.qty ?? 0
+  if (!(held > 0) || !(fraction > 0)) return null
+  const qty = fraction >= 0.999 ? held : held * fraction
+  const n = Math.max(1, Math.min(12, Math.round(Math.sqrt(qty * t.price / 20))))
+  const queue = Array.from({ length: n }, () => ({ tokenId: t.id, atTick: m.tick + rng.int(1, 6), usd: 0, wallet: walletName(rng), side: 'sell' as const, qty: qty / n }))
+  if (fraction >= 0.999) delete book[t.id]
+  else book[t.id] = { ...book[t.id], qty: held - qty }
+  return { queue, copiers: n, usd: qty * t.price }
+}
+
 /** Generate this tick's posts from wallet actions, market events and ambient chatter. May nudge called tokens. */
 export function tickSocial(m: MarketState, rng: Rng, actions: WalletAction[], events: MarketEvent[]): SocialPost[] {
   const posts: SocialPost[] = []

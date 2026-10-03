@@ -8,7 +8,7 @@ import { generatedLaunch } from '../src/data/tokens'
 import { valuePortfolio } from '../src/game/portfolioEngine'
 import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
-import { POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
+import { copyBuys, copySells, type CopyBook, POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
 import { seasonNumber } from '../src/game/season'
 import { AUTO_MUTE_MS, moderate, rateCheck, strike, type ChatMeter } from './moderation'
 import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
@@ -66,6 +66,7 @@ interface Member {
   cooks?: number // coins cooked this round
   lastCookTick?: number
   cookTicks?: number[] // the World: when their recent launches were (the hourly limit)
+  copyBook?: CopyBook // KOLs: what their followers' copy bots hold, per coin
   brain?: BotBrain // World bots only
   // World leaderboards: where this week's profit is measured from, and bankruptcy restarts.
   weekBase?: { week: number; pnl: number }
@@ -110,6 +111,8 @@ export interface RoomSnapshot {
   cooked?: [string, Cooked][]
   reports?: ChatReport[]
 }
+
+const fmtUsdShort = (n: number) => (n >= 1000 ? `$${(n / 1000).toFixed(1)}K` : `$${Math.round(n)}`)
 
 export class Room {
   readonly code: string
@@ -166,7 +169,7 @@ export class Room {
       lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()], reports: this.reports.slice(0, 100),
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: m.info.bot ? m.info.online : false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
-        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, brain: m.brain,
+        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, copyBook: m.copyBook, brain: m.brain,
         weekBase: m.weekBase, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
       })),
     }
@@ -475,6 +478,7 @@ export class Room {
       m.cooks = 0
       m.lastCookTick = undefined
       m.cookTicks = undefined
+      m.copyBook = undefined
     }
     this.broadcast({ t: 'round', round: this.round, market: this.netMarket(), wallets: round(this.wallets) as SimWallet[] })
     for (const m of this.members.values()) this.sendWallet(m)
@@ -495,7 +499,7 @@ export class Room {
   }
 
   /** Tell a player their wallets as the server has them (after the wallet message numbered `m.ack`). */
-  private sendWallet(m: Member, extra: { ref?: number; fills?: Trade[]; failures?: string[] } = {}) {
+  private sendWallet(m: Member, extra: { ref?: number; fills?: Trade[]; failures?: string[]; note?: string } = {}) {
     if (!m.wallet) return
     if (this.world && m.wallet.trades.length > WORLD_TRADES_KEPT) m.wallet = { ...m.wallet, trades: m.wallet.trades.slice(0, WORLD_TRADES_KEPT) }
     const vaults: Record<string, number> = {}
@@ -541,13 +545,30 @@ export class Room {
     setClock(secPerTickOf(this.market))
     setCandleLog(this.pending)
     const who = this.whoFor(me)
+    const heldBefore = o.side === 'sell' ? (o.legs ?? []).slice(0, 12).reduce((a, l) => a + (accountOf(w, String(l.walletId))?.positions[t.id]?.qty ?? 0), 0) : 0
     const r = o.side === 'buy'
       ? runBuy(w, this.market, (o.walletIds ?? []).slice(0, 12), Math.max(0, Number(o.usdEach) || 0), t.id, { autoSwap: !!o.autoSwap, setting: o.setting, who })
       : runSell(w, this.market, (o.legs ?? []).slice(0, 12).map((l) => ({ walletId: String(l.walletId), qty: Math.max(0, Number(l.qty) || 0) })), t.id, { setting: o.setting, who })
     me.wallet = r.portfolio
     this.market = r.market
     this.earn(me, r.fills)
-    this.sendWallet(me, { ref: msg.ref, fills: r.fills.map((f) => ({ ...f, ref: msg.ref })), failures: r.failures })
+    // KOLs: their followers' copy bots follow the trade a few seconds later.
+    let note: string | undefined
+    if (r.fills.length) {
+      const nt = this.market.tokens.find((x) => x.id === t.id) ?? t
+      const rng = new Rng((Math.random() * 2 ** 32) >>> 0)
+      const book = (me.copyBook ??= {})
+      const kol = o.side === 'buy' && o.kol ? { followers: Math.max(0, Math.min(5_000_000, Math.round(o.kol.followers) || 0)), rep: Math.max(0, Math.min(100, Math.round(o.kol.rep) || 0)) } : null
+      const sold = r.fills.reduce((a, f) => a + f.qty, 0)
+      const wave = o.side === 'buy'
+        ? kol && copyBuys(this.market, rng, nt, kol, r.fills.reduce((a, f) => a + f.value, 0), book)
+        : copySells(this.market, rng, nt, heldBefore > 0 ? sold / heldBefore : 0, book)
+      if (wave) {
+        this.market = { ...this.market, shillQueue: [...(this.market.shillQueue ?? []), ...wave.queue] }
+        note = o.side === 'buy' ? `👥 ${wave.copiers} copy trader${wave.copiers > 1 ? 's are' : ' is'} following your buy of $${t.ticker} (~${fmtUsdShort(wave.usd)})` : `👥 Your copy traders are selling $${t.ticker} behind you`
+      }
+    }
+    this.sendWallet(me, { ref: msg.ref, fills: r.fills.map((f) => ({ ...f, ref: msg.ref })), failures: r.failures, note })
   }
 
   private op(me: Member, msg: Extract<ClientMsg, { t: 'op' }>) {
