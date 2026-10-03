@@ -14,7 +14,8 @@
     "server": "tsx server/index.ts",
     "server:dev": "tsx watch server/index.ts",
     "play-online": "node scripts/play-online.mjs",
-    "typecheck:server": "tsc --noEmit -p tsconfig.server.json"
+    "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
+    "bots": "tsx scripts/ui-bots.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
@@ -35,6 +36,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.1.1",
     "oxlint": "^1.81.0",
+    "playwright-core": "^1.63.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "~6.0.2",

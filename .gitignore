@@ -27,3 +27,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# UI tester bot reports (npm run bots)
+bot-reports
