@@ -4,7 +4,7 @@ import type { CandlePoint } from '../game/marketEngine'
 import type { WalletLayout, WalletState } from '../game/orders'
 import type { Asset } from '../game/tradingEngine'
 import type { Chain, TradeSetting } from '../types'
-import type { Candle, GameMode, MarketEngine, MarketEvent, MarketState, SimWallet, SocialPost, Timeframe, Token, VolumeBot, WalletAction } from '../types'
+import type { Candle, GameMode, LaunchStyle, MarketEngine, MarketEvent, MarketState, SimWallet, SocialPost, Timeframe, Token, VolumeBot, WalletAction } from '../types'
 
 export const MP_PATH = '/mp'
 
@@ -149,6 +149,7 @@ export interface CookMoney {
   bundle?: { wallets: number; perWallet: number; stagger: boolean }
   marketing: number // USD
   autoSwap?: boolean
+  style?: LaunchStyle // the server builds the coin itself from your choices (see Room.cook)
 }
 
 // ─── Browser → server ────────────────────────────────────────────────────────

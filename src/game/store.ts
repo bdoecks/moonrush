@@ -1607,7 +1607,7 @@ export const useGame = create<GameState>()((set, get) => {
       if (fresh && netHooks.wallet) {
         const ref = netHooks.wallet({
           t: 'cook', token: fresh, candles: candleStore.get(t.id), event: cooked.event,
-          money: { devWallet: devId, devBuy: spec.devBuy, bundle: bundleNative > 0 ? bundle : undefined, marketing: spec.marketing, autoSwap: s.settings.autoSwap },
+          money: { devWallet: devId, devBuy: spec.devBuy, bundle: bundleNative > 0 ? bundle : undefined, marketing: spec.marketing, autoSwap: s.settings.autoSwap, style: spec.style },
         })
         const p = get().portfolio
         quietly(() => set({ portfolio: tagRef(p, p.trades.length - s.portfolio.trades.length, ref) }))
