@@ -5,6 +5,7 @@ import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { useGame } from '../game/store'
 import { useAccount } from '../net/account'
 import { mpProfile } from '../net/client'
+import { inviteLink } from '../net/invites'
 import { fmtAge, fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { isSafeImageSrc } from '../utils/image'
 import { Modal } from './ui'
@@ -291,6 +292,7 @@ function ShareWindow({ data, onClose }: { data: ShareData; onClose: () => void }
     }
   }, [data, username])
 
+  const shareUrl = username ? inviteLink(username) : gameUrl() // signed in: friends who join through it count as your invites
   const text = `${data.title} ${fmtPct(data.pct, 1)} (${signedUsd(data.pnl)}) on MOONRUSH, the memecoin trading game. Fake money, real bragging rights.`
   const fileName = `moonrush-${data.title.replace(/[^a-z0-9]+/gi, '').toLowerCase() || 'pnl'}.png`
   const copyImage = async () => {
@@ -311,13 +313,13 @@ function ShareWindow({ data, onClose }: { data: ShareData; onClose: () => void }
   const onPost = async () => {
     // X can't take a picture from a link, so the picture goes on the clipboard and the post opens with the words and the game's link.
     const ok = await copyImage()
-    window.open(`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(gameUrl())}`, '_blank', 'noopener')
+    window.open(`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}`, '_blank', 'noopener')
     setPosted(ok ? 'copied' : 'manual') // stays on screen (a pop-up would be gone by the time you come back from X)
   }
   // Phones: the system share sheet (Messages, Discord, X…) with the picture attached.
   const file = blob ? new File([blob], fileName, { type: 'image/png' }) : null
   const canNative = !!file && typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })
-  const onNative = () => file && void navigator.share({ files: [file], text, url: gameUrl() }).catch(() => {})
+  const onNative = () => file && void navigator.share({ files: [file], text, url: shareUrl }).catch(() => {})
 
   const btn = 'flex h-9 min-w-max flex-1 items-center justify-center gap-1.5 rounded-md border border-line2 px-2 text-[12px] font-semibold text-muted hover:text-ink disabled:opacity-40'
   return (

@@ -10,6 +10,7 @@ import { Kbd, Modal, Segmented, Toggle } from './ui'
 import { LobbyModal, WorldCard } from './Multiplayer'
 import { useFlags } from '../game/flags'
 import { useAccount } from '../net/account'
+import { INVITE_MINUTES, INVITE_REWARD, useInvites } from '../net/invites'
 
 const MODE_ICON: Record<GameMode, string> = { practice: '🧪', challenge: '🎯', arena: '⚔️', hardcore: '☠️' }
 
@@ -47,6 +48,8 @@ function ModeModal() {
     startRun(m)
   }
 
+  const invitedBy = useInvites((s) => s.pending) // you opened someone's invite link and haven't signed up yet
+
   return (
     <Modal title={<Logo />} onClose={() => setModal(null)} wide closable={closable}>
       <div className="mb-4">
@@ -55,6 +58,12 @@ function ModeModal() {
           Trade fictional memecoins in a live simulated market. Spot momentum, dodge rugs, climb the board. <span className="text-dim">Virtual money only: nothing here is real.</span>
         </p>
       </div>
+      {invitedBy && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2 text-[12px]">
+          <span className="text-[18px]">🎁</span>
+          <span><b>{invitedBy}</b> invited you. Make an account and play {INVITE_MINUTES} minutes: you both get {fmtUsd(INVITE_REWARD, 0)} in-game.</span>
+        </div>
+      )}
       {!import.meta.env.VITE_NO_MP && (worldOn || isAdmin) && <WorldCard adminOnly={!worldOn} />}
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <span className="mr-1 text-[11px] font-semibold text-muted">Round length</span>

@@ -11,8 +11,10 @@ import { MODES } from '../game/progression'
 import { selectSpeed, useGame } from '../game/store'
 import { fmtCompact, fmtUsd } from '../utils/format'
 import { load, save } from '../utils/storage'
+import { InviteTab } from '../components/InviteTab'
+import { useInvites } from '../net/invites'
 
-type Tab = 'referral' | 'cashback' | 'daily' | 'history'
+type Tab = 'invite' | 'referral' | 'cashback' | 'daily' | 'history'
 const tierLabel = (v: number) => (v === 0 ? 'Start' : `Vol.${fmtCompact(v, '')}`)
 
 export function RewardsView() {
@@ -27,7 +29,9 @@ export function RewardsView() {
   const native = useGame((s) => s.market.native)
   const cbPending = pendingUsd(cashbackOf(r), (c) => native?.[c]?.price ?? CHAINS[c].basePrice)
   const canCheckIn = r.checkIn.lastDate !== todayKey()
+  const invitePending = useInvites((s) => !!s.pending)
   const tabs: { id: Tab; label: string; dot?: boolean }[] = [
+    { id: 'invite', label: '🎁 Invite', dot: invitePending },
     { id: 'cashback', label: 'Cashback', dot: cbPending >= 0.0001 },
     ...(REFERRALS_ENABLED ? [{ id: 'referral' as Tab, label: 'Referral', dot: r.commissionPending >= 0.01 }] : []),
     { id: 'daily', label: 'Daily', dot: canCheckIn },
@@ -48,6 +52,7 @@ export function RewardsView() {
         </span>
       </div>
       <div className="p-3">
+        {tab === 'invite' && <InviteTab />}
         {tab === 'referral' && <Referral />}
         {tab === 'cashback' && <Cashback />}
         {tab === 'daily' && <Daily />}
