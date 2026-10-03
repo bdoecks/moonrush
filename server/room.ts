@@ -1315,7 +1315,8 @@ export class Room {
     const cashLike = w.cash + (w.balances.sol ?? 0) * px
     if (cashLike < 300) return
     // Most launches ride what the real market is launching right now (approved themes only); the rest are random.
-    const trend = rng.chance(TREND_SHARE) ? trendCoin(rng, (x) => this.market.tokens.some((t) => t.ticker === x)) : null
+    const liveTickers = this.market.tokens.filter((t) => t.status === 'bonding' || t.status === 'graduated').map((t) => t.ticker)
+    const trend = rng.chance(TREND_SHARE) ? trendCoin(rng, (x) => this.market.tokens.some((t) => t.ticker === x), liveTickers) : null
     const base = trend ?? generatedLaunch(this.market.launched + rng.int(50, 5000))
     let ticker = base.ticker
     for (let k = 2; k < 9 && this.market.tokens.some((t) => t.ticker === ticker); k++) ticker = `${base.ticker}${k}`

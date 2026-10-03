@@ -68,7 +68,8 @@ Without the brain file the bots fall back to the old `STYLE` rules.
 **Trend coins**: the learner also writes `trends` (theme words found in real launch names, ranked by SOL traded). Only words on
 the allow-list in `server/trendThemes.ts` count, so real people, brands, politics and crude words never reach the game;
 never add such words there. Chefs launch `TREND_SHARE` (60%) of their coins on a trend (`trendCoin`: "Baby Horse",
-"AGENTAI"…), never copying a real launch's name. Trends are as fresh as the last brain: to refresh, `npm run record`,
+"AGENTAI"…), never copying a real launch's name. When out of ideas (every theme has `TREND_CROWDED` live coins, or the brain is
+older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so launches never stop. Trends are as fresh as the last brain: to refresh, `npm run record`,
 `npm run learn`, copy `bot-data/brain.json` to `server/data/market-brain.json`, open a PR.
 
 ## How it is deployed (read this before pushing)

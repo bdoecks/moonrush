@@ -115,11 +115,11 @@ export function safety(t: Token) {
 export function eye(tier: Tier, rank: number, t: Token) {
   const pumped = Math.max(0, t.change['5m'] ?? 0) / 100
   switch (tier) {
-    case 'pro': return rank ** 4
-    case 'good': return rank ** 2
+    case 'pro': return rank ** 6
+    case 'good': return rank ** 3
     case 'average': return 1
-    case 'bad': return 1.2 - rank * 0.6
-    case 'degen': return (1.5 - rank) * (1 + pumped)
+    case 'bad': return (1.1 - rank) ** 1.5
+    case 'degen': return (1.05 - rank) ** 2 * (1 + pumped)
   }
 }
 
@@ -142,6 +142,10 @@ export const PILE_ON_LIMIT = 2
 // ─── Trend coins ─────────────────────────────────────────────────────────────
 /** Share of chef launches that ride a current real-market trend (the rest get the game's usual random names). */
 export const TREND_SHARE = 0.6
+/** Trends older than this many days are treated as stale (refresh the brain to bring them back). */
+export const TREND_MAX_AGE_DAYS = 14
+/** A theme with this many live coins already is crowded: chefs pick another, or a random name. */
+export const TREND_CROWDED = 2
 const ICON: Partial<Record<string, string>> = { horse: '🐴', squirrel: '🐿️', mink: '🦦', cat: '🐱', dog: '🐶', frog: '🐸', agent: '🕵️', bot: '🤖', robot: '🤖', artificial: '🧠', rocket: '🚀', moon: '🌙', alien: '👽', pizza: '🍕', burger: '🍔', banana: '🍌', ghost: '👻', wizard: '🧙', dragon: '🐉', shark: '🦈', whale: '🐋', ape: '🦍', monkey: '🐒', owl: '🦉', duck: '🦆', penguin: '🐧', hamster: '🐹', panda: '🐼', goblin: '👺', ninja: '🥷', pirate: '🏴‍☠️', cowboy: '🤠', clown: '🤡', rogue: '🗡️', trencher: '⛏️', renter: '🏠', cache: '📦', chill: '🧊', giga: '💪', pump: '⛽' }
 const BY_NARRATIVE: Record<Narrative, string> = { dogs: '🐶', cats: '🐱', frogs: '🐸', ai: '🤖', food: '🍔', space: '🚀', absurd: '🌀', retro: '👾' }
 
@@ -149,8 +153,11 @@ const BY_NARRATIVE: Record<Narrative, string> = { dogs: '🐶', cats: '🐱', fr
  * A coin idea from the trends: a theme picked by how much the real market traded it, dressed up the way pump.fun names
  * go ("Baby Horse", "HORSEAI"…). Never a real launch's name, only the approved theme word. Null when there are no trends.
  */
-export function trendCoin(rng: Rng, taken: (ticker: string) => boolean): { name: string; ticker: string; emoji: string; narrative: Narrative; theme: string } | null {
-  const trends = BRAIN?.trends ?? []
+export function trendCoin(rng: Rng, taken: (ticker: string) => boolean, liveTickers: string[] = []): { name: string; ticker: string; emoji: string; narrative: Narrative; theme: string } | null {
+  // Out of ideas means the game's usual random coins: trends older than TREND_MAX_AGE_DAYS are stale, and a theme
+  // that already has TREND_CROWDED live coins is skipped.
+  const fresh = !!BRAIN && Date.now() - Date.parse(BRAIN.learnedAt) < TREND_MAX_AGE_DAYS * 86_400_000
+  const trends = (fresh ? (BRAIN?.trends ?? []) : []).filter((t) => liveTickers.filter((x) => x.includes(t.word.toUpperCase())).length < TREND_CROWDED)
   if (!trends.length) return null
   // Square root of volume: the hottest theme comes up most, but not every time.
   let r = rng.next() * trends.reduce((a, t) => a + Math.sqrt(t.volumeSol + 1), 0)
