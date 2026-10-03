@@ -27,3 +27,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Real-market recordings for the learning bots (npm run record): private, never uploaded
+bot-data

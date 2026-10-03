@@ -41,6 +41,13 @@ npx vite build                              # production build
 
 Every line of the test scripts prints PASS or FAIL. Add checks there when you add server behaviour.
 
+**Market recorder** (`scripts/market-recorder.ts`, `npm run record`): read-only recording of real pump.fun
+bonding-curve trades, launches and graduations from Solana logs (Helius free plan via `HELIUS_API_KEY` in `.env`, or
+`--public`), for teaching bots. Wallets are saved only as salted hashes (salt in `bot-data/salt.txt`); real addresses
+never leave this computer. `bot-data/` is gitignored. About 25 MB/min, so ~30 h/month fits the Helius free plan
+(`--usage` tracks it). Optional `bot-data/watch.txt`: wallets or wallet-page links to follow. Never wire this into the
+game or server: the game must not connect to real markets or money.
+
 ## How it is deployed (read this before pushing)
 
 - GitHub `bdoecks/moonrush`, branch `main`. **Every push to `main` deploys to Render within about a minute and
