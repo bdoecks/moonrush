@@ -19,8 +19,11 @@ async function identify(msg: Extract<ClientMsg, { t: 'hello' }>): Promise<{ play
   const v = await verifyToken(msg.token)
   if (v && (await isBanned(v.id))) return { playerId: `u-${v.id}`, name: v.username, avatar: '', verified: true, banned: true }
   if (v) return { playerId: `u-${v.id}`, name: v.username, avatar: String(msg.avatar || v.avatar).slice(0, 8), verified: true }
-  const pid = String(msg.playerId).startsWith('u-') ? `g-${String(msg.playerId).slice(2, 14)}` : String(msg.playerId).slice(0, 64)
-  let name = String(msg.name ?? '').trim().slice(0, 16) || 'Anon'
+  // A guest can't sit in an account's seat (u-…) or a World bot's (bot-…): claiming a bot's id used to take the bot
+  // over and knock it out of the World. Nor can a guest wear the 🤖 that marks the real bots.
+  const raw = String(msg.playerId)
+  const pid = raw.startsWith('u-') ? `g-${raw.slice(2, 14)}` : raw.startsWith('bot-') ? `g-${raw.slice(4, 16)}` : raw.slice(0, 64)
+  let name = String(msg.name ?? '').replace(/🤖/gu, '').trim().slice(0, 16) || 'Anon'
   if (nameBlocked(name)) name = 'Anon'
   if (await nameTaken(name)) name = `${name.slice(0, 11)}_guest`
   return { playerId: pid, name, avatar: String(msg.avatar ?? '🐸').slice(0, 8), verified: false }
