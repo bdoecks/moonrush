@@ -12,6 +12,7 @@ import { selectSpeed, useGame } from '../game/store'
 import { fmtCompact, fmtUsd } from '../utils/format'
 import { load, save } from '../utils/storage'
 import { InviteTab } from '../components/InviteTab'
+import { DailyChallenges } from '../components/DailyChallenges'
 import { useInvites } from '../net/invites'
 
 type Tab = 'invite' | 'referral' | 'cashback' | 'daily' | 'history'
@@ -355,6 +356,7 @@ function Daily() {
         </button>
         <p className="mt-2 text-[10px] text-dim">Pays cash during a running Practice round, XP otherwise. Uses your device's calendar day.</p>
       </Card>
+      <DailyChallenges />
     </div>
   )
 }
@@ -362,7 +364,7 @@ function Daily() {
 function History() {
   const history = useGame((s) => s.rewards.history)
   if (!history.length) return <EmptyState icon="🎁" title="No rewards claimed yet" />
-  const label = { commission: 'Referral commission', cashback: 'Fee cashback', checkin: 'Daily check-in' }
+  const label = { commission: 'Referral commission', cashback: 'Fee cashback', checkin: 'Daily check-in', challenge: 'Daily challenge' }
   return (
     <Card className="p-0">
       <table className="w-full text-[12px]">

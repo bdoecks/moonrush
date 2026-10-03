@@ -4,6 +4,7 @@ import { useValuation } from '../hooks/useDerived'
 import { ACCENTS, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS } from '../game/progression'
 import { selectSpeed, useGame } from '../game/store'
 import { fmtClock, fmtCompact, fmtPct } from '../utils/format'
+import { DailyChallenges } from '../components/DailyChallenges'
 
 export function MissionsView() {
   const profile = useGame((s) => s.profile)
@@ -109,6 +110,8 @@ export function MissionsView() {
               </div>
             )}
           </div>
+
+          <DailyChallenges />
 
           <div className="rounded-md border border-line bg-panel">
             <div className="flex items-center justify-between border-b border-line px-3 py-2">

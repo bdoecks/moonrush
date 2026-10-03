@@ -8,6 +8,8 @@ import { fakeAddress } from '../utils/address'
 import { playSfx, type Sfx } from '../utils/sound'
 import { load, remove, save } from '../utils/storage'
 import { createChallenges, evaluateChallenges, type ChallengeContext } from './challengeEngine'
+import { DAILY_SWEEP_XP, foldDailies } from './dailyChallenges'
+import { newTrades } from './daily'
 import { rollEvents } from './eventEngine'
 import { createRivals, tickRivals } from './leaderboardEngine'
 import { freshSeason, isRanked, placementPoints, seasonNumber, tierFor, type SeasonState } from './season'
@@ -312,6 +314,8 @@ export interface GameState {
   claimCashback: (chain: Chain | 'all', as: 'coin' | 'usdc') => void
   setCashbackAuto: (auto: CashbackState['auto']) => void
   checkIn: () => void
+  /** Daily challenges: count these new fills (and coins cooked) towards today's three, paying XP for any that finish. */
+  trackDaily: (fills: Trade[], cooked?: number) => void
   setChainFilter: (c: 'all' | Chain) => void
   setSwapOpen: (v: boolean) => void
   setWalletsOpen: (v: boolean) => void
@@ -2107,6 +2111,18 @@ export const useGame = create<GameState>()((set, get) => {
       if (!asCash) gainXp(amount, 'Daily check-in', true)
       persist()
     },
+    trackDaily: (fills, cooked = 0) => {
+      const s = get()
+      const { state, completed, swept } = foldDailies(s.rewards.dailies, fills, cooked)
+      const paid: [string, number][] = completed.map((c) => [c.title, c.xp])
+      if (swept) paid.push(['All three daily challenges', DAILY_SWEEP_XP])
+      const claims: RewardClaim[] = paid.map(([, xp], i) => ({ id: `d${Date.now()}${i}`, time: Date.now(), kind: 'challenge', amount: xp, paidAs: 'xp' }))
+      set({ rewards: { ...s.rewards, dailies: state, history: claims.length ? [...claims, ...s.rewards.history].slice(0, 50) : s.rewards.history } })
+      for (const c of completed) s.notify({ title: 'DAILY CHALLENGE DONE', body: `${c.title} · +${c.xp} XP`, tone: 'xp', icon: c.icon }, 'achievement')
+      if (swept) s.notify({ title: 'DAILY SWEEP', body: `All three done · +${DAILY_SWEEP_XP} XP bonus`, tone: 'xp', icon: '🧹' }, 'achievement')
+      for (const [title, xp] of paid) gainXp(xp, title, true)
+      if (paid.length) persist()
+    },
     toggleFollowAccount: (accountId) => {
       const s = get()
       const on = !s.followedAccounts.includes(accountId)
@@ -2188,6 +2204,24 @@ useGame.subscribe((s, prev) => {
     lifetimeUsd += paid.usd
   } else for (const [c, n] of earned) pending[c] += n
   quietly(() => useGame.setState({ ...(portfolio !== s.portfolio ? { portfolio } : {}), rewards: { ...s.rewards, cashback: { ...cb, pending, volume, roundVolume, roundUsd, lifetimeUsd } } }))
+})
+
+// ─── Daily challenges ────────────────────────────────────────────────────────
+
+// Every new fill and every coin you cook counts towards today's three. Must stay below the cashback listener: that one
+// writes `rewards` from the state it was called with, so it has to run first.
+useGame.subscribe((s, prev) => {
+  if (s.runStatus !== 'running') return
+  const cooked = s.launches.length === prev.launches.length + 1 && (s.runStats.cooked ?? 0) === (prev.runStats.cooked ?? 0) + 1 ? 1 : 0
+  let fills: Trade[] = []
+  if (s.portfolio.trades !== prev.portfolio.trades && s.mode === prev.mode) {
+    const old = new Set(prev.portfolio.trades)
+    const refs = new Set(prev.portfolio.trades.map((tr) => tr.ref).filter((r) => r !== undefined))
+    // Only fills stamped with the current market time (loading a save or rejoining a room never re-adds old trades),
+    // and each order once: in rooms the server's fills replace the ones shown instantly, under the same `ref`.
+    fills = newTrades(s.portfolio.trades, prev.portfolio.trades).filter((tr) => !old.has(tr) && tr.status === 'FILLED' && tr.time >= s.market.time - 12 && (tr.ref === undefined || !refs.has(tr.ref)))
+  }
+  if (fills.length || cooked) s.trackDaily(fills, cooked)
 })
 
 export const TICK_REAL_SECONDS = 1

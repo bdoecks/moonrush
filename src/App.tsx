@@ -71,7 +71,9 @@ export default function App() {
     const fills = s.portfolio.trades !== prev.portfolio.trades && s.mode === prev.mode
       ? newTrades(s.portfolio.trades, prev.portfolio.trades).filter((t) => t.time >= s.market.time - 12)
       : []
-    if (fills.length) useGame.setState({ profile: { ...s.profile, daily: foldDaily(s.profile.daily, fills) } })
+    // Read the profile fresh: a listener that ran before this one (daily challenges) may have just added XP to it.
+    const profile = useGame.getState().profile
+    if (fills.length) useGame.setState({ profile: { ...profile, daily: foldDaily(profile.daily, fills) } })
     // Leaderboard: track rank movement; cheer when you overtake a rival mid-round.
     if (s.players !== prev.players && s.players.length) {
       const map = new Map(s.market.tokens.map((t) => [t.id, t]))

@@ -191,7 +191,7 @@ export interface Friend {
 export interface RewardClaim {
   id: string
   time: number // ms timestamp
-  kind: 'commission' | 'cashback' | 'checkin'
+  kind: 'commission' | 'cashback' | 'checkin' | 'challenge'
   amount: number // USD value (or XP)
   paidAs: 'cash' | 'xp' | 'coin'
   chain?: Chain // cashback paid in a chain coin
@@ -217,6 +217,7 @@ export interface RewardsState {
   cashbackClaimed: number // legacy (USD cashback before chain-coin cashback)
   cashback?: CashbackState
   checkIn: { lastDate: string; streak: number }
+  dailies?: import('../game/dailyChallenges').DailyState // today's daily-challenge numbers
   history: RewardClaim[]
 }
 

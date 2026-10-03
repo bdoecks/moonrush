@@ -36,6 +36,7 @@ npx tsx scripts/seat-test.ts                # guest seats: only the browser with
 npx tsx scripts/kol-test.ts                 # KOL copy traders: followers copy a KOL's buys and sells
 npx tsx scripts/charts-test.ts 30           # charts across a restart: short timeframes rebuilt from the real 1m candles
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
+npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
 npx vite build                              # production build
 npm run bots                                # UI bots: play every page in hidden Chrome, PDF report (see below)
