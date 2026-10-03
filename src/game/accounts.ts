@@ -4,6 +4,9 @@
 import type { Account, Chain, Portfolio, Position } from '../types'
 
 export const MAX_WALLETS = 10
+// Dev wallets: wallets made to deploy coins from (marked by their emoji, which the server keeps with the wallet layout).
+export const DEV_EMOJI = '🧑‍💻'
+export const MAX_DEV_WALLETS = 3
 export const WALLET_EMOJIS = ['🟢', '🔵', '🟣', '🟠', '🔴', '🟡', '⚫', '⚪', '🐸', '🐋', '🦊', '🤖']
 const empty = (): Record<Chain, number> => ({ sol: 0, bsc: 0, hood: 0 })
 

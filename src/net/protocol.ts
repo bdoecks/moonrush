@@ -40,16 +40,39 @@ export interface BoardRow {
   equity: number // net worth now (USD + coins + bags)
   pnl: number // all-time profit: net worth minus everything put in
   week: number // profit since this week began (or since they joined, if later)
+  day: number // profit today (UTC)
+  season: number // profit this season (the calendar month)
+  chains: Record<Chain, number> // realized profit this season on each chain's coins
+  dev?: DevStats // coins they've launched in the World
+  trophies?: string[] // season awards, e.g. "🏆 S1"
   restarts: number // bankruptcy restarts taken
 }
+/** A dev's record in the World (lifetime, and this season). */
+export interface DevStats {
+  cooked: number
+  migrated: number
+  fees: number // creator fees + graduation bonuses earned (USD)
+  bestAth: number // best all-time-high market cap of a coin they launched
+  bestTicker?: string
+  season: { cooked: number; migrated: number; fees: number }
+}
+/** One finished season: who won what. */
+export interface HallEntry {
+  n: number
+  name: string // "October 2026"
+  winners: { list: BoardList; name: string; avatar: string; value: number; bot?: boolean }[]
+}
+export type BoardList = 'worth' | 'day' | 'week' | 'season' | 'sol' | 'bsc' | 'hood' | 'dev'
 /** The World leaderboards: the top of each list, where you stand, and when you may next restart. */
 export interface BoardMsg {
   t: 'board'
-  week: number // the week number (same as the season)
+  list: BoardList // which ranking `rows` is
+  week: number // the week number
+  season: { n: number; name: string; endsAt: number }
   total: number // players ranked
-  worth: BoardRow[] // by net worth
-  weekly: BoardRow[] // by this week's profit
-  me?: { row: BoardRow; worthRank: number; weekRank: number; restartAt: number | null } // restartAt: real time (ms) you can next restart, null = now
+  rows: BoardRow[] // the top 100 of that list
+  me?: { row: BoardRow; rank: number; restartAt: number | null } // restartAt: real time (ms) you can next restart, null = now
+  hall: HallEntry[] // past seasons' winners, newest first
 }
 
 export interface RoomPlayer {
@@ -139,7 +162,7 @@ export type ClientMsg =
   | { t: 'bot'; tokenId: string; bot: VolumeBot | null }
   | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[]; addrs?: string[]; cbVolume?: number; cbAuto?: 'off' | 'coin' | 'usdc' }
   | { t: 'candles'; tokenId: string }
-  | { t: 'board' } // World: ask for the leaderboards
+  | { t: 'board'; list?: BoardList } // World: ask for one leaderboard
   // Report a chat message to the admins (`from` + `time` + `text` say which one).
   | { t: 'report'; from: string; time: number; text: string }
   // Wallets (rooms). `seq` numbers every wallet message so the game knows which server answers are up to date.

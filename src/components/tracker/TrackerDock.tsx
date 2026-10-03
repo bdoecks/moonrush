@@ -5,12 +5,14 @@ import { useTokenMap } from '../../hooks/useDerived'
 import { useLiveFeed } from '../../game/liveSocial'
 import { SIM_SEC_PER_TICK } from '../../game/marketEngine'
 import { useGame } from '../../game/store'
+import { useFriends } from '../../net/friends'
 import type { SimWallet, SocialPost, TrackerDockPrefs, WalletStyle, WalletTrade } from '../../types'
 import { fmtAge, fmtCompact, fmtUsd } from '../../utils/format'
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
 import { Composer, Engagement, postAccount } from '../SocialTracker'
 import { useFriendRows, type TrackerRow } from './friendRows'
+import { GroupMenu, NewGroupButton } from './groups'
 
 export const DOCK_DEFAULTS: TrackerDockPrefs = { open: true, side: 'left', width: 320, split: 0.5, wallet: true, social: true }
 const MIN_W = 260
@@ -137,7 +139,7 @@ function Tabs<T extends string>({ value, onChange, options }: { value: T; onChan
 
 // ─── Wallet tracker ──────────────────────────────────────────────────────────
 
-type WalletScope = 'tracked' | 'smart' | 'kol' | 'all'
+type WalletScope = 'tracked' | 'smart' | 'kol' | 'all' | `g:${string}` // g:<name> = one of your groups
 const SCOPE_STYLES: Partial<Record<WalletScope, WalletStyle[]>> = { smart: ['smart', 'whale'], kol: ['kol'] }
 const ACTION: Record<string, { label: string; cls: string }> = {
   first: { label: 'Buy', cls: 'text-up' },
@@ -151,37 +153,45 @@ function WalletSection() {
   const tracked = useGame((s) => s.trackedWallets)
   const setView = useGame((s) => s.setView)
   const friends = useFriendRows() // friends you track in a room
+  const groups = useGame((s) => s.tracker.groups)
+  const labels = useGame((s) => s.walletLabels)
+  const watch = useFriends((s) => s.watch)
   const nTracked = tracked.length + friends.count
   const [scope, setScope] = useState<WalletScope>(nTracked ? 'tracked' : 'smart')
+  const group = scope.startsWith('g:') ? scope.slice(2) : null
+  const inGroup = (id: string) => labels[id]?.group === group
   const rows = useMemo(() => {
-    const out: TrackerRow[] = scope === 'tracked' ? [...friends.rows] : []
-    const styles = SCOPE_STYLES[scope]
+    const out: TrackerRow[] = scope === 'tracked' ? [...friends.rows] : group ? friends.rows.filter((r) => inGroup(r.w.id)) : []
+    const styles = SCOPE_STYLES[scope as 'smart' | 'kol']
     for (const w of wallets) {
-      if (scope === 'tracked' ? !tracked.includes(w.id) : styles && !styles.includes(w.style)) continue
+      if (scope === 'tracked' ? !tracked.includes(w.id) : group ? !tracked.includes(w.id) || !inGroup(w.id) : styles && !styles.includes(w.style)) continue
       for (const tr of w.trades.slice(0, 20)) out.push({ w, tr })
     }
     return out.sort((a, b) => b.tr.tick - a.tr.tick || b.tr.id - a.tr.id).slice(0, 60)
-  }, [wallets, tracked, scope, friends.rows])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallets, tracked, scope, friends.rows, labels])
+  const groupCount = (g: string) => tracked.filter((id) => labels[id]?.group === g).length + watch.filter((w) => labels[w.key]?.group === g).length
   return (
     <>
-      <Tabs value={scope} onChange={setScope} options={[
-        { value: 'tracked', label: <>Tracked <span className="text-dim">{nTracked}</span></> },
-        { value: 'smart', label: '🧠 Smart' },
-        { value: 'kol', label: '📣 KOL' },
-        { value: 'all', label: 'All' },
-      ]} />
+      <div className="no-scrollbar flex shrink-0 items-center gap-3 overflow-x-auto border-b border-line/40 px-2 py-1 text-[11px]">
+        {([['tracked', <>Tracked <span className="text-dim">{nTracked}</span></>], ...groups.map((g) => [`g:${g}`, <>📁 {g} <span className="text-dim">{groupCount(g)}</span></>]), ['smart', '🧠 Smart'], ['kol', '📣 KOL'], ['all', 'All']] as [WalletScope, ReactNode][]).map(([v, label]) => (
+          <button key={v} onClick={() => setScope(v)} className={clsx('flex shrink-0 items-center gap-1 font-semibold', scope === v ? 'text-ink' : 'text-dim hover:text-muted')}>{label}</button>
+        ))}
+        <NewGroupButton onAdded={(g) => setScope(`g:${g}`)} />
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!rows.length ? (
           scope === 'tracked'
             ? <EmptyState icon={<UserPlus />} title="No tracked wallets yet" hint={<button onClick={() => setView('track')} className="text-accent underline">Track wallets →</button>} />
+            : group ? <EmptyState icon="📁" title={`Nothing in ${group} yet`} hint="Click the 📁 on any tracked wallet's trade to put it in this group" />
             : <EmptyState icon="👛" title="No trades yet" />
-        ) : rows.map(({ w, tr, friend }) => <WalletRow key={`${w.id}-${tr.id}`} w={w} tr={tr} friend={friend} />)}
+        ) : rows.map(({ w, tr, friend }) => <WalletRow key={`${w.id}-${tr.id}`} w={w} tr={tr} friend={friend} groupable={friend || tracked.includes(w.id)} />)}
       </div>
     </>
   )
 }
 
-function WalletRow({ w, tr, friend }: { w: SimWallet; tr: WalletTrade; friend?: boolean }) {
+function WalletRow({ w, tr, friend, groupable }: { w: SimWallet; tr: WalletTrade; friend?: boolean; groupable?: boolean }) {
   const setView = useGame((s) => s.setView)
   const tick = useGame((s) => s.market.tick)
   const select = useGame((s) => s.select)
@@ -199,6 +209,7 @@ function WalletRow({ w, tr, friend }: { w: SimWallet; tr: WalletTrade; friend?: 
         <span className={clsx('shrink-0 font-bold', a.cls)}>{a.label}</span>
         <span className={clsx('num shrink-0', tr.side === 'buy' ? 'text-up' : 'text-down')}>{fmtUsd(tr.usd, 0)}</span>
         <span className="num ml-auto shrink-0 text-[10px] text-dim">{fmtAge((tick - tr.tick) * SIM_SEC_PER_TICK)}</span>
+        {groupable && <GroupMenu id={w.id} />}
       </div>
       <div className="mt-1 flex items-center gap-1.5">
         <button disabled={!t} onClick={() => t && select(t.id)} className="flex min-w-0 items-center gap-1.5 hover:text-accent">

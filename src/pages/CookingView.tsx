@@ -152,7 +152,7 @@ export function CookingView() {
   }
   const [showEmojis, setShowEmojis] = useState(false)
   const sideCount = (spec.sideBuys ?? []).filter((x) => x.walletId !== devAcc?.id).length
-  const [advanced, setAdvanced] = useState(() => bundleOn || sideCount > 0)
+  const [advanced, setAdvanced] = useState(() => bundleOn)
 
   const submit = () => {
     const id = cook(spec)
@@ -369,8 +369,13 @@ export function CookingView() {
               </Row>
             </Step>
 
-            {/* ④ Dev buy + advanced */}
-            <Step n={4} title="Dev buy" hint="Your own bag at launch" right={<span className="num text-[13px] font-bold" style={{ color: chainMeta.color }}>{fmtNative(spec.devBuy, spec.chain)} <span className="text-[10px] font-normal text-dim">≈{fmtUsd(devUsd, 0)}</span></span>}>
+            {/* ④ Dev wallet (deployer) + side buys */}
+            <Step n={4} title="Dev wallet" hint="Which wallet deploys it (everyone can track it)">
+              <SideWalletsSection spec={spec} onChange={up} />
+            </Step>
+
+            {/* ⑤ Dev buy + advanced */}
+            <Step n={5} title="Dev buy" hint="Your own bag at launch" right={<span className="num text-[13px] font-bold" style={{ color: chainMeta.color }}>{fmtNative(spec.devBuy, spec.chain)} <span className="text-[10px] font-normal text-dim">≈{fmtUsd(devUsd, 0)}</span></span>}>
               <input type="range" min={0} max={Math.max(maxDev, spec.devBuy)} step={devStep} value={spec.devBuy} onChange={(e) => up({ devBuy: Number(e.target.value) })} className="w-full accent-[var(--accent)]" aria-label={`Dev buy amount in ${chainMeta.native}`} />
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
                 <span className={clsx('num font-bold', est.devPct > 15 ? 'text-down' : est.devPct > 6 ? 'text-warn' : 'text-up')} title="Estimate: the exact launch price varies a little">≈{est.devPct.toFixed(1)}% of supply</span>
@@ -386,15 +391,13 @@ export function CookingView() {
               <div className="mt-3 rounded-md border border-line2">
                 <button onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced} className="flex w-full items-center gap-2 px-2.5 py-2 text-left">
                   <span className="text-[12px] font-bold">Advanced</span>
-                  <span className="text-[11px] text-dim">bundle wallets & side-wallet buys</span>
+                  <span className="text-[11px] text-dim">bundle wallets</span>
                   {bundleOn && <span className="rounded bg-info/15 px-1.5 text-[10px] font-bold text-info">📦 Bundle ×{spec.bundle.wallets}</span>}
-                  {sideCount > 0 && <span className="rounded bg-accent/15 px-1.5 text-[10px] font-bold text-accent">{sideCount} side buy{sideCount > 1 ? 's' : ''}</span>}
                   <ChevronDown size={14} className={clsx('ml-auto text-dim transition-transform', advanced && 'rotate-180')} />
                 </button>
                 {advanced && (
                   <div className="space-y-2 border-t border-line2 p-2">
                     <BundlerSection spec={spec} onChange={(bundle) => up({ bundle: { ...spec.bundle, ...bundle } })} est={est} detect={detect} bundleUsd={bundleUsd} bundleFees={bundleFees} maxPerWallet={maxPerWallet} />
-                    <SideWalletsSection spec={spec} onChange={up} />
                   </div>
                 )}
               </div>

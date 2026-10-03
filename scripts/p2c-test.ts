@@ -2,6 +2,7 @@
 import { Room } from '../server/room'
 import { cookToken, COOK_FEE } from '../src/game/marketEngine'
 import { Rng } from '../src/utils/rng'
+import { walletAddress } from '../src/utils/address'
 import type { ServerMsg } from '../src/net/protocol'
 
 const inbox: ServerMsg[] = []
@@ -31,6 +32,7 @@ r.handle('p1', { t: 'cook', seq: 2, ref: 2, token: cooked.token, money: { devWal
 const w1 = lastWallet()
 const tok = room.market.tokens.find((t) => t.id === cooked.token.id)
 ok(!!tok && (tok as { creatorId?: string }).creatorId === 'p1', 'coin is on the shared market as the player\'s')
+ok((tok as { devAddr?: string } | undefined)?.devAddr === walletAddress('p1', main().id, 'sol'), `coin carries its dev wallet's real address (trackable): ${(tok as { devAddr?: string } | undefined)?.devAddr}`)
 ok(w1.ref === 2 && (w1.fills ?? []).length === 2, `server ran dev buy + bundle: ${(w1.fills ?? []).length} fills, ${(w1.failures ?? []).join(',')}`)
 ok((w1.fills ?? [])[1]?.via === 'Bundle ×3', 'bundle fill labelled')
 const fees = COOK_FEE + 50 + 3 * 0.4

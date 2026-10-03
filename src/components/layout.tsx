@@ -18,6 +18,7 @@ import { RiskPanel } from './token/RiskPanel'
 import { TradePanel } from './token/TradePanel'
 import { Kbd, Pct } from './ui'
 import { LighthouseButton } from './Lighthouse'
+import { MarketMovementButton } from './MarketMovement'
 
 // ─── Bottom dock (tablet/desktop) ────────────────────────────────────────────
 export function Dock() {
@@ -60,7 +61,7 @@ export function Dock() {
           </button>
         ))}
         {/* Market Lighthouse sits with the tabs (Positions, Watchlist, Events, trackers…). */}
-        <span className="ml-1 flex items-center border-l border-line pl-2"><LighthouseButton /></span>
+        <span className="ml-1 flex items-center gap-1.5 border-l border-line pl-2"><LighthouseButton /><MarketMovementButton /></span>
         <PnlButton className="ml-auto" />
         {!collapsed && (
           <button onClick={() => setTall((v) => !v)} className="rounded p-1 text-muted hover:bg-raise hover:text-ink" aria-label={tall ? 'Make panel smaller' : 'Make panel taller'} title={tall ? 'Smaller panel' : 'Taller panel'}>

@@ -133,7 +133,7 @@ export interface Lighthouse {
 const pct = (now: number, before: number | null): number | null => (before === null ? null : before > 0 ? now / before - 1 : now > 0 ? null : 0)
 const add = (rec: PadTotals | null, pads: PadId[], k: keyof Totals) => pads.reduce((a, p) => a + (rec?.[p]?.[k] ?? 0), 0)
 /** Roughly how many different wallets made this many trades (a busy market has many repeat traders). */
-const tradersOf = (txns: number) => Math.round(txns > 40 ? 12 + (txns - 40) * 0.29 : txns * 0.55)
+export const tradersOf = (txns: number) => Math.round(txns > 40 ? 12 + (txns - 40) * 0.29 : txns * 0.55)
 
 /**
  * The Lighthouse numbers for a window. `chain` narrows it to one chain's launchpads; `only` to a single launchpad
@@ -188,3 +188,66 @@ export function lighthouse(m: MarketState, win: Win, chain: 'all' | Chain, only?
 }
 
 export const LIGHTHOUSE_CHAINS: ('all' | Chain)[] = ['all', ...CHAIN_IDS]
+
+// ─── Market Movement (Axiom's uVolume) ───────────────────────────────────────
+// The same running totals, for any window length (6h too), per chain, and how busy the market is right now compared
+// with its daily average.
+
+export interface WinCounts {
+  volume: number
+  txns: number
+  created: number
+  migrated: number
+}
+export interface WinStats extends WinCounts {
+  prev: WinCounts | null // the window before (null until watched that long)
+  exact: boolean
+}
+
+/** One window's numbers for some chains: exact once this browser has watched that long, else an estimate. */
+export function windowStats(m: MarketState, sec: number, chains: Chain[]): WinStats {
+  const pads = PAD_IDS.filter((p) => chains.includes(LAUNCHPADS[p].chain))
+  const now = book?.totals ?? null
+  const a = totalsAt(m.time - sec)
+  const b = totalsAt(m.time - 2 * sec)
+  const between = (x: PadTotals | null, y: PadTotals | null): WinCounts => ({
+    volume: Math.max(0, add(x, pads, 'volume') - add(y, pads, 'volume')),
+    txns: Math.max(0, add(x, pads, 'buys') + add(x, pads, 'sells') - add(y, pads, 'buys') - add(y, pads, 'sells')),
+    created: Math.max(0, add(x, pads, 'created') - add(y, pads, 'created')),
+    migrated: Math.max(0, add(x, pads, 'migrated') - add(y, pads, 'migrated')),
+  })
+  if (a) return { ...between(now, a), prev: b ? between(a, b) : null, exact: true }
+  // Not watched that long yet: the coins still trading, from their rolling sums.
+  const w: Win = sec <= 300 ? '5m' : sec <= 3600 ? '1h' : '24h'
+  const scale = w === '24h' ? sec / 86400 : sec / WIN_SEC[w]
+  let volume = 0
+  let txns = 0
+  let created = 0
+  let migrated = 0
+  for (const t of m.tokens) {
+    if (!pads.includes(t.pad)) continue
+    if (m.time - t.createdAt <= sec) created++
+    if (t.status === 'graduated' && m.time - (t.graduatedAt ?? 0) <= sec) migrated++
+    if (!live(t)) continue
+    volume += winVolume(t, w, m.time) * scale
+    txns += (winBuys(t, w, m.time) + winSells(t, w, m.time)) * scale
+  }
+  return { volume, txns, created: Math.max(created, add(now, pads, 'created')), migrated: Math.max(migrated, add(now, pads, 'migrated')), prev: null, exact: false }
+}
+
+/**
+ * How busy the last `sec` was against the daily average (volume per second; 1 = normal, 2 = twice as busy).
+ * Until this browser has watched a full day, "daily average" means the average since it started watching.
+ */
+export function vsDailyAverage(m: MarketState, sec: number, chains: Chain[]): number | null {
+  const samples = book?.samples
+  if (!book || !samples?.length) return null
+  const watched = m.time - samples[0].time
+  if (watched < Math.max(120, sec)) return null
+  const pads = PAD_IDS.filter((p) => chains.includes(LAUNCHPADS[p].chain))
+  const base = Math.min(86400, watched)
+  const now = add(book.totals, pads, 'volume')
+  const recent = now - add(totalsAt(m.time - sec), pads, 'volume')
+  const day = now - add(totalsAt(m.time - base) ?? samples[0].totals, pads, 'volume')
+  return day > 0 ? recent / sec / (day / base) : null
+}

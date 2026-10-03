@@ -2,7 +2,7 @@
 // The market code is the same the single-player game runs. The server is the judge of every player's wallets: orders,
 // cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
-import { adminMarket, type AdminMarketAction, rebuildCandlesFor, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
+import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
 import { BOT_BUST_USD, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, mirrorWallet, pickCoin, STYLE, type BotBrain } from './bots'
 import { generatedLaunch } from '../src/data/tokens'
 import { valuePortfolio } from '../src/game/portfolioEngine'
@@ -10,6 +10,7 @@ import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
 import { copyBuys, copySells, type CopyBook, POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
 import { seasonNumber } from '../src/game/season'
+import { dayKey, worldSeason } from '../src/game/worldSeason'
 import { AUTO_MUTE_MS, moderate, rateCheck, strike, type ChatMeter } from './moderation'
 import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
 import { accountOf } from '../src/game/accounts'
@@ -22,7 +23,7 @@ import { airdropFeePerWallet, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBot
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
-import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, type BoardMsg, type BoardRow, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
+import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, type BoardList, type BoardMsg, type BoardRow, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
@@ -70,6 +71,12 @@ interface Member {
   brain?: BotBrain // World bots only
   // World leaderboards: where this week's profit is measured from, and bankruptcy restarts.
   weekBase?: { week: number; pnl: number }
+  dayBase?: { key: string; pnl: number } // World boards: profit at the start of today / this season
+  seasonBase?: { key: string; pnl: number }
+  chainPnl?: Record<Chain, number> // realized profit on each chain's coins, all time
+  chainBase?: { key: string } & Record<Chain, number> // …and where it stood when this season began
+  dev?: DevStats // coins they launched here
+  trophies?: string[] // season awards
   lastRestart?: number // real time (ms)
   restarts?: number
   pnlCarry?: number // profit / loss from before their last restart (a restart doesn't wipe your record)
@@ -110,7 +117,11 @@ export interface RoomSnapshot {
   members: Omit<Member, 'ws' | 'ack'>[]
   cooked?: [string, Cooked][]
   reports?: ChatReport[]
+  hall?: HallEntry[] // World: finished seasons
+  seasonKey?: string | null
 }
+
+const hashCode = (str: string) => [...str].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0, 2166136261)
 
 const fmtUsdShort = (n: number) => (n >= 1000 ? `$${(n / 1000).toFixed(1)}K` : `$${Math.round(n)}`)
 
@@ -166,11 +177,11 @@ export class Room {
     return {
       v: 1, code: this.code, world: this.world || undefined, hostId: this.hostId, round: this.round, market: this.market, wallets: this.wallets,
       posts: this.posts.slice(0, 80), events: this.events.slice(0, 80), bots: [...this.bots.entries()],
-      lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()], reports: this.reports.slice(0, 100),
+      lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()], reports: this.reports.slice(0, 100), hall: this.hall, seasonKey: this.seasonKey,
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: m.info.bot ? m.info.online : false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
         cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, copyBook: m.copyBook, brain: m.brain,
-        weekBase: m.weekBase, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
+        weekBase: m.weekBase, dayBase: m.dayBase, seasonBase: m.seasonBase, chainPnl: m.chainPnl, chainBase: m.chainBase, dev: m.dev, trophies: m.trophies, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
       })),
     }
   }
@@ -203,6 +214,8 @@ export class Room {
     r.bots = new Map(s.bots ?? [])
     r.cooked = new Map(s.cooked ?? [])
     r.reports = s.reports ?? []
+    r.hall = s.hall ?? []
+    r.seasonKey = s.seasonKey ?? null
     r.lastTapeId = s.lastTapeId ?? r.market.nextTradeId - 1
     r.lastWalletTradeId = s.lastWalletTradeId ?? r.market.nextTradeId - 1
     r.members.clear() // the placeholder World's bots; the saved ones come back below
@@ -219,6 +232,8 @@ export class Room {
       for (const [tf, arr] of Object.entries(tfs) as [Timeframe, PackedCandle[]][]) {
         if (Array.isArray(arr) && arr.length) c[tf] = arr.map(([time, open, high, low, close, volume]): Candle => ({ time, open, high, low, close, volume }))
       }
+      // The short charts weren't saved (too big): rebuild them from the real 1m candles, not from a made-up curve.
+      if (tfs['1m']?.length) shortTfsFrom1m(c, new Rng(hashCode(id)))
     }
     r.sentTokens.clear() // first tick after restore sends every coin in full
     r.sentWallets.clear()
@@ -308,7 +323,7 @@ export class Room {
         this.playersDirty = true
         return
       case 'board':
-        return this.sendBoard(me)
+        return this.sendBoard(me, msg.list)
       case 'candles':
         return this.sendTo(playerId, { t: 'candles', tokenId: msg.tokenId, candles: candleStore.get(msg.tokenId) ?? null })
       case 'event': {
@@ -510,6 +525,7 @@ export class Room {
 
   /** Cashback on a player's fills (a share of the platform fee, tiered by their volume), paid now if they auto-claim. */
   private earn(m: Member, fills: Trade[]) {
+    this.realized(m, fills)
     if (!m.wallet || !fills.length) return
     const earned: [Chain, number][] = []
     for (const f of fills) {
@@ -545,7 +561,8 @@ export class Room {
     setClock(secPerTickOf(this.market))
     setCandleLog(this.pending)
     const who = this.whoFor(me)
-    const heldBefore = o.side === 'sell' ? (o.legs ?? []).slice(0, 12).reduce((a, l) => a + (accountOf(w, String(l.walletId))?.positions[t.id]?.qty ?? 0), 0) : 0
+    const mainId = w.accounts?.[0]?.id ?? 'w-main' // copy traders follow the KOL's main (public) wallet only
+    const heldBefore = o.side === 'sell' ? (accountOf(w, mainId)?.positions[t.id]?.qty ?? 0) : 0
     const r = o.side === 'buy'
       ? runBuy(w, this.market, (o.walletIds ?? []).slice(0, 12), Math.max(0, Number(o.usdEach) || 0), t.id, { autoSwap: !!o.autoSwap, setting: o.setting, who })
       : runSell(w, this.market, (o.legs ?? []).slice(0, 12).map((l) => ({ walletId: String(l.walletId), qty: Math.max(0, Number(l.qty) || 0) })), t.id, { setting: o.setting, who })
@@ -559,9 +576,10 @@ export class Room {
       const rng = new Rng((Math.random() * 2 ** 32) >>> 0)
       const book = (me.copyBook ??= {})
       const kol = o.side === 'buy' && o.kol ? { followers: Math.max(0, Math.min(5_000_000, Math.round(o.kol.followers) || 0)), rep: Math.max(0, Math.min(100, Math.round(o.kol.rep) || 0)) } : null
-      const sold = r.fills.reduce((a, f) => a + f.qty, 0)
+      const mainFills = r.fills.filter((f) => (f.walletId ?? mainId) === mainId)
+      const sold = mainFills.reduce((a, f) => a + f.qty, 0)
       const wave = o.side === 'buy'
-        ? kol && copyBuys(this.market, rng, nt, kol, r.fills.reduce((a, f) => a + f.value, 0), book)
+        ? kol && copyBuys(this.market, rng, nt, kol, mainFills.reduce((a, f) => a + f.value, 0), book)
         : copySells(this.market, rng, nt, heldBefore > 0 ? sold / heldBefore : 0, book)
       if (wave) {
         this.market = { ...this.market, shillQueue: [...(this.market.shillQueue ?? []), ...wave.queue] }
@@ -678,9 +696,10 @@ export class Room {
 
     me.cooks = (me.cooks ?? 0) + 1
     me.lastCookTick = this.market.tick
+    this.devStat(me, 'cooked', 1)
     if (this.world) me.cookTicks = [...(me.cookTicks ?? []).filter((t) => this.market.tick - t < 3600 / secPerTickOf(this.market)), this.market.tick]
     me.wallet = { ...w, cash: w.cash - usdCosts, feesPaid: w.feesPaid + COOK_FEE + bundleFees }
-    const token: NetToken = { ...msg.token, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, tape: msg.token.tape ?? [], status: 'bonding', creatorFees: 0 }
+    const token: NetToken = { ...msg.token, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, devAddr: walletAddress(me.info.id, devWallet, 'sol'), tape: msg.token.tape ?? [], status: 'bonding', creatorFees: 0 }
     this.market = { ...this.market, tokens: [token, ...this.market.tokens] }
     if (msg.candles) candleStore.set(token.id, msg.candles)
     this.freshIds.add(token.id)
@@ -797,11 +816,16 @@ export class Room {
       const fees = t.creatorFees ?? 0
       let usd = Math.max(0, fees - c.feeMark)
       c.feeMark = Math.max(c.feeMark, fees)
+      const dev = this.members.get(c.pid)
       if (!c.grad && t.status === 'graduated') {
         c.grad = true
         usd += GRAD_BONUS
+        if (dev) this.devStat(dev, 'migrated', 1)
       }
-      if (usd > 0) c.vault += usd / nativePrice(market, c.chain)
+      if (usd > 0) {
+        c.vault += usd / nativePrice(market, c.chain)
+        if (dev) this.devStat(dev, 'fees', usd)
+      }
     }
     for (const t of market.tokens as NetToken[]) {
       if (t.creatorId && sleuthBundle(t, rng)) devEvents.push(flagBundle(t, market, t.bundleWallets ?? 0))
@@ -827,6 +851,7 @@ export class Room {
     this.market = market
     this.wallets = [...wr.wallets, ...this.wallets.filter((w) => w.bot)]
     this.botTick(rng, wr.actions)
+    if (this.world && this.market.tick % 60 === 0) this.closeSeasonIfDue() // a new month closes the season even if nobody has the leaderboard open
     for (const m of billed) this.sendWallet(m)
 
     // Coins that appeared this tick: send their whole chart instead of points.
@@ -1016,6 +1041,7 @@ export class Room {
     this.market = r.market
     const nt = this.market.tokens.find((x) => x.id === t.id) ?? t
     const all = !m.wallet.accounts?.[0]?.positions[t.id]
+    this.realized(m, r.fills)
     this.mirrorFill(m, nt, r.fills[0], all ? 'all' : 'partial', actions)
     if (all) delete m.brain!.entries[t.id]
     return r.fills[0]
@@ -1186,10 +1212,11 @@ export class Room {
     }
     const cooked = cookToken(this.market, rng, spec)
     const id = cooked.token.id
-    this.market = { ...cooked.market, tokens: cooked.market.tokens.map((t) => (t.id === id ? ({ ...t, creator: 'you', creatorId: m.info.id, creatorName: m.info.name } as NetToken) : t)) }
+    this.market = { ...cooked.market, tokens: cooked.market.tokens.map((t) => (t.id === id ? ({ ...t, creator: 'you', creatorId: m.info.id, creatorName: m.info.name, devAddr: walletAddress(m.info.id, main, 'sol') } as NetToken) : t)) }
     m.wallet = { ...w, cash: Math.max(0, w.cash - COOK_FEE - marketing), feesPaid: w.feesPaid + COOK_FEE }
     this.freshIds.add(id)
     this.cooked.set(id, { pid: m.info.id, walletId: main, chain: 'sol', vault: 0, feeMark: 0, grad: false })
+    this.devStat(m, 'cooked', 1)
     const t = this.market.tokens.find((x) => x.id === id)!
     this.botBuy(m, t, spec.devBuy * px, actions)
     const after = this.market.tokens.find((x) => x.id === id)!
@@ -1232,38 +1259,126 @@ export class Room {
   // ─── World leaderboards and bankruptcy ───────────────────────────────────────
   private boardCache: { at: number; rows: BoardRow[] } | null = null
 
+  hall: HallEntry[] = [] // finished World seasons and their winners, newest first
+  seasonKey: string | null = null // the season the boards are counting (saved, so a month that ends while the server is down still closes)
+
+  /** Realized profit on each chain's coins (for the SOL / BNB / ETH boards). */
+  private realized(m: Member, fills: Trade[]) {
+    if (!this.world) return
+    for (const f of fills) {
+      if (f.side !== 'sell' || !f.pnl) continue
+      const chain = f.chain ?? this.market.tokens.find((t) => t.id === f.tokenId)?.chain ?? 'sol'
+      const cp = (m.chainPnl ??= { sol: 0, bsc: 0, hood: 0 })
+      cp[chain] = (cp[chain] ?? 0) + f.pnl
+    }
+  }
+
+  /** A dev's record: coins launched, migrations, fees earned (lifetime and this season). */
+  private devStat(m: Member, k: 'cooked' | 'migrated' | 'fees', n: number) {
+    if (!this.world) return
+    const key = worldSeason().key
+    const d = (m.dev ??= { cooked: 0, migrated: 0, fees: 0, bestAth: 0, season: { cooked: 0, migrated: 0, fees: 0 } })
+    if ((d as DevStats & { key?: string }).key !== key) Object.assign(d, { key, season: { cooked: 0, migrated: 0, fees: 0 } })
+    d[k] += n
+    d.season[k] += n
+  }
+
   /** Everyone with a wallet here, valued now (kept for a few seconds: it's asked for often). */
-  private boardRows(): BoardRow[] {
-    if (this.boardCache && Date.now() - this.boardCache.at < 8000) return this.boardCache.rows
+  private boardRows(force = false, seasonOf?: string): BoardRow[] {
+    if (!force && !seasonOf && this.boardCache && Date.now() - this.boardCache.at < 8000) return this.boardCache.rows
     const byId = new Map(this.market.tokens.map((t) => [t.id, t]))
     const week = seasonNumber()
+    const today = dayKey()
+    const season = seasonOf ?? worldSeason().key // closing a season: count it to the end before anything resets
+    // Best coin each dev has launched (from the coins still on the market).
+    for (const c of this.cooked.values()) {
+      const t = byId.get(this.cookedIdOf(c) ?? '')
+      const m = this.members.get(c.pid)
+      if (t && m?.dev && t.ath > m.dev.bestAth) Object.assign(m.dev, { bestAth: t.ath, bestTicker: t.ticker })
+    }
     const rows: BoardRow[] = []
     for (const m of this.members.values()) {
       if (m.info.spectator || !m.wallet) continue
       const equity = valuePortfolio(m.wallet, byId, this.market).equity
       // Deposits, gifts and transfers move startBalance, so this is trading profit; losses from before a restart carry over.
       const pnl = equity - m.wallet.startBalance + (m.pnlCarry ?? 0)
-      // A new week (or a new player) starts counting from where they stand now.
+      // A new day / week / season (or a new player) starts counting from where they stand now.
       if (m.weekBase?.week !== week) m.weekBase = { week, pnl: m.weekBase ? pnl : 0 }
+      if (m.dayBase?.key !== today) m.dayBase = { key: today, pnl: m.dayBase ? pnl : 0 }
+      if (m.seasonBase?.key !== season) m.seasonBase = { key: season, pnl: m.seasonBase ? pnl : 0 }
+      const cp = m.chainPnl ?? { sol: 0, bsc: 0, hood: 0 }
+      if (m.chainBase?.key !== season) m.chainBase = { key: season, sol: m.chainBase ? cp.sol : 0, bsc: m.chainBase ? cp.bsc : 0, hood: m.chainBase ? cp.hood : 0 }
+      const cb = m.chainBase
+      const dev = m.dev && (m.dev as DevStats & { key?: string }).key !== season ? { ...m.dev, season: { cooked: 0, migrated: 0, fees: 0 } } : m.dev
       rows.push({
         id: m.info.id, name: m.info.name, avatar: m.info.avatar, level: m.info.level, online: m.info.online, verified: m.info.verified, bot: m.info.bot,
-        equity, pnl, week: pnl - m.weekBase.pnl, restarts: m.restarts ?? m.brain?.busts ?? 0,
+        equity, pnl, week: pnl - m.weekBase.pnl, day: pnl - m.dayBase.pnl, season: pnl - m.seasonBase.pnl,
+        chains: { sol: cp.sol - cb.sol, bsc: cp.bsc - cb.bsc, hood: cp.hood - cb.hood },
+        ...(dev ? { dev: { cooked: dev.cooked, migrated: dev.migrated, fees: dev.fees, bestAth: dev.bestAth, bestTicker: dev.bestTicker, season: dev.season } } : {}),
+        ...(m.trophies?.length ? { trophies: m.trophies.slice(-6) } : {}),
+        restarts: m.restarts ?? m.brain?.busts ?? 0,
       })
     }
-    this.boardCache = { at: Date.now(), rows }
+    if (!seasonOf) this.boardCache = { at: Date.now(), rows }
     return rows
   }
 
-  private sendBoard(me: Member) {
+  private cookedIdOf(c: Cooked) {
+    for (const [id, x] of this.cooked) if (x === c) return id
+    return undefined
+  }
+
+  /** What each list ranks by. */
+  private static boardValue(list: BoardList, r: BoardRow): number {
+    switch (list) {
+      case 'worth': return r.equity
+      case 'day': return r.day
+      case 'week': return r.week
+      case 'season': return r.season
+      case 'sol': case 'bsc': case 'hood': return r.chains[list]
+      case 'dev': return r.dev ? r.dev.season.fees + r.dev.season.migrated * 1000 + r.dev.season.cooked : -Infinity
+    }
+  }
+
+  /**
+   * A new month: close the season. Its top traders (season profit, and each chain), top dev and richest player get
+   * a trophy that stays next to their name, and the season goes into the Hall of Fame.
+   */
+  private closeSeasonIfDue() {
     if (!this.world) return
+    const now = worldSeason()
+    if (this.seasonKey === null) this.seasonKey = now.key
+    if (this.seasonKey === now.key) return
+    const ending = worldSeason(new Date(Date.parse(`${this.seasonKey}-15T00:00:00Z`)))
+    const rows = this.boardRows(true, this.seasonKey) // the ending season's numbers (its bases are still in place)
+    const lists: [BoardList, string][] = [['season', '🏆'], ['sol', '◎'], ['bsc', '◆'], ['hood', '⟠'], ['dev', '🍳'], ['worth', '💰']]
+    const winners: HallEntry['winners'] = []
+    for (const [list, icon] of lists) {
+      const sorted = rows.filter((r) => Room.boardValue(list, r) > 0).sort((a, b) => Room.boardValue(list, b) - Room.boardValue(list, a))
+      sorted.slice(0, list === 'season' ? 3 : 1).forEach((r, i) => {
+        winners.push({ list, name: r.name, avatar: r.avatar, value: Room.boardValue(list, r), ...(r.bot ? { bot: true } : {}) })
+        const m = this.members.get(r.id)
+        if (m) m.trophies = [...(m.trophies ?? []), `${list === 'season' ? ['🏆', '🥈', '🥉'][i] : icon} S${ending.n}`]
+      })
+    }
+    this.hall = [{ n: ending.n, name: ending.name, winners }, ...this.hall].slice(0, 24)
+    this.seasonKey = now.key
+    this.boardCache = null
+    this.broadcast({ t: 'notice', text: `🏆 Season ${ending.n} (${ending.name}) is over! Winners are in the Hall of Fame. Season ${now.n} starts now.` } as never)
+  }
+
+  private sendBoard(me: Member, list: BoardList = 'worth') {
+    if (!this.world) return
+    this.closeSeasonIfDue()
     const rows = this.boardRows()
-    const worth = [...rows].sort((a, b) => b.equity - a.equity)
-    const weekly = [...rows].sort((a, b) => b.week - a.week)
-    const mine = rows.find((r) => r.id === me.info.id)
+    const pick = ['worth', 'day', 'week', 'season', 'sol', 'bsc', 'hood', 'dev'].includes(list) ? list : 'worth'
+    const ranked = [...rows].filter((r) => pick !== 'dev' || r.dev).sort((a, b) => Room.boardValue(pick, b) - Room.boardValue(pick, a))
+    const mine = ranked.find((r) => r.id === me.info.id) ?? rows.find((r) => r.id === me.info.id)
     const next = (me.lastRestart ?? 0) + WORLD_RESTART_EVERY_MS
+    const s = worldSeason()
     const msg: BoardMsg = {
-      t: 'board', week: seasonNumber(), total: rows.length, worth: round(worth.slice(0, 100)) as BoardRow[], weekly: round(weekly.slice(0, 100)) as BoardRow[],
-      ...(mine ? { me: { row: round(mine) as BoardRow, worthRank: worth.indexOf(mine) + 1, weekRank: weekly.indexOf(mine) + 1, restartAt: next > Date.now() ? next : null } } : {}),
+      t: 'board', list: pick, week: seasonNumber(), season: { n: s.n, name: s.name, endsAt: s.endsAt }, total: ranked.length, rows: round(ranked.slice(0, 100)) as BoardRow[], hall: this.hall,
+      ...(mine ? { me: { row: round(mine) as BoardRow, rank: ranked.indexOf(mine) + 1, restartAt: next > Date.now() ? next : null } } : {}),
     }
     this.sendTo(me.info.id, msg)
   }

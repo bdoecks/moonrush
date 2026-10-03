@@ -60,21 +60,40 @@ ok(wal?.state.cash === cashAfter && wal.state.startBalance === WORLD_START_BALAN
 
 // Leaderboards: everyone with a wallet is ranked (bots too), by net worth and by this week's profit.
 type Board = Extract<ServerMsg, { t: 'board' }>
-const askBoard = (): Board => {
+const askBoard = (list?: string): Board => {
   back2.length = 0
   ;(back as unknown as { boardCache: unknown }).boardCache = null
-  b.handle('u-aaa', { t: 'board' })
+  b.handle('u-aaa', { t: 'board', ...(list ? { list } : {}) })
   return back2.find((m) => m.t === 'board') as Board
 }
 const b1 = askBoard()
-ok(!!b1 && b1.total === BOT_ROSTER.length + 1 && b1.worth.length === b1.total && b1.worth.every((r, i) => i === 0 || b1.worth[i - 1].equity >= r.equity), `board ranks all ${b1?.total} wallets by net worth`)
-ok(!!b1.me && b1.me.row.id === 'u-aaa' && b1.me.worthRank >= 1 && b1.me.restartAt === null, `you're on it: #${b1.me?.worthRank} net worth, #${b1.me?.weekRank} this week`)
-ok(b1.worth.filter((r) => r.bot).length === BOT_ROSTER.length, 'bots are on the board, flagged as bots')
+ok(!!b1 && b1.list === 'worth' && b1.total === BOT_ROSTER.length + 1 && b1.rows.length === b1.total && b1.rows.every((r, i) => i === 0 || b1.rows[i - 1].equity >= r.equity), `board ranks all ${b1?.total} wallets by net worth`)
+ok(!!b1.me && b1.me.row.id === 'u-aaa' && b1.me.rank >= 1 && b1.me.restartAt === null, `you're on it: #${b1.me?.rank} net worth`)
+ok(b1.rows.filter((r) => r.bot).length === BOT_ROSTER.length, 'bots are on the board, flagged as bots')
+// The other lists: today / season / each chain are ranked by their own number; the season is the calendar month.
+for (const list of ['day', 'week', 'season', 'sol', 'bsc', 'hood'] as const) {
+  const bl = askBoard(list)
+  const val = (r: (typeof bl.rows)[number]) => (list === 'day' ? r.day : list === 'week' ? r.week : list === 'season' ? r.season : r.chains[list])
+  ok(bl.list === list && bl.rows.every((r, i) => i === 0 || val(bl.rows[i - 1]) >= val(r)), `${list} board is sorted by ${list} profit (${bl.rows.length} rows, season ${bl.season.n}: ${bl.season.name})`)
+}
 // An admin gift is money put in: net worth goes up, profit doesn't.
 const pnlBefore = b1.me!.row.pnl
 back.grant('u-aaa', 5000, 'usd')
 const b2 = askBoard()
 ok(Math.abs(b2.me!.row.equity - b1.me!.row.equity - 5000) < 60 && Math.abs(b2.me!.row.pnl - pnlBefore) < 60, `a $5,000 gift raises net worth, not profit (pnl ${pnlBefore.toFixed(0)} → ${b2.me!.row.pnl.toFixed(0)})`)
+// A month ends: the season closes, its winners get trophies and go into the Hall of Fame.
+{
+  const r = back as unknown as { seasonKey: string | null; hall: { n: number; winners: { list: string; name: string }[] }[]; members: Map<string, { trophies?: string[]; seasonBase?: { key: string; pnl: number }; info: { bot?: boolean } }> }
+  // Pretend last month: everyone's season counters belong to it, and some bots made money in it.
+  const lastMonth = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15)).toISOString().slice(0, 7)
+  r.seasonKey = lastMonth
+  for (const m of r.members.values()) if (m.seasonBase) m.seasonBase = { key: lastMonth, pnl: m.seasonBase.pnl - (m.info.bot ? Math.random() * 500 : 0) }
+  const bh = askBoard('season')
+  const champs = bh.hall[0]?.winners ?? []
+  ok(bh.hall.length === 1 && champs.some((w) => w.list === 'season'), `season closed into the Hall of Fame: ${champs.map((w) => `${w.list}: ${w.name}`).join(', ')}`)
+  ok([...r.members.values()].some((m) => m.trophies?.some((t) => t.startsWith('🏆'))), 'the season champion got a 🏆 trophy')
+  ok(r.seasonKey !== lastMonth, 'the new season started')
+}
 // Bankruptcy restart: refused while you still have money…
 back2.length = 0
 b.handle('u-aaa', { t: 'op', seq: 50, op: { kind: 'bankrupt' } })

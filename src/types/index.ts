@@ -121,6 +121,8 @@ export interface SocialProfile {
   posts: number
   lastPostTick: number
   calls: { postId: number; tokenId: string; ticker: string; tick: number; mcapAtPost: number; peak: number; likes: number; settled?: boolean; x?: number }[]
+  gainDay?: string // the day (YYYY-MM-DD) gainedToday counts
+  gainedToday?: number // followers gained that day (there's a daily cap)
 }
 
 export interface SocialPost {
@@ -382,6 +384,7 @@ export interface Token {
   creator?: 'you'
   creatorId?: string // multiplayer: the player who cooked it
   creatorName?: string
+  devAddr?: string // the wallet that deployed it (a player's or bot's real wallet): track it to see the dev's trades
   vampOf?: { id: string; ticker: string } // a copycat launch of this coin
   creatorFees?: number // USD of creator fees this coin has generated (all trading, at its launchpad's creator rate)
   feesPaid?: number // USD of all trading fees paid on this coin so far (protocol + creator + LP): pump.fun / Axiom's "Global Fees Paid"

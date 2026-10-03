@@ -12,6 +12,7 @@ import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
 import { TrackerSettingsModal } from './TrackerSettingsModal'
 import { useFriendRows, type TrackerRow } from './friendRows'
+import { GroupMenu, NewGroupButton } from './groups'
 
 const ACTION: Record<WalletActionKind, { label: string; short: string; cls: string }> = {
   first: { label: 'First Buy', short: 'Buy', cls: 'text-up' },
@@ -58,7 +59,6 @@ export function TrackerFeed({ compact = false, onManage }: { compact?: boolean; 
   const paused = frozen !== null
   const rows = frozen ?? live
   const nFilters = activeFilterCount(f)
-  const groupsInUse = f.groups.filter((g) => tracked.some((id) => labels[id]?.group === g))
   const manage = onManage ?? (() => setView('track'))
 
   if (!tracked.length && !friends.count) {
@@ -69,9 +69,10 @@ export function TrackerFeed({ compact = false, onManage }: { compact?: boolean; 
     <div>
       <div className={clsx('flex flex-wrap items-center gap-1.5 border-b border-line px-3', compact ? 'py-1.5' : 'py-2')}>
         <button onClick={() => update({ group: 'all' })} className={chip(f.group === 'all')}>All {tracked.length + friends.count}</button>
-        {groupsInUse.map((g) => (
-          <button key={g} onClick={() => update({ group: f.group === g ? 'all' : g })} className={chip(f.group === g)}>{g}</button>
+        {f.groups.map((g) => (
+          <button key={g} onClick={() => update({ group: f.group === g ? 'all' : g })} className={chip(f.group === g)}>📁 {g}</button>
         ))}
+        <NewGroupButton onAdded={(g) => update({ group: g })} className="text-[11px]" />
         <span className="mx-1 h-4 w-px bg-line2" />
         {CHAIN_IDS.map((c) => (
           <button key={c} onClick={() => update({ chains: f.chains.includes(c) ? f.chains.filter((x) => x !== c) : [...f.chains, c] })} aria-pressed={f.chains.includes(c)} className={chip(f.chains.includes(c))}>
@@ -133,8 +134,8 @@ export function TrackerFeed({ compact = false, onManage }: { compact?: boolean; 
                         <span>{w.avatar}</span>
                         <span className="font-semibold">{lb?.label || w.name}</span>
                         {friend && <span className="rounded bg-[#b36bff]/15 px-1 text-[9px] font-bold text-[#b36bff]">FRIEND</span>}
-                        {lb?.group && !compact && <span className="rounded bg-raise px-1 text-[9px] text-muted">{lb.group}</span>}
                       </button>
+                      <GroupMenu id={w.id} className="ml-1 inline-block align-middle" />
                     </td>
                     <td className={clsx(td, 'font-semibold', a.cls)}>{compact ? a.short : a.label}</td>
                     <td className={td}>

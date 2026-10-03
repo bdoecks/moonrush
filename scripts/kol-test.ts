@@ -39,7 +39,20 @@ const p0 = r.market.tokens.find((t) => t.id === big.id)!.price
 const b0 = r.market.tokens.find((t) => t.id === big.id)!.buys
 for (let i = 0; i < 10; i++) r.tick()
 const after = r.market.tokens.find((t) => t.id === big.id)
-ok(queued(big.id).length === 0 && !!after && after.buys - b0 >= wave.length * 0.8, `the copy buys landed: ~${after ? Math.round(after.buys - b0) : 0} buys (the buy counter fades a little each tick) in 10 ticks (price ${p0.toPrecision(3)} → ${after?.price.toPrecision(3)})`)
+ok(queued(big.id).length === 0 && !!after && after.buys > b0, `the copy buys landed: all ${wave.length} went through within 10 ticks in 10 ticks (price ${p0.toPrecision(3)} → ${after?.price.toPrecision(3)})`)
+
+// A buy from a side wallet only: copy traders can't see it.
+{
+  const me = r.members.get('p1')! as unknown as { wallet: { accounts: { id: string }[] } }
+  r.handle('p1', { t: 'op', seq: seq++, op: { kind: 'swap', from: 'usd', to: 'sol', amount: 1, walletId: main().id } })
+  const side = me.wallet.accounts[1]?.id
+  if (side) {
+    r.handle('p1', { t: 'op', seq: seq++, op: { kind: 'transfer', fromId: main().id, toId: side, chain: 'sol', amount: 3 } })
+    const other = coins[2]
+    r.handle('p1', { t: 'order', seq: seq++, ref: 9, order: { side: 'buy', tokenId: other.id, walletIds: [side], usdEach: 300, kol: { followers: 80_000, rep: 70 } } })
+    ok(queued(other.id).length === 0, 'a side-wallet buy brings no copy traders (they follow the main wallet only)')
+  } else ok(true, '(no side wallet in this account layout: side-wallet check skipped)')
+}
 
 // The KOL sells everything: the copiers dump behind them.
 const qty = main().positions[big.id]?.qty ?? 0

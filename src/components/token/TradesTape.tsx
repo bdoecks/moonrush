@@ -13,6 +13,8 @@ import { nativePrice } from '../../game/tradingEngine'
 import type { Portfolio, Token } from '../../types'
 import { fmtAge, fmtCompact, fmtNum, fmtTime, fmtUsd, toneClass } from '../../utils/format'
 import { EmptyState } from '../ui'
+import { walletAddress } from '../../utils/address'
+import { playerId } from '../../net/client'
 
 const TAG: Record<HolderTag, { icon: string; label: string; cls: string }> = {
   dev: { icon: '🧑‍💻', label: 'Dev', cls: 'text-down' },
@@ -595,6 +597,9 @@ function DevTokenTab({ token }: { token: Token }) {
   const tokens = useGame((s) => s.market.tokens)
   const notify = useGame((s) => s.notify)
   const select = useGame((s) => s.select)
+  const myFirstWallet = useGame((s) => s.portfolio.accounts?.[0]?.id)
+  const watch = useFriends((s) => s.watch)
+  const toggleWatch = useFriends((s) => s.toggle)
   const book = bookOf(token, now)
   const yours = token.creator === 'you'
   const creatorName = (token as Token & { creatorName?: string }).creatorName
@@ -613,7 +618,12 @@ function DevTokenTab({ token }: { token: Token }) {
   const onCurve = count('bonding')
   const dead = n - migrated - rugged - onCurve
   const best = all.reduce((b, c) => (c.athMc > b.athMc ? c : b), all[0])
-  const devAddr = displayAddress(book.devWallet, token.chain)
+  // A player's or bot's coin: the real deploying wallet (the address their trades show under), so it can be tracked.
+  const myLaunch = yours ? launches.find((l) => l.tokenId === token.id) : undefined
+  const realAddr = token.devAddr ?? (yours ? walletAddress(playerId(), myLaunch?.devWallet ?? myFirstWallet ?? 'w-main', 'sol') : undefined)
+  const devAddr = realAddr ?? displayAddress(book.devWallet, token.chain)
+  const watchKey = realAddr ? addrKey(realAddr) : null
+  const tracking = !!watchKey && watch.some((w) => w.key === watchKey)
   const devName = yours ? 'You' : creatorName ?? 'Dev wallet'
   // What the dev did on this coin.
   const dt = token.devTrades ?? []
@@ -633,7 +643,12 @@ function DevTokenTab({ token }: { token: Token }) {
   if (devSold > 0 && devSold >= devBought * 0.6) tags.push({ label: '📤 Dev selling', cls: 'border-down/40 bg-down/10 text-down' })
   const copy = () => {
     navigator.clipboard?.writeText(devAddr).catch(() => {})
-    notify({ title: 'COPIED', body: `Dev address ${devAddr} (fictional)`, tone: 'info', icon: '📋' })
+    notify({ title: 'COPIED', body: `Dev address ${devAddr}${realAddr ? '' : ' (simulated dev)'}`, tone: 'info', icon: '📋' })
+  }
+  const track = () => {
+    if (!watchKey) return
+    const on = toggleWatch({ key: watchKey, label: `Dev of $${token.ticker}` })
+    notify(on ? { title: 'TRACKING DEV', body: `You'll see this dev wallet's trades on charts and in your feed (${devAddr}).`, tone: 'info', icon: '👁' } : { title: 'STOPPED TRACKING', body: `Dev of $${token.ticker}`, tone: 'info', icon: '👁' })
   }
   const pct = (x: number) => `${Math.round((x / n) * 100)}%`
   const C = 2 * Math.PI * 22
@@ -647,7 +662,14 @@ function DevTokenTab({ token }: { token: Token }) {
             <div className="grid size-12 shrink-0 place-items-center rounded-full text-[22px] ring-2 ring-white/10" style={{ background: `radial-gradient(circle at 30% 25%, hsl(${hueOf(devAddr)} 75% 55%), hsl(${(hueOf(devAddr) + 50) % 360} 70% 22%))` }}>🧑‍💻</div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 truncate text-[14px] font-bold text-ink">{devName}</div>
-              <button onClick={copy} className="num mt-0.5 flex items-center gap-1 text-[11px] text-dim hover:text-ink" title="Copy the dev's (fictional) address">{devAddr} <span className="text-[10px]">⧉</span></button>
+              <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                <button onClick={copy} className="num flex items-center gap-1 text-[11px] text-dim hover:text-ink" title="Copy the dev wallet's address">{devAddr} <span className="text-[10px]">⧉</span></button>
+                {watchKey && !yours ? (
+                  <button onClick={track} className={clsx('flex items-center gap-1 rounded border px-1.5 py-px text-[10px] font-bold', tracking ? 'border-info bg-info/15 text-info' : 'border-line2 text-muted hover:border-info/60 hover:text-info')} title="Follow this dev wallet: its trades show on charts and in your tracker feed">
+                    <Eye size={10} /> {tracking ? 'Tracking' : 'Track dev'}
+                  </button>
+                ) : !realAddr ? <span className="text-[10px] text-dim">simulated dev</span> : null}
+              </div>
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {tags.length ? tags.map((t) => <span key={t.label} className={clsx('whitespace-nowrap rounded border px-1.5 py-px text-[10px] font-semibold', t.cls)}>{t.label}</span>) : <span className="text-[10px] text-dim">No red flags on record</span>}
               </div>

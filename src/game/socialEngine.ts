@@ -105,14 +105,43 @@ export function shill(m: MarketState, rng: Rng, t: Token | undefined, author: { 
   return { likes, rts: Math.round(likes * rng.range(0.08, 0.2)), replies, buyers, queue }
 }
 
+// ─── Follower growth ─────────────────────────────────────────────────────────
+// Followers used to grow as a share of your followers on every good call, which snowballed (trillions in half an
+// hour). Now: gains are 20% smaller, one call adds at most a quarter of your audience, and there's a daily cap
+// (2,500 + 10% of your audience a day), so KOL status (10k) takes a few days of good calls. Losses aren't capped.
+export const FOLLOWER_GAIN_RATE = 0.8
+export const followerCapPerDay = (followers: number) => Math.round(2_500 + followers * 0.1)
+const today = () => new Date().toISOString().slice(0, 10)
+
+/** Add (or lose) followers, respecting the daily cap on gains. */
+export function addFollowers(s: SocialProfile, raw: number): SocialProfile {
+  const day = today()
+  const gained = s.gainDay === day ? (s.gainedToday ?? 0) : 0
+  if (raw <= 0) return { ...s, followers: Math.max(10, Math.round(s.followers + raw)), gainDay: day, gainedToday: gained }
+  const room = Math.max(0, followerCapPerDay(s.followers) - gained)
+  const add = Math.min(room, Math.round(raw * FOLLOWER_GAIN_RATE))
+  return { ...s, followers: s.followers + add, gainDay: day, gainedToday: gained + add }
+}
+
+/** Followers you can still gain today. */
+export const followersLeftToday = (s: SocialProfile) => Math.max(0, followerCapPerDay(s.followers) - (s.gainDay === today() ? (s.gainedToday ?? 0) : 0))
+
+/** Saves from before the cap could hold absurd counts (trillions): bring them back to a big-but-sane KOL. */
+export const FOLLOWER_CEILING = 1_000_000
+export function saneSocial<T extends { social?: SocialProfile }>(p: T): T {
+  const soc = p.social
+  return soc && !(soc.followers <= FOLLOWER_CEILING) ? { ...p, social: { ...soc, followers: 100_000 } } : p
+}
+
 /**
  * After a call settles: did the coin run? Rep moves with the result; followers with engagement and wins.
  * `x` = best price since the call ÷ price at the call.
  */
 export function settleCall(s: SocialProfile, x: number, likes: number): SocialProfile {
   const repDelta = x >= 1.5 ? Math.min(12, (x - 1) * 6) : x >= 1.1 ? 2 : x < 0.6 ? -8 : -3
-  const followerGain = Math.round(likes * 0.3 + (x > 1.2 ? s.followers * Math.min(0.5, (x - 1) * 0.15) : x < 0.7 ? -s.followers * 0.04 : 0))
-  return { ...s, rep: Math.max(0, Math.min(100, s.rep + repDelta)), followers: Math.max(10, s.followers + followerGain) }
+  const raw = likes * 0.3 + (x >= 1.5 ? 20 : 0) + (x > 1.2 ? s.followers * Math.min(0.25, (x - 1) * 0.15) : x < 0.7 ? -s.followers * 0.04 / FOLLOWER_GAIN_RATE : 0)
+  const out = addFollowers(s, raw < 0 ? raw * FOLLOWER_GAIN_RATE : raw)
+  return { ...out, rep: Math.max(0, Math.min(100, s.rep + repDelta)) }
 }
 
 // ─── KOL copy traders ────────────────────────────────────────────────────────

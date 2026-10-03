@@ -33,6 +33,7 @@ npx tsx scripts/world-test.ts               # World rules: always on, guests wat
 npx tsx scripts/bots-test.ts 2              # World bots over 2 simulated hours
 npx tsx scripts/safety-test.ts              # chat safety: filter, rate limit, mute, reports
 npx tsx scripts/kol-test.ts                 # KOL copy traders: followers copy a KOL's buys and sells
+npx tsx scripts/charts-test.ts 30           # charts across a restart: short timeframes rebuilt from the real 1m candles
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
 npx vite build                              # production build
@@ -111,7 +112,11 @@ the World saved across restarts, the World in admin preview, World bots, admin w
 restart (op `bankrupt`: under $250 net worth, back to $1,000, once per 24h, losses carried in `pnlCarry`), Market
 Lighthouse, Convert, Instant Trade settings, Trenches display settings, phone layout, chat safety
 (`server/moderation.ts`: word filter, no links in the World, rate limit, strikes → auto-mute, reports, admin mute),
-player counters (`supabase/006_activity.sql`, `track_activity` / `activity_summary`, admin Switches & stats tab).
+player counters (`supabase/006_activity.sql`, `track_activity` / `activity_summary`, admin Switches & stats tab),
+share cards, KOL copy traders (`copyBuys` / `copySells`, main wallet only), dev wallets (🧑‍💻, max 3) with trackable
+`devAddr`, tracker groups (`components/tracker/groups.tsx`), follower daily cap (`addFollowers`), Market Movement panel,
+World seasons = calendar months (`game/worldSeason.ts`; boards per list via `{ t: 'board', list }`, Hall of Fame and
+trophies in `closeSeasonIfDue`), DEX pools follow price on every trade (`poolFollows`).
 
 Next, in order:
 1. Launch: Render Starter plan so the server never sleeps, then turn the `world` flag on.

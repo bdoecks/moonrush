@@ -1,5 +1,6 @@
 // MOONRUSH accounts (Supabase). Signing in claims your username and syncs your progress (XP, season, badges,
 // social following, rewards, settings) between devices. Rounds themselves stay on the device you play them on.
+import { saneSocial } from '../game/socialEngine'
 import type { Session } from '@supabase/supabase-js'
 import { create } from 'zustand'
 import { levelFromXp } from '../game/progression'
@@ -204,7 +205,7 @@ function onSignedOut() {
 function applyCloud(c: CloudSave, replace = false) {
   applying = true
   const g = useGame.getState()
-  const profile = replace ? ({ ...BLANK_PROFILE, ...(c.profile as Partial<Profile>) } as Profile) : { ...g.profile, ...c.profile }
+  const profile = saneSocial(replace ? ({ ...BLANK_PROFILE, ...(c.profile as Partial<Profile>) } as Profile) : { ...g.profile, ...c.profile })
   const rewards = c.rewards ? (replace ? c.rewards : { ...g.rewards, ...c.rewards }) : g.rewards
   // Device-only settings (window layout) stay; game settings come from the cloud.
   const settings = c.settings ? { ...g.settings, ...c.settings, trackerDock: g.settings.trackerDock } : g.settings

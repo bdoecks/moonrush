@@ -24,7 +24,9 @@ export function useTweenText<T extends HTMLElement>(value: number, format: (n: n
     let raf = 0
     let lastText = ''
     const step = (now: number) => {
-      const k = Math.min(1, (now - start) / ms)
+      // A frame's timestamp can be a hair before \`start\`: without the floor, k < 0 pushes the number past where it
+      // started, and at fast speeds (a new value every tick) that drift compounded into nonsense like $2e+59.
+      const k = Math.min(1, Math.max(0, (now - start) / ms))
       const e = 1 - Math.pow(1 - k, 3)
       shown.current = from + (value - from) * e
       const text = fmt.current(shown.current)

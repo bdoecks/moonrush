@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { Bot, Boxes, EyeOff, Gift, Info, Play, Square, Wallet } from 'lucide-react'
+import { Bot, Boxes, Check, Copy, EyeOff, Gift, Info, Play, Plus, Square, Wallet } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { CHAINS, fmtNative } from '../../data/chains'
 import { airdropFeePerWallet, BOT_RATES, BUNDLE_MAX_WALLETS, botCostPerMin, washShare, type AirdropTarget } from '../../game/devTools'
@@ -10,6 +10,9 @@ import type { BundleSpec, CookSpec, LaunchRecord, Token } from '../../types'
 import { fmtUsd } from '../../utils/format'
 import { Segmented, Toggle } from '../ui'
 import { useWallets } from '../../hooks/useWallets'
+import { DEV_EMOJI, MAX_DEV_WALLETS } from '../../game/accounts'
+import { playerId } from '../../net/client'
+import { walletAddress } from '../../utils/address'
 
 // ─── Bundler (launch form) ───────────────────────────────────────────────────
 interface BundlerProps {
@@ -95,10 +98,33 @@ export function BundlerSection({ spec, onChange, est, detect, bundleUsd, bundleF
 }
 
 // ─── Dev wallet + side wallets (launch form) ─────────────────────────────────
+/**
+ * Which wallet deploys the coin (the "dev wallet" everyone sees and can track), with up to 3 dedicated dev wallets
+ * made right here, plus buys from your other wallets that don't count as dev.
+ */
 export function SideWalletsSection({ spec, onChange }: { spec: CookSpec; onChange: (patch: Partial<CookSpec>) => void }) {
   const { all, primary } = useWallets()
   const openManager = useGame((s) => s.setWalletsOpen)
+  const createWallet = useGame((s) => s.createWallet)
+  const fundWallets = useGame((s) => s.fundWallets)
+  const notify = useGame((s) => s.notify)
   const tick = useGame((s) => s.market.tick)
+  const [naming, setNaming] = useState<string | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
+  const devWallets = all.filter((a) => a.emoji === DEV_EMOJI)
+  const choices = [...(primary && primary.emoji !== DEV_EMOJI ? [primary] : []), ...devWallets]
+  const addrOf = (id: string) => walletAddress(playerId(), id, 'sol') // the same address the tape shows for it
+  const makeDev = () => {
+    const id = createWallet((naming ?? '').trim() || `Dev ${devWallets.length + 1}`, DEV_EMOJI)
+    setNaming(null)
+    if (id) onChange({ devWallet: id, sideBuys: (spec.sideBuys ?? []).filter((x) => x.walletId !== id) })
+  }
+  const copy = (id: string) => {
+    navigator.clipboard?.writeText(addrOf(id)).catch(() => {})
+    setCopied(id)
+    setTimeout(() => setCopied(null), 1500)
+    notify({ title: 'COPIED', body: `Dev wallet address ${addrOf(id)}`, tone: 'info', icon: '📋' })
+  }
   const c = CHAINS[spec.chain]
   const devId = spec.devWallet && all.some((a) => a.id === spec.devWallet) ? spec.devWallet : primary?.id
   const sides = spec.sideBuys ?? []
@@ -115,17 +141,54 @@ export function SideWalletsSection({ spec, onChange }: { spec: CookSpec; onChang
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Wallet size={15} className="text-accent" />
-          <h2 className="text-[11px] font-bold uppercase tracking-wider text-muted">Dev &amp; side wallets</h2>
+          <h2 className="text-[11px] font-bold uppercase tracking-wider text-muted">Deploy from</h2>
         </div>
         <button type="button" onClick={() => openManager(true)} className="text-[10px] text-dim hover:text-ink">Manage wallets…</button>
       </div>
-      <p className="mt-1 text-[11px] text-muted">Only the deployer counts as the dev, so only its buys raise dev %. Your other wallets look like normal buyers, but sleuths may link them (costs hype).</p>
+      <p className="mt-1 text-[11px] text-muted">The deploying wallet is the coin’s <b className="text-ink">dev wallet</b>: its address shows on the Dev Token tab and anyone can track it. A fresh dev wallet keeps your main wallet’s history out of it.</p>
 
-      <div className="mt-2 flex items-center gap-2 text-[12px]">
-        <span className="shrink-0 text-dim">Deploy from</span>
-        <select value={devId} onChange={(e) => onChange({ devWallet: e.target.value, sideBuys: sides.filter((x) => x.walletId !== e.target.value) })} className="h-8 min-w-0 flex-1 rounded border border-line2 bg-bg px-1.5 outline-none focus:border-accent/60" aria-label="Dev wallet">
-          {all.map((a) => <option key={a.id} value={a.id}>{a.emoji} {a.name} · {fmtNative(a.balances[spec.chain], spec.chain)}</option>)}
-        </select>
+      {/* Dev wallet cards */}
+      <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+        {[...choices, ...(devId && !choices.some((a) => a.id === devId) ? all.filter((a) => a.id === devId) : [])].map((a) => {
+          const on = a.id === devId
+          const bal = a.balances[spec.chain] ?? 0
+          return (
+            <div key={a.id} role="button" tabIndex={0} onClick={() => onChange({ devWallet: a.id, sideBuys: sides.filter((x) => x.walletId !== a.id) })} onKeyDown={(e) => e.key === 'Enter' && onChange({ devWallet: a.id, sideBuys: sides.filter((x) => x.walletId !== a.id) })}
+              className={clsx('cursor-pointer rounded-md border px-2.5 py-2 transition-colors', on ? 'border-accent bg-accent/10' : 'border-line2 hover:border-line2 hover:bg-panel2')}>
+              <div className="flex items-center gap-2">
+                <span className="text-[16px]">{a.emoji}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1 truncate text-[12px] font-bold">{a.name}{a.emoji === DEV_EMOJI && <span className="rounded bg-warn/15 px-1 text-[9px] font-bold text-warn">DEV</span>}</span>
+                  <span className="num block text-[10px] text-dim">{fmtNative(bal, spec.chain)}</span>
+                </span>
+                {on && <Check size={14} className="shrink-0 text-accent" />}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <button type="button" onClick={(e) => { e.stopPropagation(); copy(a.id) }} className="num flex items-center gap-1 text-[10px] text-dim hover:text-ink" title="Copy this wallet's address">{addrOf(a.id)} {copied === a.id ? <Check size={10} /> : <Copy size={10} />}</button>
+                {on && bal < spec.devBuy && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); fundWallets('usd', [a.id], spec.chain, Math.max(25, (spec.devBuy - bal) * nativePrice(useGame.getState().market, spec.chain) * 1.05)) }} className="ml-auto whitespace-nowrap rounded bg-accent/15 px-1.5 py-px text-[10px] font-bold text-accent" title="Swap USD from your bank into this wallet">Fund for dev buy</button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+        {devWallets.length < MAX_DEV_WALLETS && (naming === null ? (
+          <button type="button" onClick={() => setNaming('')} className="flex items-center justify-center gap-1.5 rounded-md border border-dashed border-line2 px-2.5 py-2 text-[12px] font-semibold text-muted hover:border-accent/60 hover:text-accent">
+            <Plus size={13} /> New dev wallet <span className="num text-[10px] font-normal text-dim">{devWallets.length}/{MAX_DEV_WALLETS}</span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5 rounded-md border border-accent/50 px-2 py-1.5">
+            <span className="text-[15px]">{DEV_EMOJI}</span>
+            <input autoFocus value={naming} onChange={(e) => setNaming(e.target.value.slice(0, 18))} onKeyDown={(e) => { if (e.key === 'Enter') makeDev(); if (e.key === 'Escape') setNaming(null) }} placeholder={`Dev ${devWallets.length + 1}`} className="h-7 min-w-0 flex-1 rounded border border-line2 bg-bg px-1.5 text-[12px] outline-none focus:border-accent/60" aria-label="New dev wallet name" />
+            <button type="button" onClick={makeDev} className="rounded bg-accent px-2 py-1 text-[11px] font-bold text-accent-ink">Create</button>
+          </div>
+        ))}
+      </div>
+      {devWallets.length >= MAX_DEV_WALLETS && <p className="mt-1 text-[10px] text-dim">{MAX_DEV_WALLETS} dev wallets is the limit for now.</p>}
+
+      <div className="mt-3">
+        <h3 className="text-[11px] font-bold uppercase tracking-wider text-muted">Side buys</h3>
+        <p className="text-[10px] text-dim">Your other wallets buy at launch without counting as dev (sleuths may link them).</p>
       </div>
 
       {others.length === 0 ? (

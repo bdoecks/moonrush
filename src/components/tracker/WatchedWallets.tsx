@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useGame } from '../../game/store'
 import { addrKey, playerKey, useFriends } from '../../net/friends'
 import { fmtAge, fmtCompact, fmtUsd } from '../../utils/format'
+import { GroupMenu } from './groups'
 /** Wallets you follow in this room, plus a box to add a side wallet by address (if a friend gave it to you). */
 export function WatchedWallets() {
   const watch = useFriends((s) => s.watch)
@@ -36,6 +37,7 @@ export function WatchedWallets() {
           <span key={w.key} className="inline-flex items-center gap-1 rounded-md border border-line2 bg-bg px-2 py-0.5 text-[11px]">
             <span>{w.key.startsWith('p:') ? '🧑' : '🕶'}</span>
             <input defaultValue={w.label} onBlur={(e) => e.target.value.trim() && rename(w.key, e.target.value.trim())} className="num w-28 bg-transparent font-semibold outline-none" title="Rename" />
+            <GroupMenu id={w.key} />
             <button onClick={() => toggle(w)} className="text-dim hover:text-down" aria-label="Stop tracking"><X size={11} /></button>
           </span>
         ))}

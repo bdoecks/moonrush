@@ -20,7 +20,7 @@ import { emptyBalances, executeBuy, nativePrice, type Asset } from './tradingEng
 import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
 import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
-import { ACCOUNTS, CALL_SETTLE_TICKS, callerKey, copyBuys, copySells, type CopyBook, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
+import { ACCOUNTS, addFollowers, CALL_SETTLE_TICKS, callerKey, copyBuys, copySells, type CopyBook, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, saneSocial, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import { WORLD_START_BALANCE, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
 import { payNative, runBuy, runConvert, runGiveAway, runSell, runSwap } from './orders'
@@ -323,7 +323,7 @@ export interface GameState {
   /** Convert any asset in one wallet into any asset in another (USD is the shared bank). */
   convertAssets: (from: Asset, to: Asset, amount: number, fromWallet: string, toWallet: string) => boolean
   /** World: ask the server for the leaderboards. */
-  requestBoard: () => void
+  requestBoard: (list?: import('../net/protocol').BoardList) => void
   /** World: you're broke; ask the server for a fresh start (it checks you really are, and the once-a-day limit). */
   bankruptRestart: () => void
   // Multi-wallet (GMGN-style)
@@ -488,7 +488,7 @@ function defaultSelection(m: MarketState) {
 
 function initialState() {
   const settings = migrateSettings({ ...DEFAULT_SETTINGS, ...(load<Settings>('settings') ?? {}) })
-  const profile = { ...DEFAULT_PROFILE, ...(load<Profile>('profile') ?? {}) }
+  const profile = saneSocial({ ...DEFAULT_PROFILE, ...(load<Profile>('profile') ?? {}) })
   const saved = load<SavedRun>('run')
   if (saved?.market?.tokens?.length) {
     setClock(secPerTickOf(saved.market)) // before rebuilding charts: their spacing depends on the clock
@@ -636,7 +636,8 @@ export const useGame = create<GameState>()((set, get) => {
     }
     if (!s.online) {
       const kol = kolOf(s)
-      const wave = kol && copyBuys(market, new Rng((Math.random() * 2 ** 32) >>> 0), market.tokens.find((x) => x.id === id) ?? t, kol, fills.reduce((a, f) => a + f.value, 0), soloCopyBook)
+      const main = s.portfolio.accounts?.[0]?.id // copy traders follow your main (public) wallet only
+      const wave = kol && copyBuys(market, new Rng((Math.random() * 2 ** 32) >>> 0), market.tokens.find((x) => x.id === id) ?? t, kol, fills.filter((f) => !main || (f.walletId ?? main) === main).reduce((a, f) => a + f.value, 0), soloCopyBook)
       if (wave) {
         market = { ...market, shillQueue: [...(market.shillQueue ?? []), ...wave.queue] }
         s.notify({ title: 'COPY TRADERS', body: `👥 ${wave.copiers} copy trader${wave.copiers > 1 ? 's are' : ' is'} following your buy of $${t.ticker} (~${fmtUsd(wave.usd, 0)})`, tone: 'info', icon: '👥' })
@@ -1300,7 +1301,11 @@ export const useGame = create<GameState>()((set, get) => {
       let market = r.market
       // Solo: your copy traders sell the same share behind you (in rooms the server does this).
       if (!s.online && r.fills.length && tokS) {
-        const wave = copySells(market, new Rng((Math.random() * 2 ** 32) >>> 0), market.tokens.find((x) => x.id === id) ?? tokS, frac, soloCopyBook)
+        // Only what your main (public) wallet sold counts: copy traders can't see your side wallets.
+        const main = s.portfolio.accounts?.[0]
+        const mainHeld = main?.positions[id]?.qty ?? 0
+        const mainLeg = legs.find((l) => l.walletId === main?.id)
+        const wave = mainLeg && mainHeld > 0 ? copySells(market, new Rng((Math.random() * 2 ** 32) >>> 0), market.tokens.find((x) => x.id === id) ?? tokS, Math.min(1, mainLeg.qty / mainHeld), soloCopyBook) : null
         if (wave) market = { ...market, shillQueue: [...(market.shillQueue ?? []), ...wave.queue] }
       }
       const { fills, failures } = r
@@ -1711,8 +1716,8 @@ export const useGame = create<GameState>()((set, get) => {
       persist()
       return true
     },
-    requestBoard: () => {
-      if (get().online?.round.world) netHooks.send?.({ t: 'board' })
+    requestBoard: (list) => {
+      if (get().online?.round.world) netHooks.send?.({ t: 'board', ...(list ? { list } : {}) })
     },
     bankruptRestart: () => {
       const s = get()
@@ -1919,7 +1924,7 @@ export const useGame = create<GameState>()((set, get) => {
         tokenId: t?.id, ticker: t?.ticker, mcapAtPost: t?.mcap, peakMcap: t?.mcap, isCall: !!t, likes: res.likes, rts: res.rts, replies: res.replies, buyers: res.buyers,
       }
       const next: SocialProfile = {
-        ...soc, posts: soc.posts + 1, lastPostTick: s.market.tick, followers: soc.followers + Math.round(res.likes * 0.1),
+        ...addFollowers(soc, res.likes * 0.1), posts: soc.posts + 1, lastPostTick: s.market.tick,
         calls: call ? [{ ...call, postId: post.id, likes: res.likes }, ...soc.calls].slice(0, 30) : soc.calls,
       }
       set({ market, socialFeed: [post, ...s.socialFeed].slice(0, 150), profile: { ...s.profile, social: next } })

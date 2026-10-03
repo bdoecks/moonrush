@@ -369,6 +369,56 @@ export function rebuildCandlesFor(m: MarketState) {
   }
 }
 
+/**
+ * Short-timeframe candles (1s / 5s / 30s) rebuilt from real longer ones, e.g. after a server restart where only 1m and
+ * up were saved. Each long candle is split into its short ones along a path that starts at its open, touches its high
+ * and its low, and ends at its close, so the short chart follows what really traded (and the trade markers on it line
+ * up) instead of a made-up curve. Volume is shared out across the pieces.
+ */
+export function splitCandles(src: Candle[], srcSec: number, dstSec: number, max: number, rng: Rng): Candle[] {
+  const k = Math.max(1, Math.round(srcSec / dstSec))
+  const out: Candle[] = []
+  for (const c of src.slice(-Math.ceil(max / k) - 1)) {
+    if (!(c.open > 0 && c.close > 0 && c.high > 0 && c.low > 0)) continue
+    const hi = Math.max(c.high, c.open, c.close)
+    const lo = Math.min(c.low, c.open, c.close)
+    // Where the path touches the high and the low (a green candle usually dips first, a red one pops first).
+    const a = 1 + Math.floor(rng.next() * Math.max(1, k - 1))
+    let b = 1 + Math.floor(rng.next() * Math.max(1, k - 1))
+    if (k > 2 && b === a) b = a === 1 ? 2 : a - 1
+    const [first, second] = a <= b ? [a, b] : [b, a]
+    const lowFirst = c.close >= c.open ? rng.chance(0.7) : rng.chance(0.3)
+    const anchors: [number, number][] = [[0, c.open], [first, lowFirst ? lo : hi], [second, lowFirst ? hi : lo], [k, c.close]]
+    const path = new Array<number>(k + 1)
+    for (let s = 0; s < anchors.length - 1; s++) {
+      const [i0, p0] = anchors[s]
+      const [i1, p1] = anchors[s + 1]
+      for (let i = i0; i <= i1; i++) {
+        const f = i1 === i0 ? 1 : (i - i0) / (i1 - i0)
+        const noise = i === i0 || i === i1 ? 0 : rng.gauss() * 0.15 * Math.log(hi / lo || 1)
+        path[i] = Math.min(hi, Math.max(lo, Math.exp(Math.log(p0) + (Math.log(p1) - Math.log(p0)) * f + noise)))
+      }
+    }
+    const weights = Array.from({ length: k }, () => 0.2 + rng.next())
+    const wsum = weights.reduce((x, y) => x + y, 0)
+    for (let j = 0; j < k; j++) {
+      const open = path[j]
+      const close = path[j + 1]
+      out.push({ time: c.time + j * dstSec, open, close, high: Math.max(open, close), low: Math.min(open, close), volume: (c.volume * weights[j]) / wsum })
+    }
+  }
+  return out.slice(-max)
+}
+
+/** Rebuild a coin's 1s / 5s / 30s charts from its real 1m candles (see `splitCandles`). */
+export function shortTfsFrom1m(c: Record<Timeframe, Candle[]>, rng: Rng) {
+  const m1 = c['1m']
+  if (!m1?.length) return
+  c['30s'] = splitCandles(m1, 60, 30, maxCandles('30s'), rng)
+  c['5s'] = splitCandles(m1, 60, 5, maxCandles('5s'), rng)
+  c['1s'] = splitCandles(m1, 60, 1, maxCandles('1s'), rng)
+}
+
 /** After loading a saved market, candles are regenerated to end at each token's current price. */
 export function rebuildCandles(m: MarketState) {
   const rng = new Rng(m.seed ^ 0x9e3779b9)
@@ -459,7 +509,19 @@ function applyPointRaw(c: Record<Timeframe, Candle[]>, time: number, price: numb
  */
 export function touchCandles(t: Token, time: number, prevPrice: number, usd: number, native?: MarketState['native']) {
   if (native && t.status === 'bonding') syncCurve(t, nativeUsdOf(native, t.chain))
+  else poolFollows(t, prevPrice)
   pushCandles(t, time, prevPrice, usd)
+}
+
+/**
+ * A migrated coin's DEX pool after a trade moved its price: in a constant-product pool the quote side grows with the
+ * square root of the price (buyers' money goes in, sellers' comes out), so liquidity rises as a coin pumps and shrinks
+ * as it dumps. Without this, trades moved the price but not the pool: a coin pumped to $200K kept the ~$15K pool it
+ * opened with, and every sell then hit far too hard. (The market's own per-tick move already does the same.)
+ */
+export function poolFollows(t: Token, prevPrice: number) {
+  if (t.status !== 'graduated' || !(prevPrice > 0) || !(t.price > 0)) return
+  t.liquidity = clamp(t.liquidity * Math.sqrt(t.price / prevPrice), t.price * SUPPLY * 0.02, t.price * SUPPLY * 0.4)
 }
 
 /**
@@ -1041,6 +1103,7 @@ export function applyPlayerTrade(m: MarketState, tokenId: string, side: 'buy' | 
     } else t.sells += 1
     // Sells move the curve too: without this, the next wallet selling in the same tick is paid off the pre-sell reserves.
     if (t.status === 'bonding') syncCurve(t, nativeUsdOf(m.native, t.chain))
+    else poolFollows(t, prevPrice)
     // Multiplayer: the server tags another player's trade with their name and id (each browser shows its own as YOU).
     const entry: TapeTrade = who ? { id: m.nextTradeId, time: m.time, side, usd, price: newPrice, wallet: who.name, ...(who.pid ? { pid: who.pid } : {}), ...(who.addr ? { addr: who.addr } : {}), ...(who.walletId ? { walletId: who.walletId } : {}) } : { id: m.nextTradeId, time: m.time, side, usd, price: newPrice, wallet: 'YOU', tag: 'you' }
     t.tape = [entry, ...t.tape].slice(0, TAPE_LEN)

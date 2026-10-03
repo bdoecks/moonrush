@@ -100,7 +100,7 @@ export function PriceChart(o: ChartOptions) {
   const firstWallet = useGame((s) => s.portfolio.accounts?.[0]?.id)
 
   const k = unit === 'mcap' ? SUPPLY : 1
-  const fmt = (v: number) => (unit === 'mcap' ? fmtCompact(v) : fmtPrice(v))
+  const fmt = (v: number) => (v < 0 ? '' : unit === 'mcap' ? fmtCompact(v) : fmtPrice(v)) // the axis margin can dip under zero: no labels there
   const toBar = (c: Candle) => ({ time: c.time as UTCTimestamp, open: c.open * k, high: c.high * k, low: c.low * k, close: c.close * k })
   const toVol = (c: Candle) => ({ time: c.time as UTCTimestamp, value: c.volume, color: c.close >= c.open ? 'rgba(25,217,137,0.35)' : 'rgba(255,77,106,0.35)' })
   const lastLegend = (): Legend | null => {
@@ -220,7 +220,7 @@ export function PriceChart(o: ChartOptions) {
       const hi = fwd(r.to)
       const anchor = hi - f * (hi - lo)
       ps.setAutoScale(false)
-      ps.setVisibleRange({ from: back(anchor - (anchor - lo) * factor), to: back(anchor + (hi - anchor) * factor) })
+      ps.setVisibleRange({ from: Math.max(logMode ? 1e-18 : 0, back(anchor - (anchor - lo) * factor)), to: back(anchor + (hi - anchor) * factor) })
     }
     host.addEventListener('wheel', onWheel, { capture: true, passive: false })
     return () => {
