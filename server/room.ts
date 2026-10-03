@@ -593,19 +593,24 @@ export class Room {
     me.ack = Math.max(me.ack, msg.seq)
     const w = this.walletOf(me)
     const o = msg.op
+    // Only the four real assets: anything else reaches the price lookup and throws.
+    const ok = (a: unknown) => a === 'usd' || a === 'sol' || a === 'bsc' || a === 'hood'
     if (w && o) {
       if (o.kind === 'swap') {
-        const r = runSwap(w, this.market, o.from, o.to, Number(o.amount) || 0, String(o.walletId))
-        if (r.ok) me.wallet = r.portfolio
+        if (ok(o.from) && ok(o.to)) {
+          const r = runSwap(w, this.market, o.from, o.to, Number(o.amount) || 0, String(o.walletId))
+          if (r.ok) me.wallet = r.portfolio
+        }
       } else if (o.kind === 'convert') {
-        const ok = (a: unknown) => a === 'usd' || a === 'sol' || a === 'bsc' || a === 'hood'
         if (ok(o.from) && ok(o.to)) {
           const r = runConvert(w, this.market, o.from, o.to, Number(o.amount) || 0, String(o.fromWallet), String(o.toWallet), this.market.tick)
           if (r.ok) me.wallet = r.portfolio
         }
       } else if (o.kind === 'transfer') {
-        const r = runTransfer(w, String(o.fromId), String(o.toId), o.chain, Number(o.amount) || 0, this.market.tick)
-        if (r.ok) me.wallet = r.portfolio
+        if (o.chain === 'sol' || o.chain === 'bsc' || o.chain === 'hood') {
+          const r = runTransfer(w, String(o.fromId), String(o.toId), o.chain, Number(o.amount) || 0, this.market.tick)
+          if (r.ok) me.wallet = r.portfolio
+        }
       } else if (o.kind === 'bankrupt') {
         return this.bankrupt(me)
       } else if (o.kind === 'claimFees') {

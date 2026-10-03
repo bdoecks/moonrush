@@ -99,6 +99,15 @@ wss.on('connection', (ws: WebSocket) => {
     ws.send(JSON.stringify({ t: 'error', message } satisfies ServerMsg))
     ws.close(4001, message)
   }
+  // One bad message must never take the server down: an error thrown here is outside any try, so Node would exit and
+  // drop every player in every room and the World. Log it and carry on.
+  const handle = (m: ClientMsg) => {
+    try {
+      room?.handle(playerId, m)
+    } catch (e) {
+      console.error(`[room ${room?.code}] "${m?.t}" from ${playerId} failed:`, e)
+    }
+  }
   ws.on('message', (raw) => {
     let msg: ClientMsg
     try {
@@ -120,11 +129,11 @@ wss.on('connection', (ws: WebSocket) => {
         if (ws.readyState !== ws.OPEN) return
         if (who.banned || bannedGuests.has(who.playerId)) return fail('You are banned from MOONRUSH rooms')
         enter({ ...msg, ...who })
-        for (const m of queued) if (room) room.handle(playerId, m)
+        for (const m of queued) handle(m)
       })
       return
     }
-    room.handle(playerId, msg)
+    handle(msg)
   })
   const enter = (msg: Extract<ClientMsg, { t: 'hello' }> & { verified: boolean }) => {
     const name = String(msg.name ?? '').trim().slice(0, 16) || 'Anon'
