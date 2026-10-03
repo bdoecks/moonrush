@@ -48,6 +48,13 @@ never leave this computer. `bot-data/` is gitignored. About 25 MB/min, so ~30 h/
 (`--usage` tracks it). Optional `bot-data/watch.txt`: wallets or wallet-page links to follow. Never wire this into the
 game or server: the game must not connect to real markets or money.
 
+**Market learner** (`scripts/market-learner.ts`, `npm run learn`): replays the recordings coin by coin, profiles wallets
+(return, entry age, hold time, size, loss cutting, dev / big sells), ranks them into skill levels (pro / good / average /
+bad / degen by return) and styles (sniper, scalper, whale, diamond, degen, dumper), and writes `bot-data/brain.json`:
+per style/level, buy lift by situation (age × market cap × last-minute move), size, exit multiple and timing, plus
+market-wide dump stats (dev sells, big sells, pile-ons, rugs). Only aggregates, no wallet ids. Coins whose launch was
+not recorded are left out of the age-based odds. Summary for people: `bot-data/brain-summary.md`.
+
 ## How it is deployed (read this before pushing)
 
 - GitHub `bdoecks/moonrush`, branch `main`. **Every push to `main` deploys to Render within about a minute and
