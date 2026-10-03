@@ -63,7 +63,7 @@ const snap = JSON.parse(JSON.stringify(world.snapshot()))
 const back = Room.restore(snap, null) as unknown as { members: Map<string, M>; wallets: { bot?: boolean }[]; dispose(): void }
 ok([...back.members.values()].filter((m) => m.info.bot).length === N && back.wallets.filter((x) => x.bot).length === N, 'bots survive a save / restore')
 const backOn = [...back.members.values()].filter((m) => m.info.bot && m.info.online).map((m) => m.info.name.split(' ')[0])
-ok(['SniperSam', 'DegenDana', 'ChefCarl'].every((n) => backOn.includes(n)), `always-on bots are online after a restart: ${backOn.join(', ')}`)
+ok(BOT_ROSTER.filter((b) => b.always).map((b) => b.name.split(' ')[0]).every((n) => backOn.includes(n)), `always-on bots are online after a restart: ${backOn.join(', ')}`)
 // An older save that marked every bot offline (the bug) is repaired on load.
 for (const m of snap.members) m.info.online = false
 const fixed = Room.restore(snap, null) as unknown as { members: Map<string, M>; dispose(): void }
