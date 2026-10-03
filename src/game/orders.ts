@@ -151,7 +151,11 @@ export function freshWallet(startBalance: number, layout?: WalletLayout): Portfo
 /** Apply a new layout: add / rename / reorder wallets, keeping balances; wallets that still hold money aren't removed. */
 export function applyLayout(p: Portfolio, layout: WalletLayout): Portfolio {
   const old = new Map((p.accounts ?? []).map((a) => [a.id, a]))
-  const next: Account[] = layout.accounts.slice(0, 12).map((l) => {
+  // Each wallet once: a list naming the same wallet twice would otherwise copy its coins and bags.
+  const seen = new Set<string>()
+  const wanted = (Array.isArray(layout?.accounts) ? layout.accounts : []).filter((l) => l && !seen.has(String(l.id)) && !!seen.add(String(l.id)))
+  if (!wanted.length) return p
+  const next: Account[] = wanted.slice(0, 12).map((l) => {
     const a = old.get(l.id)
     return a ? { ...a, name: String(l.name).slice(0, 18), emoji: String(l.emoji).slice(0, 4) } : { id: String(l.id).slice(0, 40), name: String(l.name).slice(0, 18), emoji: String(l.emoji).slice(0, 4), createdAt: Number(l.createdAt) || Date.now(), balances: emptyBalances(), positions: {} }
   })
