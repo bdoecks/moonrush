@@ -15,7 +15,8 @@
     "server:dev": "tsx watch server/index.ts",
     "play-online": "node scripts/play-online.mjs",
     "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
-    "bots": "tsx scripts/ui-bots.ts"
+    "bots": "tsx scripts/ui-bots.ts",
+    "online-bots": "tsx scripts/online-bots.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

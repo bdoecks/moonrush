@@ -48,6 +48,11 @@ an explorer bot clicks around on its own, favouring buttons it has tried least a
 Uses the installed Chrome/Edge (`CHROME_PATH` to override). `--clicks N`, `--seed S` to replay, `--show` to watch,
 `--selftest` plants a crash and NaN cash to prove the bots notice. Add a step to `checklistBot` for new features.
 
+**Online bots** (`scripts/online-bots.ts`, `npm run online-bots`): starts the room server (port 8787) and the game
+(port 5197), then two players in separate browser contexts create and join a friends room, trade, cook, send money,
+chat and click around together. After each action each screen is compared with `window.__srvWallet` (the server's
+last wallet answer), and both players' markets are compared tick for tick. `--clicks N`, `--show`, `--selftest`.
+
 ## How it is deployed (read this before pushing)
 
 - GitHub `bdoecks/moonrush`, branch `main`. **Every push to `main` deploys to Render within about a minute and
