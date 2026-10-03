@@ -154,7 +154,8 @@ export interface CookMoney {
 // ─── Browser → server ────────────────────────────────────────────────────────
 export type ClientMsg =
   // `token`: your login (signed-in players); the server checks it and uses your account name.
-  | { t: 'hello'; name: string; avatar: string; level: number; playerId: string; room?: string; create?: boolean; token?: string }
+  // `key`: a guest's private seat key (kept in this browser, never shown to others); only it can rejoin as that guest.
+  | { t: 'hello'; name: string; avatar: string; level: number; playerId: string; room?: string; create?: boolean; token?: string; key?: string }
   | { t: 'start'; mode: GameMode; durationTicks: number | null; engine?: MarketEngine }
   // `token` is the fresh coin before any buys; the server runs your dev buy / bundle (`money`) on it as order `ref`.
   | { t: 'cook'; token: NetToken; candles?: Record<Timeframe, Candle[]>; event?: MarketEvent; seq?: number; ref?: number; money?: CookMoney }

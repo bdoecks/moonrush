@@ -2,6 +2,7 @@
 // The market code is the same the single-player game runs. The server is the judge of every player's wallets: orders,
 // cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
+import { createHash } from 'node:crypto'
 import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
 import { BOT_BUST_USD, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, mirrorWallet, pickCoin, STYLE, type BotBrain } from './bots'
 import { generatedLaunch } from '../src/data/tokens'
@@ -52,6 +53,7 @@ function round(v: unknown): unknown {
 
 interface Member {
   info: RoomPlayer
+  seat?: string // guests: a hash of the private key they first joined with; only that key gets back in
   ws: WebSocket | null
   protect: string[]
   lastPostTick?: number
@@ -179,7 +181,7 @@ export class Room {
       posts: this.posts.slice(0, 80), events: this.events.slice(0, 80), bots: [...this.bots.entries()],
       lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()], reports: this.reports.slice(0, 100), hall: this.hall, seasonKey: this.seasonKey,
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
-        info: { ...m.info, online: m.info.bot ? m.info.online : false }, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
+        info: { ...m.info, online: m.info.bot ? m.info.online : false }, seat: m.seat, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
         cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, copyBook: m.copyBook, brain: m.brain,
         weekBase: m.weekBase, dayBase: m.dayBase, seasonBase: m.seasonBase, chainPnl: m.chainPnl, chainBase: m.chainBase, dev: m.dev, trophies: m.trophies, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
       })),
@@ -241,15 +243,20 @@ export class Room {
   }
 
   // ─── Players ───────────────────────────────────────────────────────────────
-  join(ws: WebSocket, msg: Extract<ClientMsg, { t: 'hello' }> & { verified?: boolean }) {
+  /** Returns false (and lets nobody in) when a guest's seat is claimed by a browser without its key. */
+  join(ws: WebSocket, msg: Extract<ClientMsg, { t: 'hello' }> & { verified?: boolean }): boolean {
     const existing = this.members.get(msg.playerId)
+    // Guest ids are public (the player list shows them), so a guest's seat, and the wallet in it, opens only for the
+    // key it was first taken with. Signed-in players are proven by their login instead.
+    const seat = !msg.verified && typeof msg.key === 'string' && msg.key ? createHash('sha256').update(msg.key).digest('hex') : undefined
+    if (!msg.verified && existing?.seat && existing.seat !== seat) return false
     // World: you need an account to play; guests watch (WORLD_GUESTS_PLAY=1 lets guests play, for local testing only).
     const spectator = this.world && !msg.verified && process.env.WORLD_GUESTS_PLAY !== '1'
     const info: RoomPlayer = existing
       ? { ...existing.info, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, verified: !!msg.verified, spectator: spectator || undefined }
       : { id: msg.playerId, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, equity: 0, startEquity: 0, trades: 0, wins: 0, verified: !!msg.verified, spectator: spectator || undefined }
     existing?.ws?.close(4000, 'Joined from another tab')
-    this.members.set(msg.playerId, { ...existing, info, ws, protect: existing?.protect ?? [], inbox: undefined, ack: 0 }) // a new connection restarts the wallet message count (the game does too)
+    this.members.set(msg.playerId, { ...existing, info, ws, protect: existing?.protect ?? [], inbox: undefined, ack: 0, seat: existing?.seat ?? seat }) // a new connection restarts the wallet message count (the game does too)
     if (!this.hostId && !this.world) this.hostId = msg.playerId
     this.emptySince = null
     this.send(ws, {
@@ -260,6 +267,7 @@ export class Room {
     const joined = this.members.get(msg.playerId)!
     if (this.walletOf(joined)) this.sendWallet(joined)
     this.broadcastPlayers()
+    return true
   }
 
   leave(playerId: string, ws: WebSocket) {
