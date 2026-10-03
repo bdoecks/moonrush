@@ -296,7 +296,19 @@ export class Room {
         return this.cook(me, msg)
       case 'patch': {
         const t = this.market.tokens.find((x) => x.id === msg.tokenId) as NetToken | undefined
-        if (t && t.creatorId === playerId) Object.assign(t, msg.patch)
+        if (!t || t.creatorId !== playerId || !msg.patch) return
+        // Only the fields the game's dev tools change, within their ranges: anything else (price, liquidity, the
+        // hidden sim) would let a modified game rewrite its own coin's market.
+        const p = msg.patch
+        const pct = (n: unknown, cur: number) => (Number.isFinite(n) ? Math.min(100, Math.max(0, Number(n))) : cur)
+        const count = (n: unknown, cur: number, max: number) => (Number.isFinite(n) ? Math.min(max, Math.max(0, Math.round(Number(n)))) : cur)
+        if ('devPct' in p) t.devPct = pct(p.devPct, t.devPct)
+        if ('bundlePct' in p) t.bundlePct = pct(p.bundlePct, t.bundlePct ?? 0)
+        if ('top10Pct' in p) t.top10Pct = pct(p.top10Pct, t.top10Pct)
+        if ('hype' in p) t.hype = pct(p.hype, t.hype)
+        if ('holders' in p) t.holders = count(p.holders, t.holders, 1_000_000)
+        if ('bundleWallets' in p) t.bundleWallets = count(p.bundleWallets, t.bundleWallets ?? 0, 50)
+        if ('bundleFlagged' in p) t.bundleFlagged = !!p.bundleFlagged
         return
       }
       case 'bot': {
