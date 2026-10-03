@@ -418,6 +418,166 @@ async function checklistBot(page: Page) {
     if (c !== a) throw new Error('space did not resume')
   })
 
+  const g = <T>(fn: string) => page.evaluate(`(() => { const s = window.__game.getState(); return (${fn})(s) })()`) as Promise<T>
+
+  await step(page, 'Swap USD into chain coins', 'The wallet balance button opens Swap. "Quick split" should turn half your USD into SOL, BNB and ETH, and typing an amount and pressing Confirm should swap it, losing only the small swap fee.', async () => {
+    const before = await state(page)
+    act('Open Swap'); await page.evaluate(() => (window as any).__game.getState().setSwapOpen(true))
+    await page.waitForTimeout(400)
+    act('Click "Quick split half my USD"'); await page.getByRole('button', { name: /Quick split half my USD/ }).click()
+    await page.waitForTimeout(500)
+    const mid = await state(page)
+    if (!(mid.balances.sol > 0 && mid.balances.bsc > 0 && mid.balances.hood > 0)) throw new Error(`after Quick split the chain balances are ${JSON.stringify(mid.balances)}`)
+    act('Type 100 in the amount box and press Confirm')
+    await page.getByPlaceholder('0.0').first().fill('100')
+    await page.getByRole('button', { name: /^Confirm/ }).first().click()
+    await page.waitForTimeout(500)
+    const after = await state(page)
+    if (JSON.stringify(after.balances) === JSON.stringify(mid.balances) && after.cash === mid.cash) throw new Error('pressed Confirm but no balance changed')
+    const lost = before.equity - after.equity
+    if (lost > before.equity * 0.02) throw new Error(`swapping lost $${lost.toFixed(2)} of value (over 2%)`)
+    await shot(page, 'swap')
+    act('Press Escape'); await page.keyboard.press('Escape')
+    await page.evaluate(() => (window as any).__game.getState().setSwapOpen?.(false))
+    return `value change $${(-lost).toFixed(2)}`
+  })
+
+  await step(page, 'Make a second wallet', 'In the wallet manager, typing a name and pressing "Create wallet" should add a new empty wallet.', async () => {
+    const n0 = await g<number>('(s) => (s.portfolio.accounts ?? []).length')
+    act('Open the wallet manager'); await page.evaluate(() => (window as any).__game.getState().setWalletsOpen(true))
+    await page.waitForTimeout(400)
+    act('Type "Bot wallet" and press "Create wallet"')
+    await page.getByLabel('New wallet name').fill('Bot wallet')
+    await page.getByRole('button', { name: 'Create wallet' }).click()
+    await page.waitForTimeout(400)
+    const n1 = await g<number>('(s) => (s.portfolio.accounts ?? []).length')
+    await shot(page, 'wallets')
+    act('Press Escape'); await page.keyboard.press('Escape')
+    await page.evaluate(() => (window as any).__game.getState().setWalletsOpen(false))
+    if (n1 !== n0 + 1) throw new Error(`wallets went from ${n0} to ${n1}`)
+  })
+
+  await step(page, 'Arm a sniper', 'On the Sniper page, pressing "Arm sniper" should add a sniper that waits for new launches.', async () => {
+    await openNav(page, NAV[4])
+    const n0 = await g<number>('(s) => (s.snipers ?? []).length')
+    act('Click "Arm sniper"'); await page.getByRole('button', { name: 'Arm sniper' }).click()
+    await page.waitForTimeout(500)
+    const n1 = await g<number>('(s) => (s.snipers ?? []).length')
+    await shot(page, 'sniper')
+    if (n1 !== n0 + 1) throw new Error(`snipers went from ${n0} to ${n1}`)
+  })
+
+  await step(page, 'Copy a trader', 'On CopyTrade, pressing "Copy" on the first trader and then "Start copying" should start copying them.', async () => {
+    await openNav(page, NAV[3])
+    const n0 = await g<number>('(s) => (s.copies ?? []).length')
+    act('Click "Copy" on the first trader'); await page.locator('main button', { hasText: /^\s*Copy\s*$/ }).first().click()
+    await page.waitForTimeout(400)
+    act('Click "Start copying …"'); await page.getByRole('button', { name: /^Start copying/ }).click()
+    await page.waitForTimeout(500)
+    const n1 = await g<number>('(s) => (s.copies ?? []).length')
+    await shot(page, 'copytrade')
+    await page.keyboard.press('Escape')
+    if (n1 !== n0 + 1) throw new Error(`copies went from ${n0} to ${n1}`)
+  })
+
+  await step(page, 'Daily check-in', 'On Rewards → Daily, pressing "Check in" should give today\'s reward once, then say "come back tomorrow".', async () => {
+    await openNav(page, NAV[8])
+    act('Click the "Daily" tab'); await page.locator('main button', { hasText: /^Daily$/ }).first().click()
+    await page.waitForTimeout(300)
+    const btn = page.locator('main button', { hasText: /Check in|Checked in today/ }).first()
+    const label0 = (await btn.innerText()).trim()
+    if (/Checked in today/.test(label0)) return 'already checked in today'
+    act(`Click "${label0}"`); await btn.click()
+    await page.waitForTimeout(400)
+    const label1 = (await btn.innerText()).trim()
+    await shot(page, 'check-in')
+    if (!/Checked in today/.test(label1)) throw new Error(`after checking in the button still reads "${label1}"`)
+  })
+
+  await step(page, 'Claim cashback', 'On Rewards → Cashback, "Claim all as USDC" should pay any cashback from your trades into your cash.', async () => {
+    act('Click the "Cashback" tab'); await page.locator('main button', { hasText: /^Cashback$/ }).first().click()
+    await page.waitForTimeout(300)
+    const c0 = (await state(page)).cash
+    act('Click "Claim all as USDC"'); await page.locator('main button', { hasText: /^Claim all as USDC$/ }).first().click().catch(() => {})
+    await page.waitForTimeout(400)
+    const c1 = (await state(page)).cash
+    if (c1 < c0 - 0.01) throw new Error(`claiming cashback lowered cash by $${(c0 - c1).toFixed(2)}`)
+    return c1 > c0 ? `+$${(c1 - c0).toFixed(4)} claimed` : 'nothing to claim yet'
+  })
+
+  await step(page, 'Settings switches', 'In Settings, "Compact mode" and the game speed should switch on and back off.', async () => {
+    act('Open Settings'); await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
+    await page.waitForTimeout(300)
+    const compact = () => g<boolean>('(s) => s.settings.compact')
+    const a = await compact()
+    act('Click the "Compact mode" switch'); await page.getByRole('switch', { name: 'Compact mode' }).click(); await page.waitForTimeout(200)
+    const b = await compact()
+    act('Click the "Compact mode" switch again'); await page.getByRole('switch', { name: 'Compact mode' }).click(); await page.waitForTimeout(200)
+    const c = await compact()
+    act('Click the "2×" speed'); await page.getByRole('button', { name: '2×', exact: true }).first().click(); await page.waitForTimeout(200)
+    const fast = await g<number>('(s) => s.settings.speed ?? s.speed ?? 0')
+    act('Click the "1×" speed'); await page.getByRole('button', { name: '1×', exact: true }).first().click(); await page.waitForTimeout(200)
+    await page.keyboard.press('Escape')
+    if (a === b) throw new Error('Compact mode did not switch on')
+    if (c !== a) throw new Error('Compact mode did not switch back')
+    return `speed after 2×: ${fast}`
+  })
+
+  await step(page, 'Search for a coin', 'Pressing "/" and typing a coin\'s ticker should find it; Enter should open its chart.', async () => {
+    await openNav(page, NAV[0])
+    const want = await g<{ id: string; ticker: string }>('(s) => { const t = s.market.tokens.find((x) => x.status === "bonding" || x.status === "graduated"); return { id: t.id, ticker: t.ticker } }')
+    await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => {})
+    act('Press "/"'); await page.keyboard.press('/')
+    await page.waitForTimeout(200)
+    act(`Type "${want.ticker}" and press Enter`)
+    await page.keyboard.type(want.ticker)
+    await page.waitForTimeout(400)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(800)
+    const s = await state(page)
+    await shot(page, 'search')
+    if (s.view !== 'token') throw new Error(`after Enter the game shows "${s.view}", not a coin`)
+    const ticker = await g<string>('(s) => s.market.tokens.find((t) => t.id === s.selectedId)?.ticker ?? ""')
+    if (ticker !== want.ticker) throw new Error(`searched for $${want.ticker} but opened $${ticker}`)
+  })
+
+  await step(page, 'Trenches quick buy', 'On Trenches, the quick-buy button on a coin (like "1 SOL") should buy it in one click.', async () => {
+    await openNav(page, NAV[1])
+    const t0 = (await state(page)).trades
+    // The row's quick-buy button shows on hover, like Axiom.
+    act('Hover the first coin in New Pairs and click its quick-buy button')
+    const qb = page.locator('main button[title^="Quick buy "][title*="trade settings"]:not([disabled])').first()
+    await qb.hover()
+    await qb.click()
+    await page.waitForTimeout(1000)
+    const t1 = (await state(page)).trades
+    await shot(page, 'trenches-buy')
+    if (t1 <= t0) throw new Error('clicked quick buy but no trade happened')
+  })
+
+  await step(page, 'Other game modes', 'From the mode menu, Challenge and Arena should each start a fresh round with $10,000 and a timer, and Hardcore should stay locked for a new player (it needs level 5).', async () => {
+    for (const [label, mode] of [['Challenge', 'challenge'], ['Arena', 'arena']] as const) {
+      act('Open the mode menu'); await page.evaluate(() => (window as any).__game.getState().setModal('mode'))
+      await page.waitForTimeout(300)
+      const card = page.getByRole('button', { name: new RegExp(`^.{0,4}${label}`) }).first()
+      act(`Click "${label}"`); await card.click()
+      await page.waitForTimeout(500)
+      // Mid-round, the first click only warns "Click again to abandon your current round".
+      if (/Click again/.test(await card.innerText().catch(() => ''))) { act(`Click "${label}" again to confirm`); await card.click(); await page.waitForTimeout(800) }
+      const s = await g<{ mode: string; run: string; start: number; dur: number | null }>('(s) => ({ mode: s.mode, run: s.runStatus, start: s.portfolio.startBalance, dur: s.runDuration })')
+      if (s.mode !== mode || s.run !== 'running') throw new Error(`${label}: mode "${s.mode}", round "${s.run}"`)
+      if (s.start !== 10_000) throw new Error(`${label} started with $${s.start}, expected $10,000`)
+      if (!s.dur) throw new Error(`${label} has no timer`)
+    }
+    act('Open the mode menu'); await page.evaluate(() => (window as any).__game.getState().setModal('mode'))
+    await page.waitForTimeout(300)
+    act('Click "Hardcore" (locked)'); await page.getByRole('button', { name: /Hardcore/ }).first().click({ force: true }).catch(() => {})
+    await page.waitForTimeout(600)
+    const after = await g<string>('(s) => s.mode')
+    await page.keyboard.press('Escape')
+    if (after === 'hardcore') throw new Error('Hardcore started for a level 1 player')
+  })
+
   await step(page, 'Phone layout', 'On a phone-sized screen, no page should be wider than the screen (no sideways scrolling).', async () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.waitForTimeout(600)
