@@ -180,18 +180,28 @@ function revive(code: string): Promise<void> {
   return p
 }
 
-/** Save every room (charts too when asked; they're bigger, so only every few minutes and at shutdown). */
-async function saveAll(withCharts: boolean, world = true) {
-  await Promise.all([...rooms.values()].filter((r) => world || !r.world).map((r) => saveRoom(r.code, r.snapshot(), withCharts ? r.chartSnapshot() : undefined)))
+/** Save rooms (charts too when asked; they're bigger, so only every few minutes and at shutdown). */
+async function saveAll(withCharts: boolean, world = true, worldCharts = withCharts) {
+  await Promise.all([...rooms.values()].filter((r) => world || !r.world).map((r) => saveRoom(r.code, r.snapshot(), (r.world ? worldCharts : withCharts) ? r.chartSnapshot() : undefined)))
 }
-// Rooms save every 20s (charts every 3 min). The World's save is much bigger, so it goes every minute (its charts
-// every 3 min too); everything is saved again at shutdown.
+// Rooms save every 20s (charts every 3 min). The World's save is several MB, and every save rewrites the whole row in
+// the database: at once a minute that was gigabytes of writes a day, enough to slow the database for everything else
+// (sign-in included). So the World saves every 5 minutes and its charts every 15; everything is saved again at
+// shutdown, so an update or restart still loses nothing.
+const WORLD_SAVE_MS = 5 * 60_000
+const WORLD_CHARTS_MS = 15 * 60_000
 let lastCharts = 0
-let saves = 0
+let lastWorld = Date.now()
+let lastWorldCharts = Date.now()
 setInterval(() => {
-  const charts = Date.now() - lastCharts > 3 * 60_000
-  if (charts) lastCharts = Date.now()
-  void saveAll(charts, ++saves % 3 === 0 || charts)
+  const now = Date.now()
+  const charts = now - lastCharts > 3 * 60_000
+  if (charts) lastCharts = now
+  const world = now - lastWorld >= WORLD_SAVE_MS
+  if (world) lastWorld = now
+  const worldCharts = world && now - lastWorldCharts >= WORLD_CHARTS_MS
+  if (worldCharts) lastWorldCharts = now
+  void saveAll(charts, world, worldCharts)
 }, 20_000)
 
 // An update or restart: save everything (with charts) before the server stops, so everyone picks up where they were.
