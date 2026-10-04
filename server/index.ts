@@ -8,7 +8,7 @@ import { MP_PATH, WORLD_CODE, type ClientMsg, type ServerMsg } from '../src/net/
 import { Room, type RoomSnapshot } from './room'
 import { isBanned, nameTaken, verifyToken } from './auth'
 import { bannedGuests, handleAdmin } from './admin'
-import { deleteRoom, loadRoom, persistOn, saveRoom } from './persist'
+import { deleteRoom, loadRoom, loadWorld, persistOn, saveRoom } from './persist'
 import { nameBlocked } from './moderation'
 
 /**
@@ -39,7 +39,18 @@ const rooms = new Map<string, Room>()
 // ─── The World: one public room, always on ───────────────────────────────────
 /** Load the World as it was saved (however long ago), or start a fresh one. Joiners wait for this. */
 const worldReady: Promise<void> = (async () => {
-  const saved = await loadRoom(WORLD_CODE, 10 * 365 * 24 * 3600_000)
+  // If the database doesn't answer, wait and ask again, for as long as it takes. Starting a fresh World here would
+  // get saved over the real one. (Solo play and friends' rooms don't wait for this; only joining the World does.)
+  let saved: Awaited<ReturnType<typeof loadWorld>> = null
+  for (let attempt = 1; ; attempt++) {
+    try {
+      saved = await loadWorld(WORLD_CODE)
+      break
+    } catch (e) {
+      console.warn(`[world] the database didn't answer (try ${attempt}): ${e instanceof Error ? e.message : e}. Trying again in 20s…`)
+      await new Promise((r) => setTimeout(r, 20_000))
+    }
+  }
   let world: Room | null = null
   if (saved) {
     try {

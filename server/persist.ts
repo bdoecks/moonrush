@@ -41,6 +41,19 @@ export async function loadRoom(code: string, maxAgeMs = MAX_AGE_MS): Promise<{ s
   }
 }
 
+/**
+ * The World's save, for starting up. Unlike `loadRoom`, this tells "there is no save" (null) apart from "the database
+ * didn't answer" (it throws): the server must never mistake a slow database for an empty one, or it would start a
+ * fresh World and save it over everyone's wallets.
+ */
+export async function loadWorld(code: string, timeoutMs = 90_000): Promise<{ state: unknown; charts: unknown } | null> {
+  if (!persistOn) return null
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rooms?code=eq.${code}&select=state,charts`, { headers: headers(), signal: AbortSignal.timeout(timeoutMs) })
+  if (!res.ok) throw new Error(`database answered ${res.status}`)
+  const rows = (await res.json()) as { state: unknown; charts: unknown }[]
+  return rows[0] ?? null
+}
+
 export async function deleteRoom(code: string) {
   if (!persistOn) return
   try {
