@@ -452,7 +452,7 @@ export function InstantTrade() {
       {/* Wallet holdings open beside the panel (right if there is room, else left), joined to it as one piece: same
           height, one shared line between them, square corners where they meet */}
       {sideOpen && (
-        <div className={clsx('absolute -bottom-px -top-px border border-line2 bg-panel', holdingsSide === 'right' ? 'left-full rounded-r-lg border-l-0' : 'right-full rounded-l-lg border-r-0')} style={{ width: SIDE_W }}>
+        <div className={clsx('absolute -bottom-px -top-px border border-line2 bg-panel', holdingsSide === 'right' ? 'left-full rounded-r-lg' : 'right-full rounded-l-lg')} style={{ width: SIDE_W }}>
           <WalletHoldings t={t} inNative={inNative} px={px} tall />
         </div>
       )}
