@@ -19,6 +19,7 @@ import { liveIds, useWalletGroups } from '../../game/walletGroups'
 import { InstantSettingsModal, instantOpts } from './InstantSettings'
 
 const W = 300
+const SIDE_W = 280 // the wallet holdings panel that opens beside it
 const clampPos = (p: { x: number; y: number }) => ({
   x: Math.min(Math.max(8, p.x), Math.max(8, window.innerWidth - W - 8)),
   y: Math.min(Math.max(56, p.y), Math.max(56, window.innerHeight - 240)),
@@ -220,6 +221,10 @@ export function InstantTrade() {
     drag.current = null
   }
   const dragProps = { onPointerDown: onDown, onPointerMove: onMove, onPointerUp: onUp }
+  // Where the wallet holdings go: to the right of the panel, to the left when the right is off screen, and underneath
+  // (inside the panel) only when neither side has room, as on a phone.
+  const vw = typeof window === 'undefined' ? 1280 : window.innerWidth
+  const holdingsSide: 'right' | 'left' | 'below' = pos2d.x + W + SIDE_W + 12 <= vw ? 'right' : pos2d.x - SIDE_W - 12 >= 0 ? 'left' : 'below'
   const resetPnl = () => {
     const next = { ...resets, [t.id]: useGame.getState().market.tick + 1 }
     setResets(next)
@@ -427,7 +432,7 @@ export function InstantTrade() {
           <span className={clsx('grid size-3 place-items-center rounded-sm border', ip.showHoldings ? 'border-accent bg-accent text-black' : 'border-line2')}>{ip.showHoldings && <Check size={9} strokeWidth={3} />}</span>
           Show wallet holdings
         </button>
-        {ip.showHoldings && <WalletHoldings t={t} inNative={inNative} px={px} />}
+        {ip.showHoldings && holdingsSide === 'below' && <WalletHoldings t={t} inNative={inNative} px={px} />}
         <div className="grid grid-cols-4 gap-1">
           <div><div className="text-dim">Bal</div><div className="num text-ink">{stats.value ? money(stats.value, stats.value / px) : '--'}</div></div>
           <div><div className="text-dim">Bought</div><div className="num text-up">{stats.bought ? money(stats.bought, stats.boughtN) : '--'}</div></div>
@@ -443,6 +448,12 @@ export function InstantTrade() {
       )}
       </>
       )}
+      {/* Wallet holdings open beside the panel (right if there is room, else left), so the panel keeps its height */}
+      {o.pnlRow && tab === 'trade' && ip.showHoldings && holdingsSide !== 'below' && (
+        <div className={clsx('absolute top-0 rounded-lg border border-line2 bg-panel/95 p-1.5 shadow-2xl shadow-black/60 backdrop-blur', holdingsSide === 'right' ? 'left-full ml-1.5' : 'right-full mr-1.5')} style={{ width: SIDE_W }}>
+          <WalletHoldings t={t} inNative={inNative} px={px} tall />
+        </div>
+      )}
       <div className="flex items-center justify-between border-t border-line px-2.5 py-1 text-[9px] text-dim">
         <span>{o.dragAnywhere ? 'Drag anywhere to move' : 'Drag the top bar to move'}{hk.on ? ' · hotkeys on' : ''}</span>
         <span><Kbd>I</Kbd> toggle</span>
@@ -455,7 +466,7 @@ export function InstantTrade() {
  * GMGN-style "show holdings": every wallet you own with how much of this coin it holds, its value and PnL, and its
  * chain coin. Tick a wallet to trade from it; the red button sells that one wallet's bag.
  */
-function WalletHoldings({ t, inNative, px }: { t: Token; inNative: boolean; px: number }) {
+function WalletHoldings({ t, inNative, px, tall }: { t: Token; inNative: boolean; px: number; tall?: boolean }) {
   const { all, activeIds } = useWallets()
   const setActive = useGame((s) => s.setActiveWallets)
   const sell = useGame((s) => s.sell)
@@ -474,12 +485,12 @@ function WalletHoldings({ t, inNative, px }: { t: Token; inNative: boolean; px: 
     setActive(on ? activeIds.filter((x) => x !== id) : [...activeIds, id])
   }
   return (
-    <div className="mb-1.5 rounded border border-line bg-bg/60">
+    <div className={clsx('rounded border border-line bg-bg/60', !tall && 'mb-1.5')}>
       <div className="flex items-center justify-between border-b border-line/60 px-1.5 py-0.5 text-[9px] text-dim">
         <span>{holding}/{all.length} wallets hold {t.ticker}</span>
         <span className="num">{fmtNum(totalQty)} · {((totalQty / SUPPLY) * 100).toFixed(2)}% supply</span>
       </div>
-      <ul className="max-h-[180px] overflow-y-auto">
+      <ul className={clsx('overflow-y-auto', tall ? 'max-h-[340px]' : 'max-h-[180px]')}>
         {rows.map((r) => {
           const on = activeIds.includes(r.a.id)
           return (
