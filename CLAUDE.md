@@ -77,7 +77,10 @@ patience, mistake rate, tilt) and chat voice. Trading bots play from `server/dat
 (real SOL × `SIZE_SCALE`), exits from the real exit spread, moods from streaks. Chefs launch coins and dump on real
 dev-sell timing (`DEV_DUMP_CHANCE` by level). Big bot sells on one coin are capped at `PILE_ON_LIMIT` per 10s. Bots not in
 the roster (the original 20) are removed from the World with their wallets on boot. `WORLD_BOTS=20` on Render runs fewer.
-Without the brain file the bots fall back to the old `STYLE` rules.
+Without the brain file the bots fall back to the old `STYLE` rules. To keep the World a steady size, a bot writes off
+any bag in a dead or delisted coin as a realized loss (`botWriteOff`, through `runGiveAway`), and its own wallet keeps
+only its last `BOT_TRADES_KEPT` trades (lifetime counts live in `brain.fills` / `brain.wins`; the public wallet still
+shows 60). Without those, bags and history pile up for ever: check with `crowd-test` and `world-soak` after bot changes.
 
 **Trend coins**: the learner also writes `trends` (theme words found in real launch names, ranked by SOL traded). Only words on
 the allow-list in `server/trendThemes.ts` count, so real people, brands, politics and crude words never reach the game;

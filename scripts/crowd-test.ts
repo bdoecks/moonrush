@@ -13,7 +13,7 @@ import { nameBlocked } from '../server/moderation'
 const hours = Number(process.argv[2] ?? 3)
 const ok = (cond: boolean, what: string) => console.log(`${cond ? 'PASS' : 'FAIL'} ${what}`)
 type W = { cash: number; startBalance: number; trades: { side: string; tokenId: string; time: number; value: number }[]; accounts?: { balances: Record<string, number>; positions: Record<string, { qty: number }> }[] }
-type M = { info: { name: string; online: boolean; bot?: boolean; equity: number }; wallet?: W; brain?: { busts: number; plans?: object }; pnlCarry?: number }
+type M = { info: { name: string; online: boolean; bot?: boolean; equity: number }; wallet?: W; brain?: { busts: number; plans?: object; fills?: number }; pnlCarry?: number }
 type R = { tick(): void; members: Map<string, M>; wallets: { id: string; bot?: boolean }[]; market: { tick: number; time: number; tokens: { id: string; price: number; mcap: number; liquidity: number; status: string; creatorId?: string }[] }; snapshot(): unknown; dispose(): void }
 
 ok(!!BRAIN, `the market brain is loaded (${BRAIN ? `${Object.keys(BRAIN.groups).length} groups, learned ${BRAIN.learnedAt.slice(0, 10)}` : 'missing'})`)
@@ -79,7 +79,7 @@ let fills = 0
 for (const spec of BOT_ROSTER) {
   const m = world.members.get(spec.id)
   if (!m?.wallet || spec.style === 'chef') continue
-  fills += m.wallet.trades.length
+  fills += m.brain?.fills ?? m.wallet.trades.length
   const eq = valuePortfolio(m.wallet as never, byId as never, world.market as never).equity
   const r = (eq + (m.pnlCarry ?? 0)) / 10_000 - 1
   ;(ret[spec.tier] ??= []).push(r)
@@ -94,6 +94,12 @@ ok(top > bottom, `pros and good players ended ahead of bad players and degens ($
 ok(devDumps >= hours * 2, `devs dumped their own coins: ${devDumps} dev sells`)
 ok(worstPile <= PILE_ON_LIMIT + 1, `big bot sells on one coin within 10s never went past the limit (worst ${worstPile}, limit ${PILE_ON_LIMIT} planned + 1 old-rule)`)
 ok(!bad, bad ? `impossible money: ${bad}` : 'no bot wallet ever held an impossible amount')
+// The World must stay a steady size: bots drop bags in dead or delisted coins (those would keep dead coins listed and
+// pile up in the save), and keep only a short trade history.
+const botMembers = [...world.members.values()].filter((m) => m.info.bot && m.wallet)
+const stuck = botMembers.reduce((a, m) => a + Object.keys(m.wallet!.accounts?.[0]?.positions ?? {}).filter((id) => { const t = byId.get(id); return !t || (t.status !== 'bonding' && t.status !== 'graduated') }).length, 0)
+ok(stuck < BOT_ROSTER.length / 4, `bots write off bags in dead or delisted coins: ${stuck} such bags left across the crowd`)
+ok(botMembers.every((m) => m.wallet!.trades.length <= 25), `bot wallets keep a short trade history (longest ${Math.max(...botMembers.map((m) => m.wallet!.trades.length))})`)
 ok(msPerTick < 50, `the World stays fast with the crowd: ${msPerTick.toFixed(1)} ms per 1-second tick`)
 const trends = BRAIN?.trends ?? []
 ok(trends.length > 0 && trends.every((t) => SAFE_THEMES.has(t.word)), `trends are all approved themes: ${trends.slice(0, 8).map((t) => t.word).join(', ')}`)

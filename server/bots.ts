@@ -22,6 +22,8 @@ export interface BotBrain {
   busts: number
   plans?: Record<string, ExitPlan> // bags bought from the market brain: how this bot means to get out
   streak?: number // wins (+) or losses (-) in a row: moves its mood
+  fills?: number // every trade it ever made, and the sells that made money (its wallet keeps only the latest few)
+  wins?: number
 }
 
 /** What makes one bot different from another of the same style and level. */

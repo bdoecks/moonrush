@@ -32,6 +32,7 @@ const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
 const KEYFRAME_TICKS = 30 // a full market refresh every ~30s; ticks in between only carry what changed
 const WORLD_TRADES_KEPT = 300 // World wallets live forever: keep their recent trade history only
+const BOT_TRADES_KEPT = 20 // bots: nobody reads their own wallet's history (their public wallet shows their trades), and 100 × 300 trades is most of the save
 const WORLD_DEAD_COIN_SEC = 3600 // World: dead player-cooked coins leave the market after an hour
 const WORLD_FADE_AFTER_SEC = 1800 // World: a graduated coin can fade out once it's been on the DEX for 30 min…
 const WORLD_FADE_MCAP = 5_000 // …and has sunk below this market cap
@@ -1087,6 +1088,7 @@ export class Room {
     this.market = r.market
     const nt = this.market.tokens.find((x) => x.id === t.id) ?? t
     this.mirrorFill(m, nt, r.fills[0], had ? 'more' : 'first', actions)
+    m.brain!.fills = (m.brain!.fills ?? 0) + 1
     m.brain!.entries[t.id] ??= { tick: this.market.tick, peak: nt.price }
     return r.fills[0]
   }
@@ -1104,11 +1106,36 @@ export class Room {
     const all = !m.wallet.accounts?.[0]?.positions[t.id]
     this.realized(m, r.fills)
     this.mirrorFill(m, nt, r.fills[0], all ? 'all' : 'partial', actions)
+    m.brain!.fills = (m.brain!.fills ?? 0) + 1
+    if ((r.fills[0].pnl ?? 0) > 0) m.brain!.wins = (m.brain!.wins ?? 0) + 1
     if (all) {
       delete m.brain!.entries[t.id]
       if (m.brain!.plans) delete m.brain!.plans[t.id]
     }
     return r.fills[0]
+  }
+
+  /** A bot's worthless bag (dead or delisted coin) leaves its wallet as a realized loss, and its public wallet too. */
+  private botWriteOff(m: Member, tokenId: string, chain: Chain) {
+    const main = m.wallet?.accounts?.[0]
+    const pos = main?.positions[tokenId]
+    if (!m.wallet || !main || !pos) return
+    const r = runGiveAway(m.wallet, main.id, tokenId, pos.qty, chain, 0)
+    if (!r.ok) return
+    m.wallet = r.portfolio
+    const cp = (m.chainPnl ??= { sol: 0, bsc: 0, hood: 0 })
+    cp[chain] = (cp[chain] ?? 0) - pos.costBasis
+    delete m.brain!.entries[tokenId]
+    delete m.brain!.cooked[tokenId]
+    if (m.brain!.plans) delete m.brain!.plans[tokenId]
+    const i = this.wallets.findIndex((w) => w.id === m.info.id)
+    const mine = i >= 0 ? this.wallets[i].positions[tokenId] : undefined
+    if (!mine) return
+    const w0 = this.wallets[i]
+    const positions = { ...w0.positions }
+    delete positions[tokenId]
+    const w: SimWallet = { ...w0, positions, live: { ...w0.live, losses: w0.live.losses + 1, pnl24h: w0.live.pnl24h - mine.cost } }
+    this.wallets = this.wallets.map((x, k) => (k === i ? w : x))
   }
 
   private botChat(m: Member, text: string, reply = false) {
@@ -1243,16 +1270,18 @@ export class Room {
       // Exits (the chef handles its own coins below).
       for (const pos of bags) {
         const t = byId.get(pos.tokenId)
-        if (!t || b.cooked[pos.tokenId]) continue
-        if (t.status !== 'bonding' && t.status !== 'graduated') {
-          if (b.entries[t.id]) {
-            delete b.entries[t.id]
-            if (b.plans) delete b.plans[t.id]
+        // A bag in a coin that died, or that has left the market, can never be sold: take the loss and drop it (dev
+        // bags too). Left in the wallet, every such bag keeps its dead coin listed while the bot is online and stays
+        // in the save forever, so the World would grow without limit.
+        if (!t || !live(t)) {
+          if (b.entries[pos.tokenId]) {
             b.streak = Math.min(-1, (b.streak ?? 0) - 1)
-            if (rng.chance(0.4)) this.botChat(m, chatLine('loss', rng, t.ticker, -0.9))
+            if (t && rng.chance(0.4)) this.botChat(m, chatLine('loss', rng, t.ticker, -0.9))
           }
+          this.botWriteOff(m, pos.tokenId, t?.chain ?? 'sol')
           continue
         }
+        if (b.cooked[pos.tokenId]) continue
         const e = (b.entries[t.id] ??= { tick, peak: t.price })
         e.peak = Math.max(e.peak, t.price)
         const pnl = t.price / Math.max(1e-18, pos.avgEntry) - 1
@@ -1294,11 +1323,11 @@ export class Room {
         const v = valuePortfolio(m.wallet!, byId, this.market)
         const trades = m.wallet!.trades
         m.info = {
-          ...m.info, equity: v.equity, startEquity: m.wallet!.startBalance, trades: trades.length, wins: trades.filter((x) => x.side === 'sell' && (x.pnl ?? 0) > 0).length,
+          ...m.info, equity: v.equity, startEquity: m.wallet!.startBalance, trades: b.fills ?? trades.length, wins: b.wins ?? trades.filter((x) => x.side === 'sell' && (x.pnl ?? 0) > 0).length,
           holdings: Object.values(m.wallet!.accounts?.[0]?.positions ?? {}).slice(0, 30).map((p) => ({ tokenId: p.tokenId, qty: p.qty, cost: p.costBasis, openedAt: p.openedAt })),
         }
         m.protect = Object.keys(m.wallet!.positions)
-        if (m.wallet!.trades.length > WORLD_TRADES_KEPT) m.wallet = { ...m.wallet!, trades: m.wallet!.trades.slice(0, WORLD_TRADES_KEPT) }
+        if (m.wallet!.trades.length > BOT_TRADES_KEPT) m.wallet = { ...m.wallet!, trades: m.wallet!.trades.slice(0, BOT_TRADES_KEPT) }
         this.playersDirty = true
         const liveBags = Object.keys(m.wallet!.positions).filter((id) => { const t = byId.get(id); return t && (t.status === 'bonding' || t.status === 'graduated') })
         if (!liveBags.length && v.equity < BOT_BUST_USD) {
