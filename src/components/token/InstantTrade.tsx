@@ -225,6 +225,7 @@ export function InstantTrade() {
   // (inside the panel) only when neither side has room, as on a phone.
   const vw = typeof window === 'undefined' ? 1280 : window.innerWidth
   const holdingsSide: 'right' | 'left' | 'below' = pos2d.x + W + SIDE_W + 12 <= vw ? 'right' : pos2d.x - SIDE_W - 12 >= 0 ? 'left' : 'below'
+  const sideOpen = o.pnlRow && tab === 'trade' && !!ip.showHoldings && holdingsSide !== 'below'
   const resetPnl = () => {
     const next = { ...resets, [t.id]: useGame.getState().market.tick + 1 }
     setResets(next)
@@ -235,7 +236,7 @@ export function InstantTrade() {
     <div
       role="dialog"
       aria-label="Instant trade"
-      className={clsx('pop-in fixed z-40 rounded-lg border border-line2 bg-panel/95 shadow-2xl shadow-black/60 backdrop-blur', o.dragAnywhere && 'touch-none')}
+      className={clsx('pop-in fixed z-40 rounded-lg border border-line2 bg-panel/95 shadow-2xl shadow-black/60 backdrop-blur', o.dragAnywhere && 'touch-none', sideOpen && (holdingsSide === 'right' ? 'rounded-r-none' : 'rounded-l-none'))}
       style={{ left: pos2d.x, top: pos2d.y, width: W }}
       {...(o.dragAnywhere ? dragProps : {})}
     >
@@ -448,9 +449,10 @@ export function InstantTrade() {
       )}
       </>
       )}
-      {/* Wallet holdings open beside the panel (right if there is room, else left), so the panel keeps its height */}
-      {o.pnlRow && tab === 'trade' && ip.showHoldings && holdingsSide !== 'below' && (
-        <div className={clsx('absolute top-0 rounded-lg border border-line2 bg-panel/95 p-1.5 shadow-2xl shadow-black/60 backdrop-blur', holdingsSide === 'right' ? 'left-full ml-1.5' : 'right-full mr-1.5')} style={{ width: SIDE_W }}>
+      {/* Wallet holdings open beside the panel (right if there is room, else left), joined to it as one piece: same
+          height, one shared line between them, square corners where they meet */}
+      {sideOpen && (
+        <div className={clsx('absolute -bottom-px -top-px border border-line2 bg-panel', holdingsSide === 'right' ? 'left-full rounded-r-lg border-l-0' : 'right-full rounded-l-lg border-r-0')} style={{ width: SIDE_W }}>
           <WalletHoldings t={t} inNative={inNative} px={px} tall />
         </div>
       )}
@@ -485,12 +487,12 @@ function WalletHoldings({ t, inNative, px, tall }: { t: Token; inNative: boolean
     setActive(on ? activeIds.filter((x) => x !== id) : [...activeIds, id])
   }
   return (
-    <div className={clsx('rounded border border-line bg-bg/60', !tall && 'mb-1.5')}>
-      <div className="flex items-center justify-between border-b border-line/60 px-1.5 py-0.5 text-[9px] text-dim">
+    <div className={tall ? 'flex h-full flex-col' : 'mb-1.5 rounded border border-line bg-bg/60'}>
+      <div className={clsx('flex items-center justify-between border-b px-1.5 text-[9px] text-dim', tall ? 'border-line px-2.5 py-2' : 'border-line/60 py-0.5')}>
         <span>{holding}/{all.length} wallets hold {t.ticker}</span>
         <span className="num">{fmtNum(totalQty)} · {((totalQty / SUPPLY) * 100).toFixed(2)}% supply</span>
       </div>
-      <ul className={clsx('overflow-y-auto', tall ? 'max-h-[340px]' : 'max-h-[180px]')}>
+      <ul className={clsx('overflow-y-auto', tall ? 'min-h-0 flex-1' : 'max-h-[180px]')}>
         {rows.map((r) => {
           const on = activeIds.includes(r.a.id)
           return (
