@@ -67,9 +67,9 @@ const askBoard = (list?: string): Board => {
   return back2.find((m) => m.t === 'board') as Board
 }
 const b1 = askBoard()
-ok(!!b1 && b1.list === 'worth' && b1.total === BOT_ROSTER.length + 1 && b1.rows.length === b1.total && b1.rows.every((r, i) => i === 0 || b1.rows[i - 1].equity >= r.equity), `board ranks all ${b1?.total} wallets by net worth`)
+ok(!!b1 && b1.list === 'worth' && b1.total === BOT_ROSTER.length + 1 && b1.rows.length === Math.min(b1.total, 100) && b1.rows.every((r, i) => i === 0 || b1.rows[i - 1].equity >= r.equity), `board ranks all ${b1?.total} wallets by net worth`)
 ok(!!b1.me && b1.me.row.id === 'u-aaa' && b1.me.rank >= 1 && b1.me.restartAt === null, `you're on it: #${b1.me?.rank} net worth`)
-ok(b1.rows.filter((r) => r.bot).length === BOT_ROSTER.length, 'bots are on the board, flagged as bots')
+ok(b1.rows.filter((r) => r.bot).length === b1.rows.filter((r) => r.id.startsWith('bot-')).length && b1.rows.some((r) => r.bot), 'bots are on the board, flagged as bots (the board sends the top 100)')
 // The other lists: today / season / each chain are ranked by their own number; the season is the calendar month.
 for (const list of ['day', 'week', 'season', 'sol', 'bsc', 'hood'] as const) {
   const bl = askBoard(list)

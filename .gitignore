@@ -30,3 +30,5 @@ dist-ssr
 
 # UI tester bot reports (npm run bots)
 bot-reports
+# Real-market recordings for the learning bots (npm run record): private, never uploaded
+bot-data

@@ -38,6 +38,7 @@ npx tsx scripts/charts-test.ts 30           # charts across a restart: short tim
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
+npx tsx scripts/crowd-test.ts 3             # the 100 World bots: skill shows in results, dev dumps, pile-on limit, speed
 npx vite build                              # production build
 npm run bots                                # UI bots: play every page in hidden Chrome, PDF report (see below)
 ```
@@ -54,6 +55,36 @@ Uses the installed Chrome/Edge (`CHROME_PATH` to override). `--clicks N`, `--see
 (port 5197), then two players in separate browser contexts create and join a friends room, trade, cook, send money,
 chat and click around together. After each action each screen is compared with `window.__srvWallet` (the server's
 last wallet answer), and both players' markets are compared tick for tick. `--clicks N`, `--show`, `--selftest`.
+
+**Market recorder** (`scripts/market-recorder.ts`, `npm run record`): read-only recording of real pump.fun
+bonding-curve trades, launches and graduations from Solana logs (Helius free plan via `HELIUS_API_KEY` in `.env`, or
+`--public`), for teaching bots. Wallets are saved only as salted hashes (salt in `bot-data/salt.txt`); real addresses
+never leave this computer. `bot-data/` is gitignored. About 25 MB/min, so ~30 h/month fits the Helius free plan
+(`--usage` tracks it). Optional `bot-data/watch.txt`: wallets or wallet-page links to follow. Never wire this into the
+game or server: the game must not connect to real markets or money.
+
+**Market learner** (`scripts/market-learner.ts`, `npm run learn`): replays the recordings coin by coin, profiles wallets
+(return, entry age, hold time, size, loss cutting, dev / big sells), ranks them into skill levels (pro / good / average /
+bad / degen by return) and styles (sniper, scalper, whale, diamond, degen, dumper), and writes `bot-data/brain.json`:
+per style/level, buy lift by situation (age × market cap × last-minute move), size, exit multiple and timing, plus
+market-wide dump stats (dev sells, big sells, pile-ons, rugs). Only aggregates, no wallet ids. Coins whose launch was
+not recorded are left out of the age-based odds. Summary for people: `bot-data/brain-summary.md`.
+
+**World bots** (`server/bots.ts`, `server/brainBots.ts`): 100 bots made from a fixed seed (`makeRoster`; don't reorder its
+lists, wallets are saved per id), each with a style, skill level (pro → degen), persona (bet size, reaction time,
+patience, mistake rate, tilt) and chat voice. Trading bots play from `server/data/market-brain.json` (copy
+`bot-data/brain.json` there after `npm run learn` to update): buy odds by situation × a level-based eye for coin safety (`safety`: risk score, dev and top-10 share, holders, liquidity, recent pump; measured to predict dying coins in the World), sizes
+(real SOL × `SIZE_SCALE`), exits from the real exit spread, moods from streaks. Chefs launch coins and dump on real
+dev-sell timing (`DEV_DUMP_CHANCE` by level). Big bot sells on one coin are capped at `PILE_ON_LIMIT` per 10s. Bots not in
+the roster (the original 20) are removed from the World with their wallets on boot. `WORLD_BOTS=20` on Render runs fewer.
+Without the brain file the bots fall back to the old `STYLE` rules.
+
+**Trend coins**: the learner also writes `trends` (theme words found in real launch names, ranked by SOL traded). Only words on
+the allow-list in `server/trendThemes.ts` count, so real people, brands, politics and crude words never reach the game;
+never add such words there. Chefs launch `TREND_SHARE` (60%) of their coins on a trend (`trendCoin`: "Baby Horse",
+"AGENTAI"…), never copying a real launch's name. When out of ideas (every theme has `TREND_CROWDED` live coins, or the brain is
+older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so launches never stop. Trends are as fresh as the last brain: to refresh, `npm run record`,
+`npm run learn`, copy `bot-data/brain.json` to `server/data/market-brain.json`, open a PR.
 
 ## How it is deployed (read this before pushing)
 
@@ -85,7 +116,8 @@ last wallet answer), and both players' markets are compared tick for tick. `--cl
 | `src/net/client.ts` | Browser side of rooms: connect, apply ticks, reconcile wallets. |
 | `server/index.ts` | HTTP + WebSocket, identity, room lifecycle, saving, World boot. |
 | `server/room.ts` | One room: shared market tick, players, **every player's wallet**, cooking, bots, fees, cashback, admin actions. |
-| `server/bots.ts` | World bots: roster, styles, coin picking, chat lines. |
+| `server/bots.ts` | World bots: the 100-bot roster (personas, voices), styles, fallback coin picking, chat lines. |
+| `server/brainBots.ts` | The market brain the World bots trade from (`server/data/market-brain.json`). |
 | `server/persist.ts` | Saving rooms / the World to Supabase, gifts. |
 | `server/auth.ts`, `server/admin.ts` | Token checks, bans, the admin API. |
 | `src/components`, `src/pages` | UI. |
