@@ -30,7 +30,14 @@ import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
-const KEYFRAME_TICKS = 30 // a full market refresh every ~30s; ticks in between only carry what changed
+const KEYFRAME_TICKS = 120 // each coin and public wallet is re-sent in full every ~2 min (each on its own tick, so no tick is a big one); ticks in between only carry what changed
+// World: a coin's on-screen statistics (rolling windows, % changes, momentum, counters) go out every few seconds
+// instead of every second. They were most of what a browser received; price, market cap, liquidity, curve progress
+// and everything a trade quote reads still go out the moment they change.
+const SLOW_FIELD_TICKS = 5
+const SLOW_FIELDS = new Set(['win', 'change', 'momentum', 'momentumScore', 'volMark', 'volume', 'buys', 'sells', 'creatorFees', 'feesPaid', 'holders', 'devTrades'])
+/** A steady number per id, to give every coin and wallet its own turn. */
+const turnOf = (id: string) => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return h }
 const WORLD_TRADES_KEPT = 300 // World wallets live forever: keep their recent trade history only
 const BOT_TRADES_KEPT = 20 // bots: nobody reads their own wallet's history (their public wallet shows their trades), and 100 × 300 trades is most of the save
 const WORLD_DEAD_COIN_SEC = 3600 // World: dead player-cooked coins leave the market after an hour
@@ -927,11 +934,6 @@ export class Room {
     this.events = [...events.slice().reverse(), ...this.events].slice(0, EVENTS_KEPT)
     this.posts = [...posts.slice().reverse(), ...this.posts].slice(0, POSTS_KEPT)
 
-    // Every ~30s, forget what was sent so this tick is a full refresh (repairs anything a client missed).
-    if (market.tick % KEYFRAME_TICKS === 0) {
-      this.sentTokens.clear()
-      this.sentWallets.clear()
-    }
     const points: TickMsg['points'] = {}
     for (const [id, pts] of this.pending) points[id] = pts.map(([time, price, prev, vol]) => [time, r6(price), r6(prev), r3(vol)])
     const msg: TickMsg = {
@@ -964,12 +966,17 @@ export class Room {
   private tickMarketDiff(): TickMsg['market'] {
     const since = this.lastTapeId
     let max = since
+    const tick = this.market.tick
     const tokens: TokenDiff[] = this.market.tokens.map((t) => {
-      const prev = this.sentTokens.get(t.id)
+      const turn = tick + turnOf(t.id)
+      // On its refresh turn a coin is sent in full, as if new (repairs anything a browser missed).
+      const prev = turn % KEYFRAME_TICKS === 0 ? undefined : this.sentTokens.get(t.id)
+      const slowTurn = !this.world || turn % SLOW_FIELD_TICKS === 0
       const snap: Record<string, string> = prev ?? {}
       const out: TokenDiff = { id: t.id }
       for (const [k, v] of Object.entries(t)) {
         if (k === 'id' || k === 'tape' || (k === 'sim' && prev)) continue
+        if (prev && !slowTurn && SLOW_FIELDS.has(k)) continue
         const rv = round(v)
         const js = JSON.stringify(rv)
         if (!prev || prev[k] !== js) {
@@ -1002,7 +1009,8 @@ export class Room {
       void _t
       const rw = round(rest) as Omit<SimWallet, 'trades'>
       const js = JSON.stringify(rw)
-      if (this.sentWallets.get(w.id) === js && !trades.length) continue
+      const refresh = (this.market.tick + turnOf(w.id)) % KEYFRAME_TICKS === 0
+      if (!refresh && this.sentWallets.get(w.id) === js && !trades.length) continue
       this.sentWallets.set(w.id, js)
       out.push({ ...rw, trades: round(trades) as SimWallet['trades'] })
     }

@@ -150,6 +150,9 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
 - Files are UTF-8 with emoji in strings. Edit with a real editor or a Node script. **Never rewrite source files
   with PowerShell** (`Set-Content` has corrupted the emoji before).
 - Numbers on the wire are rounded to 6 significant digits (`round()` in `server/room.ts`).
+- What a browser receives each second is the limit on how many can play. In the World a coin's on-screen statistics
+  (`SLOW_FIELDS` in `server/room.ts`) go out every `SLOW_FIELD_TICKS` seconds, each coin on its own turn; anything a trade
+  quote reads stays live. Full refreshes are staggered per coin and wallet (`KEYFRAME_TICKS`), never all on one tick.
 - Feature switches the owner flips live are in Supabase `app_flags` (`src/game/flags.ts`). New risky features
   should ship behind one, admin-only at first (see the `world` flag).
 
