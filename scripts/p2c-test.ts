@@ -1,5 +1,6 @@
 // Phase 2 piece 3 check: cooking, bots, creator fees, cashback, airdrops and claims run on the server's wallets.
 import { Room } from '../server/room'
+import { coinLook } from '../server/moderation'
 import { cookToken, COOK_FEE } from '../src/game/marketEngine'
 import { Rng } from '../src/utils/rng'
 import { walletAddress } from '../src/utils/address'
@@ -25,7 +26,7 @@ const sol0 = main().balances.sol
 ok(sol0 > 0, `swapped into SOL: ${sol0.toFixed(3)}`)
 
 // Cook with a dev buy of 1 SOL, marketing $50, and a 3-wallet bundle of 0.5 SOL each.
-const spec = { name: 'Test Coin', ticker: 'TSTC', emoji: '🧪', hue: 100, description: '', chain: 'sol', pad: 'pump', tax: { buy: 0, sell: 0 }, devBuy: 1, marketing: 50, narrative: 'meme', socials: { x: true, tg: false, web: false }, style: 'fair', bundle: { wallets: 3, perWallet: 0.5, stagger: false } } as never
+const spec = { name: 'Test Coin', ticker: 'TSTC', emoji: '🧪', hue: 100, description: '', chain: 'sol', pad: 'pump', tax: { buy: 0, sell: 0 }, devBuy: 1, marketing: 50, narrative: 'dogs', socials: { x: true, tg: false, web: false }, style: 'fair', bundle: { wallets: 3, perWallet: 0.5, stagger: false } } as never
 const cooked = cookToken(room.market, new Rng(123), spec)
 const cashBefore = me().wallet.cash
 r.handle('p1', { t: 'cook', seq: 2, ref: 2, token: cooked.token, money: { devWallet: main().id, devBuy: 1, bundle: { wallets: 3, perWallet: 0.5, stagger: false }, marketing: 50 } })
@@ -108,5 +109,41 @@ const snap = JSON.parse(JSON.stringify(room.snapshot()))
 const back = Room.restore(snap, null) as unknown as { cooked: Map<string, unknown>; members: Map<string, { cashback?: unknown; cooks?: number }>; dispose(): void }
 ok(back.cooked.has(cooked.token.id) && back.members.get('p1')?.cooks === 1, 'cooked coins and cook count saved with the room')
 back.dispose()
+
+// The coin's look (name, ticker, description, picture) is checked by the server before anything is charged: a
+// changed game could send anything, and everyone in the room sees it.
+for (let i = 0; i < 31; i++) r.tick() // past the kitchen cooldown
+let seqL = 40
+const tryCook = (look: Record<string, unknown>) => {
+  seqL++
+  const t = cookToken(room.market, new Rng(1000 + seqL), { ...spec, name: 'Look Coin', ticker: 'LOOK' }).token
+  r.handle('p1', { t: 'cook', seq: seqL, ref: seqL, token: { ...t, id: `look-${seqL}`, ...look }, money: { devWallet: main().id, devBuy: 0, marketing: 0 } })
+  return { why: (lastWallet().failures ?? [])[0] ?? '', coin: room.market.tokens.find((x) => x.id === `look-${seqL}`) }
+}
+const cooksOf = () => (me() as unknown as { cooks?: number }).cooks
+const cashL = me().wallet.cash
+ok(tryCook({ name: 'x' }).why.includes('2–24'), 'a one-letter coin name is refused')
+ok(tryCook({ ticker: 'lower' }).why.includes('Ticker') && tryCook({ ticker: 'WAYTOOLONGTICKER' }).why.includes('Ticker') && tryCook({ ticker: 'A B' }).why.includes('Ticker'), 'a ticker that is not 2–8 capital letters or digits is refused')
+ok(tryCook({ name: 'kys coin' }).why.includes('isn’t allowed'), 'a coin name with a blocked phrase is refused')
+ok(tryCook({ ticker: 'TSTC' }).why.includes('already exists'), 'a ticker that is already live is refused')
+ok(tryCook({ image: 'https://example.com/pixel.png' }).why.includes('uploaded'), 'a picture link is refused (every other player’s browser would fetch it)')
+ok(tryCook({ image: 'data:image/svg+xml;base64,AAAA' }).why.includes('can’t be used') && tryCook({ image: 'javascript:alert(1)' }).why.includes('can’t be used'), 'a picture that is not an embedded PNG, JPG, WebP or GIF is refused')
+ok(tryCook({ image: `data:image/png;base64,${'A'.repeat(200_001)}` }).why.includes('too big'), 'an oversized picture is refused, not cut in half')
+ok(tryCook({ narrative: 'made-up' }).why.includes('narrative'), 'an unknown narrative is refused')
+ok(me().wallet.cash === cashL && cooksOf() === 1, 'refused launches cost nothing and do not count as a launch')
+const tidy = tryCook({ name: '  Tidy‮   Coin\n', emoji: 'RUDE', hue: 9999, description: 'a  retard  wrote this', image: 'data:image/png;base64,iVBORw0KGgo=' })
+ok(!tidy.why && tidy.coin?.name === 'Tidy Coin' && tidy.coin.emoji === '🪙' && tidy.coin.hue === 360 && tidy.coin.description === 'a ****** wrote this' && tidy.coin.image === 'data:image/png;base64,iVBORw0KGgo=',
+  `a good launch goes through cleaned up: "${tidy.coin?.name}" ${tidy.coin?.emoji} hue ${tidy.coin?.hue} "${tidy.coin?.description}" ${tidy.why}`)
+ok(me().wallet.cash < cashL && cooksOf() === 2, 'and that one is charged and counted')
+const worldLook = { name: 'Visit scam.com', ticker: 'SCAM', emoji: '🐸' }
+ok(typeof coinLook(worldLook, { noLinks: true }) === 'string' && typeof coinLook(worldLook) !== 'string', 'a link in a coin name is refused in the World only (as in chat)')
+ok(String(coinLook({ name: 'Fine Coin', ticker: 'FINE', emoji: '🐸', description: 'join www.scam.io now' }, { noLinks: true })).includes('Links'), 'a link in a World coin’s description is refused')
+// A coin saved with a picture link (before this check) comes back without it.
+const snapL = JSON.parse(JSON.stringify(room.snapshot()))
+snapL.market.tokens[0].image = 'https://example.com/pixel.png'
+snapL.market.tokens[1].image = 'data:image/png;base64,iVBORw0KGgo='
+const backL = Room.restore(snapL, null)
+ok(backL.market.tokens[0].image === undefined && backL.market.tokens[1].image === 'data:image/png;base64,iVBORw0KGgo=', 'a saved coin’s picture link is dropped on load, an uploaded picture is kept')
+backL.dispose()
 room.dispose()
 process.exit(0)

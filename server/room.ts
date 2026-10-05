@@ -13,7 +13,8 @@ import { createWallets, tickWallets } from '../src/game/walletEngine'
 import { copyBuys, copySells, type CopyBook, POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
 import { seasonNumber } from '../src/game/season'
 import { dayKey, worldSeason } from '../src/game/worldSeason'
-import { AUTO_MUTE_MS, moderate, rateCheck, strike, type ChatMeter } from './moderation'
+import { AUTO_MUTE_MS, coinLook, embeddedImage, moderate, rateCheck, strike, type ChatMeter } from './moderation'
+import { NARRATIVES } from '../src/data/narratives'
 import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
 import { accountOf } from '../src/game/accounts'
 import { nativePrice } from '../src/game/tradingEngine'
@@ -253,7 +254,8 @@ export class Room {
     for (const t of r.market.tokens) candleStore.delete(t.id) // the placeholder market's charts
     r.hostId = s.hostId
     r.round = s.round
-    r.market = s.market
+    // Coins saved before picture links were refused (see coinLook) lose the link and show their emoji instead.
+    r.market = s.market.tokens.some((t) => t.image && !embeddedImage(t.image)) ? { ...s.market, tokens: s.market.tokens.map((t) => (t.image && !embeddedImage(t.image) ? { ...t, image: undefined } : t)) } : s.market
     r.wallets = s.wallets ?? []
     r.posts = s.posts ?? []
     r.events = s.events ?? []
@@ -763,6 +765,13 @@ export class Room {
     const chain = msg.token.chain
     const pad = LAUNCHPADS[msg.token.pad]
     if (!(chain in CHAINS) || !pad || pad.chain !== chain) return fail('Unknown chain or launchpad')
+    // The coin's look is checked before anything is charged: the same rules as the game's own form, plus the chat
+    // filter and "no picture links" (see coinLook). A refused launch costs nothing.
+    const look = coinLook(msg.token, { noLinks: this.world })
+    if (typeof look === 'string') return fail(look)
+    if (!NARRATIVES.some((n) => n.id === msg.token.narrative)) return fail('Unknown narrative')
+    // Tickers are unique among live coins, except a vamp may reuse the ticker of the coin it copies.
+    if (this.market.tokens.some((x) => x.ticker === look.ticker && x.status !== 'dead' && x.status !== 'rugged' && x.id !== msg.token.vampOf?.id)) return fail(`$${look.ticker} already exists`)
     const px = nativePrice(this.market, chain)
     const devWallet = accountOf(w, String(money.devWallet)) ? String(money.devWallet) : w.accounts?.[0]?.id ?? 'w-main'
     const b = money.bundle && money.bundle.wallets > 0 ? { wallets: Math.min(50, Math.round(money.bundle.wallets)), perWallet: Math.max(0, Number(money.bundle.perWallet) || 0), stagger: !!money.bundle.stagger } : null
@@ -783,8 +792,8 @@ export class Room {
     const str = (s: unknown, n: number) => String(s ?? '').slice(0, n)
     const taxPct = (n: unknown) => (Number.isFinite(n) ? Math.min(0.1, Math.max(0, Number(n))) : 0)
     const spec: CookSpec = {
-      chain, pad: c0.pad, tax: { buy: taxPct(c0.tax?.buy), sell: taxPct(c0.tax?.sell) }, image: c0.image ? str(c0.image, 200_000) : undefined,
-      name: str(c0.name, 32), ticker: str(c0.ticker, 12), emoji: str(c0.emoji, 8), hue: Number(c0.hue) || 0, description: str(c0.description, 140),
+      chain, pad: c0.pad, tax: { buy: taxPct(c0.tax?.buy), sell: taxPct(c0.tax?.sell) }, image: look.image,
+      name: look.name, ticker: look.ticker, emoji: look.emoji, hue: look.hue, description: look.description,
       narrative: c0.narrative as Narrative, socials: { x: !!c0.socials?.x, tg: !!c0.socials?.tg, web: !!c0.socials?.web },
       style: money.style === 'hyped' || money.style === 'stealth' ? money.style : 'fair', marketing, devBuy: Math.max(0, Number(money.devBuy) || 0),
       bundle: b ?? { wallets: 0, perWallet: 0, stagger: false }, vampOf: c0.vampOf?.id,

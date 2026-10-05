@@ -378,10 +378,15 @@ let lastEventToast = -999
 // Cooking rules.
 export { COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND }
 
-/** Returns an error message, or null if the launch spec is valid. */
-export function validateCook(spec: CookSpec, tokens: Token[]): string | null {
+/**
+ * Returns an error message, or null if the launch spec is valid. `online`: in a room or the World the server checks
+ * the same things again (`coinLook` in server/moderation.ts) and only takes a picture that was uploaded.
+ */
+export function validateCook(spec: CookSpec, tokens: Token[], online = false): string | null {
   if (spec.name.trim().length < 2 || spec.name.trim().length > 24) return 'Name must be 2–24 characters'
   if (!/^[A-Z0-9]{2,8}$/.test(spec.ticker)) return 'Ticker must be 2–8 letters or digits'
+  if (online && spec.image && !/^data:image\//i.test(spec.image)) return 'Online, upload the picture (links are solo only)'
+  if (online && spec.image && spec.image.length > 200_000) return 'Picture too big for online play'
   // Tickers are unique, except a vamp may reuse the exact ticker of the coin it's copying (that's the point of a vamp).
   if (tokens.some((t) => t.ticker === spec.ticker && t.status !== 'dead' && t.status !== 'rugged' && t.id !== spec.vampOf)) return `$${spec.ticker} already exists`
   if (!(spec.marketing >= 0) || !(spec.devBuy >= 0)) return 'Amounts must be positive'
@@ -1525,7 +1530,7 @@ export const useGame = create<GameState>()((set, get) => {
         return null
       }
       if (s.runStatus !== 'running') return fail('Start a round to launch tokens')
-      const err = validateCook(spec, s.market.tokens)
+      const err = validateCook(spec, s.market.tokens, !!s.online)
       if (err) return fail(err)
       const limit = cookAllowance(!!s.online?.round.world, s.launches.map((l) => l.launchedTick), s.market.tick, secPerTickOf(s.market))
       if (limit.blocked) return fail(limit.blocked)

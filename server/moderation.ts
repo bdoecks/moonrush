@@ -23,9 +23,12 @@ export interface Moderated {
   strike?: boolean // a refused message that should count toward an automatic mute
 }
 
+// Invisible and control characters (line breaks, zero-width spaces, "write this backwards" marks).
+const HIDDEN = /[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202f]/g
+
 /** Check a chat message or post. `noLinks`: the public World doesn't allow links (scams, spam). */
 export function moderate(raw: string, opts: { noLinks?: boolean } = {}): Moderated {
-  const text = String(raw ?? '').replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)
+  const text = String(raw ?? '').replace(HIDDEN, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)
   if (!text) return { ok: false, text: '' }
   const norm = normalize(text)
   if (REFUSE.some((re) => re.test(norm))) return { ok: false, text, reason: 'That message isn’t allowed here.', strike: true }
@@ -49,6 +52,53 @@ export function moderate(raw: string, opts: { noLinks?: boolean } = {}): Moderat
 export const nameBlocked = (name: string) => {
   const n = normalize(String(name ?? ''))
   return MASK.some((re) => ((re.lastIndex = 0), re.test(n))) || REFUSE.some((re) => re.test(n))
+}
+
+// ─── Coin looks ──────────────────────────────────────────────────────────────
+// A new coin's name, ticker, description and picture are the one part of a launch that comes from the player's
+// browser, and everyone in the room sees them. The game's own form keeps them tidy (`validateCook`); a changed game
+// could send anything, so the server checks them again before it charges for the launch.
+
+/** The longest picture a coin may carry: characters of its data URL, about 150 KB of image. Every player is sent it. */
+export const COIN_IMAGE_MAX = 200_000
+const EMBEDDED_IMAGE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/
+
+/**
+ * True for a picture carried inside the coin itself. A picture link is not allowed in rooms: every player's browser
+ * would fetch it from whatever computer the link names, which shows that computer's owner each player's address.
+ */
+export const embeddedImage = (s: unknown): s is string => typeof s === 'string' && s.length <= COIN_IMAGE_MAX && EMBEDDED_IMAGE.test(s)
+
+export interface CoinLook { name: string; ticker: string; description: string; emoji: string; hue: number; image?: string }
+
+/** Clean and check what a player gave a new coin. Returns the cleaned look, or the reason it is refused (a string). */
+export function coinLook(c: { name?: unknown; ticker?: unknown; description?: unknown; emoji?: unknown; hue?: unknown; image?: unknown }, opts: { noLinks?: boolean } = {}): CoinLook | string {
+  const tidy = (s: unknown) => String(s ?? '').replace(HIDDEN, ' ').replace(/\s+/g, ' ').trim()
+  const name = tidy(c.name)
+  if (name.length < 2 || name.length > 24) return 'Name must be 2–24 characters'
+  const ticker = typeof c.ticker === 'string' ? c.ticker : ''
+  if (!/^[A-Z0-9]{2,8}$/.test(ticker)) return 'Ticker must be 2–8 letters or digits'
+  if (nameBlocked(name) || nameBlocked(ticker)) return 'That coin name isn’t allowed.'
+  if (opts.noLinks && LINK.test(name)) return 'Links aren’t allowed in a World coin’s name.'
+  let description = tidy(c.description).slice(0, 140)
+  if (description) {
+    const m = moderate(description, opts)
+    if (!m.ok) return m.strike ? 'That coin description isn’t allowed.' : 'Links aren’t allowed in a World coin’s description.'
+    description = m.text // slurs are starred out, as in chat
+  }
+  // The icon: a few emoji, never text. Cut between characters (an emoji is often two code units).
+  let emoji = ''
+  for (const ch of String(c.emoji ?? '').replace(/[\u0000-\u001f\u007f]/g, '')) {
+    if (emoji.length + ch.length > 8) break
+    emoji += ch
+  }
+  if (!emoji || /[\p{L}\p{N}<>&]/u.test(emoji)) emoji = '🪙'
+  const h = Number(c.hue)
+  const hue = Number.isFinite(h) ? Math.min(360, Math.max(0, h)) : 0
+  if (c.image === undefined || c.image === null || c.image === '') return { name, ticker, description, emoji, hue }
+  if (embeddedImage(c.image)) return { name, ticker, description, emoji, hue, image: c.image }
+  if (typeof c.image === 'string' && /^https?:\/\//i.test(c.image)) return 'Online, a coin’s picture has to be uploaded. A picture link only works in solo play.'
+  return typeof c.image === 'string' && c.image.length > COIN_IMAGE_MAX ? 'That picture is too big to use online. Try a smaller file.' : 'That picture can’t be used online. Upload a PNG, JPG, WebP or GIF.'
 }
 
 // ─── Rate limit ──────────────────────────────────────────────────────────────
