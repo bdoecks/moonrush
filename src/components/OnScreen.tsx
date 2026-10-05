@@ -32,20 +32,27 @@ function watch(el: Element, cb: (on: boolean) => void) {
 
 /**
  * Draws its children only while it is on (or near) the screen; scrolled away, it stays as an empty box of the height
- * it last had. For the rows of long feeds that update every tick and differ in height (so they can't be windowed by
- * arithmetic, like the coin lists are): a row nobody can see costs nothing.
+ * it last had. For the rows of long lists that update every tick and differ in height: a row nobody can see costs
+ * nothing, and because every row keeps its own real height, nothing shifts when rows come and go. (Placing rows by
+ * "index × average height" instead made a list of unequal rows hop, and at some scroll positions redraw for ever.)
+ *
+ * `estimate`: the height to hold before the row has ever been drawn. `drawn`: whether it starts drawn (default yes,
+ * so nothing flashes in empty; pass false for rows far down a long list). `className` is fixed when the row first
+ * appears, so an entrance animation on it plays once and is never cut short.
  */
-export function OnScreen({ children, className }: { children: ReactNode; className?: string }) {
+export function OnScreen({ children, className, estimate = 0, drawn = true }: { children: ReactNode; className?: string; estimate?: number; drawn?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [on, setOn] = useState(true) // drawn at first, so nothing flashes in empty
-  const height = useRef(0)
+  const [on, setOn] = useState(drawn)
+  const [cls] = useState(className)
+  const height = useRef(estimate)
   useEffect(() => {
     const el = ref.current
     if (!el) return
     return watch(el, (visible) => {
-      if (!visible) height.current = el.offsetHeight
+      // A box that isn't laid out (a column hidden on a phone) measures 0: keep the height we had.
+      if (!visible && el.offsetHeight > 0) height.current = el.offsetHeight
       setOn(visible)
     })
   }, [])
-  return <div ref={ref} className={className} style={on ? undefined : { height: height.current }}>{on ? children : null}</div>
+  return <div ref={ref} className={cls} style={on ? undefined : { height: height.current }}>{on ? children : null}</div>
 }

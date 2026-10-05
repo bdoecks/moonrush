@@ -8,7 +8,7 @@ import { PadBadge } from '../pad'
 import { LAUNCHPADS } from '../../data/launchpads'
 import { AtSign, Boxes, ChefHat, Crosshair, Eye, Ghost, Globe, GraduationCap, Search, Send, Star, UserRound, Users } from 'lucide-react'
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useWindowed } from '../../hooks/useWindowed'
+import { OnScreen } from '../OnScreen'
 import { useTokenMap } from '../../hooks/useDerived'
 import { useGame } from '../../game/store'
 import { publicBundlePct } from '../../game/devTools'
@@ -23,6 +23,7 @@ import { fmtAge, fmtCompact, fmtNum } from '../../utils/format'
 import { EmptyState, FlashNum, Pct, Segmented, TokenIcon } from '../ui'
 
 type Col = TrenchColumn
+const CARD_HEIGHT = 120 // roughly: the room a card is given before it has ever been drawn (real ones run about 110-155px)
 const COLS: { id: Col; title: string }[] = [
   { id: 'new', title: 'New Pairs' },
   { id: 'stretch', title: 'Final Stretch' },
@@ -93,9 +94,9 @@ function Column({ col, list: all, now, visible }: { col: (typeof COLS)[number]; 
   const presets = useFilterPresets(chain)
   const activePreset = presetFor(filter, presets)
   const look = useTrenchDisplay()
-  // Only the cards on screen are drawn (see useWindowed). A card slides in when it joins the list, not when it is
-  // merely scrolled back into view: `known` is the list as last drawn.
-  const win = useWindowed<HTMLDivElement>(display.length, 120, 3, JSON.stringify(look))
+  // Only the cards on (or near) the screen are drawn: each sits in an OnScreen box that keeps its own height, because
+  // cards differ in height. A card slides in when it joins the list, not when it is merely scrolled back into view:
+  // `known` is the list as last drawn.
   const known = useRef<Set<string> | null>(null)
   const wasKnown = known.current
   useEffect(() => {
@@ -134,13 +135,13 @@ function Column({ col, list: all, now, visible }: { col: (typeof COLS)[number]; 
           ⏸ Paused{waiting > 0 ? ` · ${waiting} new` : ''}
         </div>
       )}
-      <div ref={win.ref} className="min-h-0 flex-1 overflow-auto" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+      <div className="min-h-0 flex-1 overflow-auto" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
         {display.length ? (
-          <>
-            {win.padTop > 0 && <div aria-hidden style={{ height: win.padTop }} />}
-            {display.slice(win.start, win.end).map((t) => <Card key={t.id} t={t} now={now} col={col.id} fresh={!wasKnown || !wasKnown.has(t.id)} />)}
-            {win.padBottom > 0 && <div aria-hidden style={{ height: win.padBottom }} />}
-          </>
+          display.map((t, i) => (
+            <OnScreen key={t.id} estimate={CARD_HEIGHT} drawn={i < 12} className={!wasKnown || !wasKnown.has(t.id) ? 'slide-in' : undefined}>
+              <Card t={t} now={now} col={col.id} fresh={false} />
+            </OnScreen>
+          ))
         ) : (
           <EmptyState
             icon="🕳️"
@@ -186,7 +187,6 @@ export const Card = memo(function Card({ t, now, preview, col, fresh = true }: {
 
   return (
     <div
-      data-win
       onClick={preview ? undefined : () => select(t.id)}
       className={clsx('group relative border-b border-line/70 px-2.5 py-2 transition-colors', !preview && 'cursor-pointer hover:bg-panel2', !preview && slide && 'slide-in', (dead || hidden) && 'opacity-50')}
     >

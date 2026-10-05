@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { Boxes, ChefHat, ChevronDown, ChevronUp, Crosshair, Eye, Ghost, Star, UserRound, Users } from 'lucide-react'
 import { HideButton } from '../HideButton'
 import { useHidden } from '../../game/hidden'
-import { memo, useEffect, useRef, type ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { useGame } from '../../game/store'
 import { publicBundlePct } from '../../game/devTools'
 import { devPctOf, top10Of } from '../../game/ledger'
@@ -48,13 +48,41 @@ export function TokenTable({ tokens, tf, sortKey, sortDir, onSort, cursor }: Pro
   const held = useGame((s) => s.portfolio.positions)
   const compact = useGame((s) => s.settings.compact)
 
-  // Only the rows on screen are drawn (see useWindowed).
+  // Only the rows on screen are drawn (see useWindowed). Moving the keyboard cursor scrolls to its row, drawn or not;
+  // a row never scrolls itself into view, or the list would jump every time the highlighted row was drawn again.
   const win = useWindowed<HTMLDivElement>(tokens.length, compact ? 46 : 62)
   const { reveal } = win
   useEffect(() => {
     if (cursor >= 0) reveal(cursor)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor])
+
+  // The table sizes its columns from the rows that are drawn, so they would shift sideways as rows scroll in and out.
+  // So each column keeps the widest it has been, until the box is resized or the layout changes.
+  // - When the table fits its box, "Pair info" is left free to take up the slack, and if holding the others ever
+  //   pushes the table past the box they are let go and measured afresh.
+  // - When the box is narrower than the table's minimum (it scrolls sideways anyway), every column is held.
+  const headRef = useRef<HTMLTableRowElement>(null)
+  useLayoutEffect(() => {
+    const row = headRef.current
+    const table = row?.closest('table')
+    const box = table?.parentElement
+    if (!row || !table || !box) return
+    const cells = [...row.children] as HTMLElement[]
+    const fits = box.clientWidth >= (parseFloat(getComputedStyle(table).minWidth) || 0)
+    const key = `${box.clientWidth}|${compact}|${tf}`
+    if (row.dataset.widths !== key || (fits && table.offsetWidth > box.clientWidth + 1)) {
+      for (const c of cells) c.style.minWidth = c.style.width = ''
+      row.dataset.widths = key
+      return // measured afresh on the next draw
+    }
+    cells.forEach((c, i) => {
+      if (i < (fits ? 2 : 1)) return
+      const w = c.getBoundingClientRect().width
+      // Width as well as minimum: a column with a set width stays put, and spare room goes to the free column.
+      if (w > (parseFloat(c.style.minWidth) || 0) + 0.5) c.style.minWidth = c.style.width = `${w}px`
+    })
+  })
 
   if (!tokens.length) return <EmptyState icon="🔭" title="No tokens match" hint="Try another filter or clear the search" />
 
@@ -63,7 +91,7 @@ export function TokenTable({ tokens, tf, sortKey, sortDir, onSort, cursor }: Pro
     <div ref={win.ref} className="h-full overflow-auto">
       <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[12px] sm:min-w-[980px]">
         <thead className="sticky top-0 z-10 bg-panel">
-          <tr>
+          <tr ref={headRef}>
             <th className="sticky left-0 z-20 w-8 border-b border-line bg-panel" />
             {COLS.map((c) => (
               <th
@@ -107,7 +135,6 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
   const select = useGame((s) => s.select)
   const toggleWatch = useGame((s) => s.toggleWatch)
   const hidden = useHidden((s) => s.ids.includes(t.id))
-  const ref = useRef<HTMLTableRowElement>(null)
   const dead = t.status === 'rugged' || t.status === 'dead'
   const buys = winBuys(t, tf, now)
   const sells = winSells(t, tf, now)
@@ -121,13 +148,8 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
   const watchers = Math.round(t.hype * 0.6 + Math.sqrt(t.holders) * 2)
   const cell = clsx('border-b border-line/60 px-2', py)
 
-  useEffect(() => {
-    if (active) ref.current?.scrollIntoView({ block: 'nearest' })
-  }, [active])
-
   return (
     <tr
-      ref={ref}
       data-win
       onClick={() => select(t.id)}
       className={clsx('group cursor-pointer transition-colors', active ? 'bg-raise' : 'hover:bg-panel2', (dead || hidden) && 'opacity-55')}
