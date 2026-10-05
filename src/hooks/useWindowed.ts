@@ -7,9 +7,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
  *
  * Put `ref` on the scrolling box and `data-win` on each row. Only for rows that are all the same height (it is
  * measured once per box width and `estimate`); rows of different heights go in an OnScreen box each instead.
+ * When the scrolling box belongs to a parent component, pass the element as `box` instead of using `ref`.
  */
-export function useWindowed<T extends HTMLElement = HTMLDivElement>(count: number, estimate: number, overscan = 6) {
-  const [el, ref] = useState<T | null>(null) // the scrolling box (kept in state: it may appear after the first draw)
+export function useWindowed<T extends HTMLElement = HTMLDivElement>(count: number, estimate: number, overscan = 6, box?: T | null) {
+  const [own, ref] = useState<T | null>(null) // the scrolling box (kept in state: it may appear after the first draw)
+  const el = box !== undefined ? box : own
   const [rowH, setRowH] = useState(estimate)
   const [view, setView] = useState({ first: 0, rows: 40 }) // first row on screen, and how many fit
   const measured = useRef('') // what the height was last measured for

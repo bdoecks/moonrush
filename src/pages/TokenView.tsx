@@ -1,3 +1,4 @@
+import { LG, MD, useMediaQuery, useOnceTrue } from '../hooks/useMediaQuery'
 import clsx from 'clsx'
 import { fakeAddress } from '../utils/address'
 import { CHAINS, fmtNative } from '../data/chains'
@@ -7,7 +8,7 @@ import { PadBadge, PadTag } from '../components/pad'
 import { LAUNCHPADS } from '../data/launchpads'
 import { MARKER_KINDS, withMarkerDefaults, type MarkerKinds } from '../components/token/markers'
 import { ArrowLeft, BarChart3, CandlestickChart, Copy, Eye, Globe, LineChart, Magnet, Maximize2, Send, Share2, Star, Tags, AtSign, Users } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, useMemo } from 'react'
 import { FlowStats } from '../components/token/FlowStats'
 import { InstantTrade } from '../components/token/InstantTrade'
 import { PriceChart, type ScaleMode } from '../components/token/PriceChart'
@@ -111,7 +112,13 @@ export function TokenView() {
   }, [showMarkers, setShowMarkers])
   const [magnet, setMagnet] = usePersisted('chartMagnet', false)
   const [kindsRaw, setKinds] = usePersisted<MarkerKinds>('chartMarkerKinds', withMarkerDefaults({}))
-  const kinds = withMarkerDefaults(kindsRaw)
+  const kinds = useMemo(() => withMarkerDefaults(kindsRaw), [kindsRaw])
+  // Panels for one screen size are mounted when that size is first reached, then kept (see useOnceTrue).
+  const md = useMediaQuery(MD)
+  const lg = useMediaQuery(LG)
+  const showSide = useOnceTrue(md)
+  const showTablet = useOnceTrue(md && !lg)
+  const showPhone = useOnceTrue(!md)
   const tradesOpen = useTradePick((s) => s.open)
   const [fitSignal, setFitSignal] = useState(0)
   const [autoSignal, setAutoSignal] = useState(0)
@@ -158,7 +165,7 @@ export function TokenView() {
           <div className="min-w-0 flex-1 bg-grid">
             <PriceChart tokenId={t.id} ticker={t.ticker} tf={tf} style={chartStyle} unit={unit} scale={scale} showVolume={showVolume} showMarkers={showMarkers} markerKinds={kinds} magnet={magnet} fitSignal={fitSignal} autoSignal={autoSignal} />
           </div>
-          {tradesOpen && <TradesSide token={t} className="hidden w-[300px] shrink-0 md:flex" />}
+          {tradesOpen && showSide && <TradesSide token={t} className="hidden w-[300px] shrink-0 md:flex" />}
         </div>
 
         <div className="flex h-7 shrink-0 items-center gap-3 border-t border-line px-3 text-[11px]">
@@ -208,17 +215,21 @@ export function TokenView() {
       </ActivityPanel>
 
       {/* Tablet: inline flow + trade + audit (desktop uses the sidebar, mobile the bottom sheet) */}
-      <div className="hidden shrink-0 border-t border-line md:grid md:grid-cols-2 lg:hidden">
-        <div className="border-r border-line">
-          <FlowStats />
-          <TradePanel className="border-t border-line" />
+      {showTablet && (
+        <div className="hidden shrink-0 border-t border-line md:grid md:grid-cols-2 lg:hidden">
+          <div className="border-r border-line">
+            <FlowStats />
+            <TradePanel className="border-t border-line" />
+          </div>
+          <RiskPanel />
         </div>
-        <RiskPanel />
-      </div>
-      <div className="shrink-0 border-t border-line md:hidden">
-        <FlowStats />
-        <RiskPanel className="border-t border-line" />
-      </div>
+      )}
+      {showPhone && (
+        <div className="shrink-0 border-t border-line md:hidden">
+          <FlowStats />
+          <RiskPanel className="border-t border-line" />
+        </div>
+      )}
 
       {/* Mobile sticky actions */}
       <div className="sticky bottom-0 z-10 mt-auto grid grid-cols-2 gap-2 border-t border-line bg-panel/95 p-2 backdrop-blur md:hidden">
