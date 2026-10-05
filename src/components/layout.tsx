@@ -1,3 +1,4 @@
+import { LG, useMediaQuery } from '../hooks/useMediaQuery'
 import clsx from 'clsx'
 import { BarChart3, ChefHat, ChevronDown, Copy, Crosshair, Eye, Flame, Gift, LineChart, Maximize2, Minimize2, Radar, ChevronUp, Compass, Radio, Target, Trophy, Wallet, X } from 'lucide-react'
 import { SocialTracker } from './SocialTracker'
@@ -101,6 +102,10 @@ export function PnlButton({ className }: { className?: string }) {
 
 // ─── Right sidebar (desktop) ─────────────────────────────────────────────────
 export function Sidebar() {
+  // Mounted only at desktop width (below that it was hidden by CSS but still drawn every tick; the coin page has its
+  // own tablet and phone panels).
+  const lg = useMediaQuery(LG)
+  if (!lg) return null
   return (
     <aside className="hidden w-[320px] shrink-0 flex-col border-l border-line bg-panel lg:flex xl:w-[340px]">
       <div className="min-h-0 flex-1 overflow-y-auto">

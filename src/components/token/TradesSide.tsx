@@ -1,8 +1,9 @@
 import clsx from 'clsx'
 import { ArrowDownUp, Copy, Filter, X } from 'lucide-react'
-import { useState } from 'react'
+import { memo, useMemo, useState } from 'react'
+import { OnScreen } from '../OnScreen'
 import { CHAINS, fmtNative } from '../../data/chains'
-import { bookOf, displayAddress, gasUsd, rowOf, type HolderTag, type LedgerTrade } from '../../game/ledger'
+import { bookOf, displayAddress, gasUsd, rowOf, type Holder, type HolderTag, type LedgerTrade } from '../../game/ledger'
 import { SUPPLY } from '../../game/marketEngine'
 import { useGame } from '../../game/store'
 import { nativePrice } from '../../game/tradingEngine'
@@ -33,29 +34,45 @@ export function TradesSide({ token, className }: { token: Token; className?: str
   const [openId, setOpenId] = useState<number | null>(null)
   const book = bookOf(token, now)
   const coin = CHAINS[token.chain].native
-  const trackedNames = new Set(wallets.filter((w) => tracked.includes(w.id)).map((w) => w.name))
   const tagsOf = (tr: LedgerTrade) => book.holders.get(tr.wallet)?.tags ?? (tr.tag ? [tr.tag] : [])
-
-  const inCandle = book.log.filter((tr) => inPick(tr.time, pick))
-  const rows = inCandle.filter(
-    (tr) =>
-      (!wallet || tr.wallet === wallet) &&
-      (who === 'all' || (who === 'you' ? tr.wallet === 'YOU' : who === 'dev' ? tr.wallet === book.devWallet || tagsOf(tr).includes('dev') : trackedNames.has(tr.wallet) || !!tr.walletId && tracked.includes(tr.walletId))),
+  // The log is one array that grows at the front: "did it change" is its length and newest id. The lists below are
+  // rebuilt only then (or when a filter changes), not on every tick and every trade that trickles in.
+  const logVersion = `${book.log.length}:${book.log[0]?.id ?? ''}`
+  const trackedKey = who === 'tracked' ? tracked.join(',') : ''
+  const inCandle = useMemo(
+    () => (pick ? book.log.filter((tr) => inPick(tr.time, pick)) : book.log),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token.id, logVersion, pick],
   )
+  const { rows, total } = useMemo(() => {
+    const trackedNames = who === 'tracked' ? new Set(wallets.filter((w) => tracked.includes(w.id)).map((w) => w.name)) : null
+    const list = inCandle.filter(
+      (tr) =>
+        (!wallet || tr.wallet === wallet) &&
+        (who === 'all' || (who === 'you' ? tr.wallet === 'YOU' : who === 'dev' ? tr.wallet === book.devWallet || tagsOf(tr).includes('dev') : trackedNames!.has(tr.wallet) || !!tr.walletId && tracked.includes(tr.walletId))),
+    )
+    return { rows: list.length > 400 ? list.slice(0, 400) : list, total: list.length } // the newest 400 are listed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inCandle, logVersion, wallet, who, trackedKey])
   const live = useTrickle(rows) // new trades flow in across the second
-  // Candle summary (Axiom shows what happened inside the candle you clicked).
-  const buys = inCandle.filter((t) => t.side === 'buy')
-  const sells = inCandle.filter((t) => t.side === 'sell')
-  const buyUsd = buys.reduce((a, t) => a + t.usd, 0)
-  const sellUsd = sells.reduce((a, t) => a + t.usd, 0)
-  const makers = new Set(inCandle.map((t) => t.wallet)).size
+  // Candle summary (Axiom shows what happened inside the candle you clicked): only worked out when a candle is picked.
+  const summary = useMemo(() => {
+    if (!pick) return null
+    let buys = 0, sells = 0, buyUsd = 0, sellUsd = 0
+    const makers = new Set<string>()
+    for (const t of inCandle) {
+      if (t.side === 'buy') { buys++; buyUsd += t.usd } else { sells++; sellUsd += t.usd }
+      makers.add(t.wallet)
+    }
+    return { buys, sells, buyUsd, sellUsd, makers: makers.size }
+  }, [inCandle, pick])
   const money = (usd: number) => (inNative ? fmtNative(usd / nativeUsd, token.chain, false) : fmtUsd(usd, usd < 10 ? 2 : 0))
 
   return (
     <aside className={clsx('flex min-h-0 flex-col border-l border-line bg-panel', className)} aria-label="Trades">
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-2">
         <span className="text-[12px] font-bold">Trades</span>
-        <span className="num text-[10px] text-dim">{rows.length}</span>
+        <span className="num text-[10px] text-dim">{total}</span>
         <button onClick={() => setInNative((v) => !v)} className="ml-auto flex items-center gap-0.5 rounded px-1 text-[10px] font-semibold text-muted hover:text-ink" title={`Show amounts in USD or ${coin}`}>{inNative ? coin : 'USD'} <ArrowDownUp size={9} /></button>
         <button onClick={() => close(false)} className="rounded p-0.5 text-dim hover:text-ink" aria-label="Close trades panel" title="Close"><X size={13} /></button>
       </div>
@@ -73,7 +90,7 @@ export function TradesSide({ token, className }: { token: Token; className?: str
         )}
       </div>
 
-      {pick && (
+      {pick && summary && (
         <div className="shrink-0 border-b border-accent/30 bg-accent/5 px-2 py-1.5 text-[10px]">
           <div className="flex items-center gap-1">
             <span className="font-bold text-accent">🕯 Candle {fmtTime(pick.from)}</span>
@@ -81,9 +98,9 @@ export function TradesSide({ token, className }: { token: Token; className?: str
             <button onClick={() => setPick(null)} className="ml-auto flex items-center gap-0.5 rounded px-1 text-muted hover:text-ink" title="Show all trades again"><X size={10} /> Clear</button>
           </div>
           <div className="num mt-0.5 grid grid-cols-3 gap-1">
-            <span><span className="text-up">{buys.length} buys</span> {money(buyUsd)}</span>
-            <span><span className="text-down">{sells.length} sells</span> {money(sellUsd)}</span>
-            <span className="text-right">net <span className={toneClass(buyUsd - sellUsd)}>{buyUsd - sellUsd >= 0 ? '+' : '-'}{money(Math.abs(buyUsd - sellUsd))}</span> · {makers} wallets</span>
+            <span><span className="text-up">{summary.buys} buys</span> {money(summary.buyUsd)}</span>
+            <span><span className="text-down">{summary.sells} sells</span> {money(summary.sellUsd)}</span>
+            <span className="text-right">net <span className={toneClass(summary.buyUsd - summary.sellUsd)}>{summary.buyUsd - summary.sellUsd >= 0 ? '+' : '-'}{money(Math.abs(summary.buyUsd - summary.sellUsd))}</span> · {summary.makers} wallets</span>
           </div>
         </div>
       )}
@@ -98,48 +115,25 @@ export function TradesSide({ token, className }: { token: Token; className?: str
         {!rows.length ? (
           <div className="px-3 py-6 text-center text-[11px] text-dim">{pick ? 'No trades in this candle' : 'No trades yet'}{pick && <div><button onClick={() => setPick(null)} className="mt-1 text-accent underline">Show all trades</button></div>}</div>
         ) : (
-          live.slice(0, 400).map((tr) => {
-            const buy = tr.side === 'buy'
-            const tags = tagsOf(tr)
+          live.map((tr, i) => {
             const open = openId === tr.id
-            const h = book.holders.get(tr.wallet)
-            const hr = h ? rowOf(h, token.price) : null
+            const h = open ? book.holders.get(tr.wallet) : undefined
             return (
-              <div key={tr.id} className={clsx('border-b border-line/20', tr.wallet === 'YOU' && 'bg-accent/5')}>
-                <button onClick={() => setOpenId(open ? null : tr.id)} className="grid w-full grid-cols-[42px_1fr_1fr_1.25fr] items-center gap-1 px-2 py-1 text-left text-[11px] hover:bg-panel2/70">
-                  <span className="num text-dim">{clock ? fmtTime(tr.time).slice(-8) : fmtAge(Math.max(0, now - tr.time))}</span>
-                  <span className="num text-right text-muted">{fmtCompact(tr.price * SUPPLY)}</span>
-                  <span className={clsx('num text-right font-semibold', buy ? 'text-up' : 'text-down')}>{money(tr.usd)}</span>
-                  <span className="flex min-w-0 items-center gap-0.5 pl-2">
-                    {tags.slice(0, 2).map((k) => TAG_ICON[k] && <span key={k} className="text-[10px]">{TAG_ICON[k]}</span>)}
-                    <span className={clsx('num truncate', tr.wallet === 'YOU' ? 'font-semibold text-accent' : 'text-muted')}>{displayAddress(tr.wallet, token.chain)}</span>
-                  </span>
-                </button>
-                {open && (
-                  <div className="space-y-0.5 bg-bg/60 px-2 py-1.5 text-[10px]">
-                    <Line label="Type"><span className={buy ? 'text-up' : 'text-down'}>{buy ? 'Buy' : 'Sell'}</span> · {fmtTime(tr.time)}</Line>
-                    <Line label="Amount">{fmtUsd(tr.usd, 2)} · {fmtNative(tr.usd / nativeUsd, token.chain)}</Line>
-                    <Line label={`$${token.ticker}`}>{fmtNum(tr.qty)} ({((tr.qty / SUPPLY) * 100).toFixed(3)}% of supply)</Line>
-                    <Line label="Price / MC">{fmtUsd(tr.price, 10)} · {fmtCompact(tr.price * SUPPLY)}</Line>
-                    <Line label="Gas">{fmtUsd(gasUsd(tr, token.chain), 3)}</Line>
-                    <Line label="Wallet">
-                      <span className="num">{displayAddress(tr.wallet, token.chain)}</span>
-                      {tr.wallet !== 'YOU' && (
-                        <button onClick={() => navigator.clipboard?.writeText(displayAddress(tr.wallet, token.chain)).catch(() => {})} className="ml-1 text-dim hover:text-ink" title="Copy wallet"><Copy size={9} /></button>
-                      )}
-                    </Line>
-                    {h && hr && (
-                      <>
-                        <Line label="Wallet on this coin"><span className="text-up">{h.buys}B</span>/<span className="text-down">{h.sells}S</span> · first seen {fmtAge(Math.max(0, now - h.first))} ago</Line>
-                        <Line label="Wallet PnL"><span className={toneClass(hr.pnl)}>{hr.pnl >= 0 ? '+' : '-'}{fmtUsd(Math.abs(hr.pnl))}</span></Line>
-                      </>
-                    )}
-                    {!wallet && tr.wallet !== 'YOU' && (
-                      <button onClick={() => setWallet(tr.wallet)} className="mt-0.5 flex items-center gap-1 text-accent hover:underline"><Filter size={9} /> Only this wallet's trades</button>
-                    )}
-                  </div>
-                )}
-              </div>
+              // Only rows on (or near) the screen are drawn; an opened row is taller, so each keeps its own height.
+              <OnScreen key={tr.id} estimate={25} drawn={i < 40}>
+                <SideRow
+                  tr={tr}
+                  chain={token.chain}
+                  ticker={token.ticker}
+                  when={clock ? fmtTime(tr.time).slice(-8) : fmtAge(Math.max(0, now - tr.time))}
+                  amount={money(tr.usd)}
+                  tags={tagsOf(tr).slice(0, 2).join(',')}
+                  open={open}
+                  onToggle={setOpenId}
+                  // The details change every tick (price, ages): only the one open row is given them.
+                  detail={open ? { nativeUsd, now, h, pnl: h ? rowOf(h, token.price).pnl : 0, canFilter: !wallet, onFilter: setWallet } : undefined}
+                />
+              </OnScreen>
             )
           })
         )}
@@ -148,6 +142,50 @@ export function TradesSide({ token, className }: { token: Token; className?: str
     </aside>
   )
 }
+
+interface SideDetail { nativeUsd: number; now: number; h: Holder | undefined; pnl: number; canFilter: boolean; onFilter: (w: string) => void }
+/** One trade in the side panel. Plain text props, so it redraws only when what it shows changes. */
+const SideRow = memo(function SideRow({ tr, chain, ticker, when, amount, tags, open, onToggle, detail }: { tr: LedgerTrade; chain: Token['chain']; ticker: string; when: string; amount: string; tags: string; open: boolean; onToggle: (id: number | null) => void; detail?: SideDetail }) {
+  const buy = tr.side === 'buy'
+  const h = detail?.h
+  return (
+    <div className={clsx('border-b border-line/20', tr.wallet === 'YOU' && 'bg-accent/5')}>
+      <button onClick={() => onToggle(open ? null : tr.id)} className="grid w-full grid-cols-[42px_1fr_1fr_1.25fr] items-center gap-1 px-2 py-1 text-left text-[11px] hover:bg-panel2/70">
+        <span className="num text-dim">{when}</span>
+        <span className="num text-right text-muted">{fmtCompact(tr.price * SUPPLY)}</span>
+        <span className={clsx('num text-right font-semibold', buy ? 'text-up' : 'text-down')}>{amount}</span>
+        <span className="flex min-w-0 items-center gap-0.5 pl-2">
+          {(tags ? (tags.split(',') as HolderTag[]) : []).map((k) => TAG_ICON[k] && <span key={k} className="text-[10px]">{TAG_ICON[k]}</span>)}
+          <span className={clsx('num truncate', tr.wallet === 'YOU' ? 'font-semibold text-accent' : 'text-muted')}>{displayAddress(tr.wallet, chain)}</span>
+        </span>
+      </button>
+      {open && detail && (
+        <div className="space-y-0.5 bg-bg/60 px-2 py-1.5 text-[10px]">
+          <Line label="Type"><span className={buy ? 'text-up' : 'text-down'}>{buy ? 'Buy' : 'Sell'}</span> · {fmtTime(tr.time)}</Line>
+          <Line label="Amount">{fmtUsd(tr.usd, 2)} · {fmtNative(tr.usd / detail.nativeUsd, chain)}</Line>
+          <Line label={`$${ticker}`}>{fmtNum(tr.qty)} ({((tr.qty / SUPPLY) * 100).toFixed(3)}% of supply)</Line>
+          <Line label="Price / MC">{fmtUsd(tr.price, 10)} · {fmtCompact(tr.price * SUPPLY)}</Line>
+          <Line label="Gas">{fmtUsd(gasUsd(tr, chain), 3)}</Line>
+          <Line label="Wallet">
+            <span className="num">{displayAddress(tr.wallet, chain)}</span>
+            {tr.wallet !== 'YOU' && (
+              <button onClick={() => navigator.clipboard?.writeText(displayAddress(tr.wallet, chain)).catch(() => {})} className="ml-1 text-dim hover:text-ink" title="Copy wallet"><Copy size={9} /></button>
+            )}
+          </Line>
+          {h && (
+            <>
+              <Line label="Wallet on this coin"><span className="text-up">{h.buys}B</span>/<span className="text-down">{h.sells}S</span> · first seen {fmtAge(Math.max(0, detail.now - h.first))} ago</Line>
+              <Line label="Wallet PnL"><span className={toneClass(detail.pnl)}>{detail.pnl >= 0 ? '+' : '-'}{fmtUsd(Math.abs(detail.pnl))}</span></Line>
+            </>
+          )}
+          {detail.canFilter && tr.wallet !== 'YOU' && (
+            <button onClick={() => detail.onFilter(tr.wallet)} className="mt-0.5 flex items-center gap-1 text-accent hover:underline"><Filter size={9} /> Only this wallet's trades</button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+})
 
 function Line({ label, children }: { label: string; children: React.ReactNode }) {
   return (

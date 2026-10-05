@@ -28,6 +28,13 @@ const clampPos = (p: { x: number; y: number }) => ({
 /** Floating one-click trade panel (GMGN / Axiom style): preset buys in the chain coin or USD, sells by %, coin or USD. */
 export function InstantTrade() {
   const open = useGame((s) => s.instantOpen)
+  const hasCoin = useGame((s) => !!s.selectedId)
+  // Closed (the default) or no coin picked: nothing is mounted, so nothing is worked out each tick.
+  return open && hasCoin ? <InstantTradePanel /> : null
+}
+
+function InstantTradePanel() {
+  const open = useGame((s) => s.instantOpen)
   const toggle = useGame((s) => s.toggleInstant)
   const t = useSelectedToken()
   const settings = useGame((s) => s.settings)

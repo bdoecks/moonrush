@@ -3,10 +3,11 @@ import { ArrowDownUp, Bell, Eye, Filter, List as ListIcon, X, Zap } from 'lucide
 import { inPick, pickFor, useTradePick } from './tradePick'
 import { useTrickle } from '../../hooks/useTrickle'
 import { addrKey, playerKey, useFriends } from '../../net/friends'
-import { useMemo, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useWindowed } from '../../hooks/useWindowed'
 import { CHAINS, fmtNative } from '../../data/chains'
 import { LAUNCHPADS } from '../../data/launchpads'
-import { bookOf, devHistory, devPctOf, displayAddress, gasUsd, rowOf, top10Of, walletMeta, type Holder, type HolderRow, type HolderTag } from '../../game/ledger'
+import { bookOf, devHistory, devPctOf, displayAddress, gasUsd, rowOf, top10Of, walletMeta, type Holder, type HolderRow, type HolderTag, type LedgerTrade } from '../../game/ledger'
 import { SUPPLY } from '../../game/marketEngine'
 import { useGame } from '../../game/store'
 import { nativePrice } from '../../game/tradingEngine'
@@ -37,16 +38,19 @@ const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '-' : ''}${fmtUsd(Math.ab
 
 export function TradesTape({ token }: { token: Token }) {
   const now = useGame((s) => s.market.time)
-  const portfolio = useGame((s) => s.portfolio)
+  const mineCount = useGame((s) => (s.portfolio.accounts ?? []).reduce((n, a) => n + ((a.positions[token.id]?.qty ?? 0) > 0 ? 1 : 0), 0))
   const instantOpen = useGame((s) => s.instantOpen)
+  // The tabs' rows scroll inside this box; the tabs that draw only their visible rows need to know it.
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   const toggleInstant = useGame((s) => s.toggleInstant)
   const tradesOpen = useTradePick((s) => s.open)
   const toggleTrades = useTradePick((s) => s.toggle)
   const [tab, setTab] = useState<Tab>('trades')
   const [walletFilter, setWalletFilter] = useState<string | null>(null)
   const book = bookOf(token, now)
-  const mineCount = (portfolio.accounts ?? []).filter((a) => (a.positions[token.id]?.qty ?? 0) > 0).length
-  const holderCount = Math.max(token.holders, [...book.holders.values()].filter((h) => h.boughtQty - h.soldQty > 1).length)
+  let holding = 0
+  for (const h of book.holders.values()) if (h.boughtQty - h.soldQty > 1) holding++
+  const holderCount = Math.max(token.holders, holding)
 
   const filterWallet = (w: string) => {
     setWalletFilter(w)
@@ -94,8 +98,8 @@ export function TradesTape({ token }: { token: Token }) {
           <Zap size={11} fill="currentColor" /> Instant trade
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {tab === 'trades' && <TradesTab token={token} walletFilter={walletFilter} setWalletFilter={setWalletFilter} />}
+      <div ref={setScroller} className="min-h-0 flex-1 overflow-auto">
+        {tab === 'trades' && <TradesTab token={token} walletFilter={walletFilter} setWalletFilter={setWalletFilter} scroller={scroller} />}
         {tab === 'positions' && <PositionsTab token={token} />}
         {tab === 'holders' && <HoldersTab token={token} onFilter={filterWallet} />}
         {tab === 'traders' && <TopTradersTab token={token} onFilter={filterWallet} />}
@@ -185,7 +189,31 @@ function WalletCell({ h, chain, onFilter, walletCount, player }: { h: Pick<Holde
 type SideFilter = 'all' | 'buy' | 'sell'
 const TRADE_TAGS: HolderTag[] = ['dev', 'whale', 'smart', 'kol', 'sniper']
 
-function TradesTab({ token, walletFilter, setWalletFilter }: { token: Token; walletFilter: string | null; setWalletFilter: (w: string | null) => void }) {
+/** One trade in the tape. Its props are plain text and numbers, so a row only redraws when what it shows changes. */
+const TradeRow = memo(function TradeRow({ tr, h, walletCount, chain, when, total, gas, onFilter, fresh }: { tr: LedgerTrade; h: Holder | undefined; walletCount: number | undefined; chain: Token['chain']; when: string; total: string; gas: string; onFilter?: (w: string) => void; fresh: boolean }) {
+  const [slide] = useState(fresh) // slides in when it arrives, not when it is scrolled back into view
+  const buy = tr.side === 'buy'
+  // Size bar behind the total: log scale, $1 → 0%, $100K → 100%.
+  const bar = Math.min(100, Math.max(4, (Math.log10(Math.max(1, tr.usd)) / 5) * 100))
+  return (
+    <tr data-win className={clsx(row, slide && 'slide-in', tr.wallet === 'YOU' && 'bg-accent/5')}>
+      <td className={clsx(td, 'num text-muted')}>{when}</td>
+      <td className={clsx(td, 'font-semibold', buy ? 'text-up' : 'text-down')}>{buy ? 'Buy' : 'Sell'}</td>
+      <td className={clsx(td, 'num text-right text-ink')}>{fmtCompact(tr.price * SUPPLY)}</td>
+      <td className={clsx(td, 'num text-right text-muted')}>{fmtNum(tr.qty)}</td>
+      <td className={clsx(td, 'relative num text-right', buy ? 'text-up' : 'text-down', tr.usd >= 1000 && 'font-bold')}>
+        <span className={clsx('absolute inset-y-1 right-0', buy ? 'bg-up/12' : 'bg-down/12')} style={{ width: `${bar}%` }} />
+        <span className="relative">{total}</span>
+      </td>
+      <td className={clsx(td, 'num text-right text-dim')}>{gas}</td>
+      <td className={clsx(td, 'pl-5')}>
+        <WalletCell h={h ?? { wallet: tr.wallet, tags: tr.tag ? [tr.tag] : [], walletId: tr.walletId }} chain={chain} walletCount={walletCount} onFilter={onFilter} player={tr.pid || tr.addr ? { pid: tr.pid, addr: tr.addr } : undefined} />
+      </td>
+    </tr>
+  )
+})
+
+function TradesTab({ token, walletFilter, setWalletFilter, scroller }: { token: Token; walletFilter: string | null; setWalletFilter: (w: string | null) => void; scroller: HTMLDivElement | null }) {
   const now = useGame((s) => s.market.time)
   const nativeUsd = useGame((s) => nativePrice(s.market, token.chain))
   const [side, setSide] = useState<SideFilter>('all')
@@ -197,16 +225,33 @@ function TradesTab({ token, walletFilter, setWalletFilter }: { token: Token; wal
   const coin = CHAINS[token.chain].native
   const pick = useTradePick((s) => pickFor(s.pick, token.id))
   const setPick = useTradePick((s) => s.setPick)
-  const rows = book.log.filter(
-    (t) =>
-      inPick(t.time, pick) &&
-      (side === 'all' || t.side === side) &&
-      t.usd >= minUsd &&
-      (!walletFilter || t.wallet === walletFilter) &&
-      (!tag || (tag === 'you' ? t.wallet === 'YOU' : t.tag === tag || book.holders.get(t.wallet)?.tags.includes(tag))),
+  // The log is one array that grows at the front, so "did it change" is its length and newest id, not its identity.
+  // Filtering only then keeps the list (and the trickle below) still on ticks with no new trade.
+  const logVersion = `${book.log.length}:${book.log[0]?.id ?? ''}`
+  const rows = useMemo(
+    () => book.log.filter(
+      (t) =>
+        inPick(t.time, pick) &&
+        (side === 'all' || t.side === side) &&
+        t.usd >= minUsd &&
+        (!walletFilter || t.wallet === walletFilter) &&
+        (!tag || (tag === 'you' ? t.wallet === 'YOU' : t.tag === tag || book.holders.get(t.wallet)?.tags.includes(tag))),
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token.id, logVersion, pick, side, minUsd, walletFilter, tag],
   )
   const filtered = walletFilter ? book.holders.get(walletFilter) : undefined
   const live = useTrickle(rows) // new trades flow in across the second, like Axiom's live feed
+  // Only the rows on screen are drawn: the log holds up to 2,000 trades and this tab redraws for every one that
+  // trickles in. Rows are all the same height.
+  const win = useWindowed<HTMLDivElement>(live.length, 36, 8, scroller)
+  // A row slides in when it has just arrived: it is near the top and was not there at the last draw.
+  const known = useRef<Set<number | string> | null>(null)
+  const wasKnown = known.current
+  useEffect(() => {
+    known.current = new Set(live.slice(0, 80).map((t) => t.id))
+  })
+  const onFilter = walletFilter ? undefined : setWalletFilter
   return (
     <>
       <Toolbar>
@@ -262,28 +307,25 @@ function TradesTab({ token, walletFilter, setWalletFilter }: { token: Token; wal
             </tr>
           </thead>
           <tbody>
-            {live.map((tr) => {
-              const buy = tr.side === 'buy'
+            {win.padTop > 0 && <tr aria-hidden style={{ height: win.padTop }}><td colSpan={7} /></tr>}
+            {live.slice(win.start, win.end).map((tr, k) => {
               const h = book.holders.get(tr.wallet)
-              // Size bar behind the total: log scale, $1 → 0%, $100K → 100%.
-              const bar = Math.min(100, Math.max(4, (Math.log10(Math.max(1, tr.usd)) / 5) * 100))
               return (
-                <tr key={tr.id} className={clsx(row, 'slide-in', tr.wallet === 'YOU' && 'bg-accent/5')}>
-                  <td className={clsx(td, 'num text-muted')}>{clock ? fmtTime(tr.time) : fmtAge(now - tr.time)}</td>
-                  <td className={clsx(td, 'font-semibold', buy ? 'text-up' : 'text-down')}>{buy ? 'Buy' : 'Sell'}</td>
-                  <td className={clsx(td, 'num text-right text-ink')}>{fmtCompact(tr.price * SUPPLY)}</td>
-                  <td className={clsx(td, 'num text-right text-muted')}>{fmtNum(tr.qty)}</td>
-                  <td className={clsx(td, 'relative num text-right', buy ? 'text-up' : 'text-down', tr.usd >= 1000 && 'font-bold')}>
-                    <span className={clsx('absolute inset-y-1 right-0', buy ? 'bg-up/12' : 'bg-down/12')} style={{ width: `${bar}%` }} />
-                    <span className="relative">{inNative ? fmtNative(tr.usd / nativeUsd, token.chain, false) : fmtUsd(tr.usd, tr.usd < 10 ? 3 : 2)}</span>
-                  </td>
-                  <td className={clsx(td, 'num text-right text-dim')}>{fmtUsd(gasUsd(tr, token.chain), 3)}</td>
-                  <td className={clsx(td, 'pl-5')}>
-                    <WalletCell h={h ?? { wallet: tr.wallet, tags: tr.tag ? [tr.tag] : [], walletId: tr.walletId }} chain={token.chain} walletCount={h ? h.buys + h.sells : undefined} onFilter={walletFilter ? undefined : setWalletFilter} player={tr.pid || tr.addr ? { pid: tr.pid, addr: tr.addr } : undefined} />
-                  </td>
-                </tr>
+                <TradeRow
+                  key={tr.id}
+                  tr={tr}
+                  h={h}
+                  walletCount={h ? h.buys + h.sells : undefined}
+                  chain={token.chain}
+                  when={clock ? fmtTime(tr.time) : fmtAge(now - tr.time)}
+                  total={inNative ? fmtNative(tr.usd / nativeUsd, token.chain, false) : fmtUsd(tr.usd, tr.usd < 10 ? 3 : 2)}
+                  gas={fmtUsd(gasUsd(tr, token.chain), 3)}
+                  onFilter={onFilter}
+                  fresh={!!wasKnown && win.start + k < 80 && !wasKnown.has(tr.id)}
+                />
               )
             })}
+            {win.padBottom > 0 && <tr aria-hidden style={{ height: win.padBottom }}><td colSpan={7} /></tr>}
           </tbody>
         </table>
       )}

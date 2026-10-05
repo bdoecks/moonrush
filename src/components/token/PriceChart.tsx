@@ -1,3 +1,4 @@
+import { tokenMapOf } from '../../hooks/useDerived'
 import clsx from 'clsx'
 import {
   AreaSeries,
@@ -84,9 +85,9 @@ export function PriceChart(o: ChartOptions) {
   const tick = useGame((s) => s.market.tick)
   const trades = useGame((s) => s.portfolio.trades)
   const accent = useGame((s) => s.settings.accent)
-  const ath = useGame((s) => s.market.tokens.find((t) => t.id === tokenId)?.ath ?? 0)
-  const devTrades = useGame((s) => s.market.tokens.find((t) => t.id === tokenId)?.devTrades)
-  const creatorIsYou = useGame((s) => s.market.tokens.find((t) => t.id === tokenId)?.creator === 'you')
+  const ath = useGame((s) => tokenMapOf(s.market.tokens).get(tokenId)?.ath ?? 0)
+  const devTrades = useGame((s) => tokenMapOf(s.market.tokens).get(tokenId)?.devTrades)
+  const creatorIsYou = useGame((s) => tokenMapOf(s.market.tokens).get(tokenId)?.creator === 'you')
   const wallets = useGame((s) => s.wallets)
   const tracked = useGame((s) => s.trackedWallets)
   const markerStyle = useGame((s) => s.settings.markerStyle ?? 'avatars')
@@ -272,12 +273,12 @@ export function PriceChart(o: ChartOptions) {
   // Migration target: the market cap where the bonding curve completes and the coin moves to its DEX. Shown while
   // the coin is still bonding; it follows the chain coin's price, since the curve is priced in SOL / BNB / ETH.
   const migMcap = useGame((s) => {
-    const t = s.market.tokens.find((x) => x.id === tokenId)
+    const t = tokenMapOf(s.market.tokens).get(tokenId)
     const nu = t ? s.market.native?.[t.chain]?.price ?? 0 : 0
     return t && t.status === 'bonding' && nu ? Math.round(gradMcapUsd(t.pad, nu)) : 0
   })
   const migDex = useGame((s) => {
-    const pad = s.market.tokens.find((x) => x.id === tokenId)?.pad
+    const pad = tokenMapOf(s.market.tokens).get(tokenId)?.pad
     return (pad && LAUNCHPADS[pad]?.dex) || 'DEX'
   })
   useEffect(() => {
@@ -330,7 +331,7 @@ export function PriceChart(o: ChartOptions) {
   // it, red while you're under. Shown with the "My trades" markers.
   const showEntry = showMarkers && markerKinds.me && !!avgEntry
   const inProfit = useGame((s) => {
-    const t = s.market.tokens.find((x) => x.id === tokenId)
+    const t = tokenMapOf(s.market.tokens).get(tokenId)
     return !!t && !!avgEntry && t.price >= avgEntry
   })
   useEffect(() => {
@@ -380,9 +381,18 @@ export function PriceChart(o: ChartOptions) {
         const from = prev.close
         const start = performance.now()
         const ms = 800
+        let drawnY: number | null = null // where on the screen the candle's close was last drawn
         const step = (now: number) => {
           const e = 1 - Math.pow(1 - Math.min(1, (now - start) / ms), 3)
           const close = from + (last.close - from) * e
+          // Every update repaints the whole chart, and the glide slows to moves far too small to see: it is only
+          // redrawn when the candle would land on a different pixel (the last step always lands on the real price).
+          const y = e < 1 ? main.current?.priceToCoordinate(close * k) ?? null : null
+          if (e < 1 && y !== null && drawnY !== null && Math.abs(y - drawnY) < 0.5) {
+            glide.current.raf = requestAnimationFrame(step)
+            return
+          }
+          drawnY = y
           const bar = { ...last, close, high: Math.max(prev.high, close, last.open), low: Math.min(prev.low, close, last.open) }
           try {
             put(e >= 1 ? last : bar)
@@ -401,7 +411,11 @@ export function PriceChart(o: ChartOptions) {
       /* out-of-order update after a reload — the next rebuild fixes it */
     }
     lastTime.current = data[data.length - 1].time
-    if (!hovering.current) setLegend(lastLegend())
+    if (!hovering.current) {
+      const next = lastLegend()
+      // Same numbers as before: keep the old object, so a tick with no new candle data doesn't redraw the chart frame.
+      setLegend((cur) => (cur && next && cur.o === next.o && cur.h === next.h && cur.l === next.l && cur.c === next.c && cur.v === next.v ? cur : next))
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick, trades.length])
 
