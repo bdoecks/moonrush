@@ -1,3 +1,4 @@
+import { fmtUpTo } from '../utils/format'
 import type { Chain } from '../types'
 
 // Chains are flavour for the simulation: native coin prices here are simulated, not live market data.
@@ -37,6 +38,6 @@ export function fmtNative(amount: number, chain: Chain, withUnit = true) {
   const c = CHAINS[chain]
   const a = Math.abs(amount)
   const digits = a >= 1000 ? 0 : a >= 100 ? 1 : a >= 1 ? 2 : c.decimals
-  const s = amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: digits })
+  const s = fmtUpTo(amount, digits)
   return withUnit ? `${s} ${c.native}` : s
 }

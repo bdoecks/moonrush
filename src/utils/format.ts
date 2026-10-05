@@ -1,8 +1,26 @@
 const SUB = '₀₁₂₃₄₅₆₇₈₉'
 
+// Number and time formatters are built once and reused. `toLocaleString` builds a new one inside the browser on every
+// call (20-70 microseconds each), and these run hundreds of times a tick. The text they produce is exactly the same.
+const fixedFmt = new Map<number, Intl.NumberFormat>()
+const fixed = (digits: number) => {
+  let f = fixedFmt.get(digits)
+  if (!f) fixedFmt.set(digits, (f = new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })))
+  return f
+}
+const upToFmt = new Map<number, Intl.NumberFormat>()
+/** `n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: digits })`, without building a formatter each time. */
+export const fmtUpTo = (n: number, digits: number) => {
+  let f = upToFmt.get(digits)
+  if (!f) upToFmt.set(digits, (f = new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: digits })))
+  return f.format(n)
+}
+const wholeFmt = new Intl.NumberFormat('en-US')
+const timeFmt = new Intl.DateTimeFormat('en-US', { hour12: false, hour: 'numeric', minute: 'numeric', second: 'numeric' })
+
 export function fmtUsd(v: number, digits = 2): string {
   const sign = v < 0 ? '-' : ''
-  return `${sign}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+  return `${sign}$${fixed(digits).format(Math.abs(v))}`
 }
 
 export function fmtCompact(v: number, prefix = '$'): string {
@@ -22,7 +40,7 @@ export function fmtNum(v: number): string {
   if (a >= 1e9) return `${(v / 1e9).toFixed(2)}B`
   if (a >= 1e6) return `${(v / 1e6).toFixed(2)}M`
   if (a >= 1e4) return `${(v / 1e3).toFixed(1)}K`
-  return Math.round(v).toLocaleString('en-US')
+  return wholeFmt.format(Math.round(v))
 }
 
 /** Memecoin-style price: 0.0₄5123 for very small numbers. */
@@ -65,8 +83,7 @@ export function fmtClock(sec: number): string {
 }
 
 export function fmtTime(simSec: number): string {
-  const d = new Date(simSec * 1000)
-  return d.toLocaleTimeString('en-US', { hour12: false })
+  return timeFmt.format(new Date(simSec * 1000))
 }
 
 export const toneClass = (v: number) => (v > 0 ? 'text-up' : v < 0 ? 'text-down' : 'text-muted')
