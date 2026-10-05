@@ -38,6 +38,7 @@ const SLOW_FIELD_TICKS = 5
 const SLOW_FIELDS = new Set(['win', 'change', 'momentum', 'momentumScore', 'volMark', 'volume', 'buys', 'sells', 'creatorFees', 'feesPaid', 'holders', 'devTrades'])
 /** A steady number per id, to give every coin and wallet its own turn. */
 const turnOf = (id: string) => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return h }
+const WORLD_PLAYERS_TICKS = 5 // World: the player list is broadcast at most this often (seconds)
 const WORLD_TRADES_KEPT = 300 // World wallets live forever: keep their recent trade history only
 const BOT_TRADES_KEPT = 20 // bots: nobody reads their own wallet's history (their public wallet shows their trades), and 100 × 300 trades is most of the save
 const WORLD_DEAD_COIN_SEC = 3600 // World: dead player-cooked coins leave the market after an hour
@@ -980,7 +981,10 @@ export class Room {
       this.broadcast(msg)
       this.broadcast({ t: 'round', round: this.round })
     } else this.broadcast(msg)
-    if (this.playersDirty) this.broadcastPlayers()
+    // The player list goes to everyone, so its cost grows with the square of the players. In the World, where every
+    // browser reports its status every 2 s, it was re-sent after almost every tick (45% of all data at 200 players):
+    // there it goes out every few seconds instead. Joining and leaving still send it at once.
+    if (this.playersDirty && (!this.world || this.market.tick % WORLD_PLAYERS_TICKS === 0)) this.broadcastPlayers()
   }
 
   // ─── Wire formats ──────────────────────────────────────────────────────────
@@ -1735,7 +1739,8 @@ export class Room {
   }
 
   private broadcast(msg: ServerMsg) {
-    const data = JSON.stringify(msg)
-    for (const m of this.members.values()) if (m.ws && m.ws.readyState === 1) m.ws.send(data)
+    // Turned into bytes once for everybody (as a string, every socket would encode it again). Still a text message.
+    const data = Buffer.from(JSON.stringify(msg))
+    for (const m of this.members.values()) if (m.ws && m.ws.readyState === 1) m.ws.send(data, { binary: false })
   }
 }

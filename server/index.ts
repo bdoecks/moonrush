@@ -211,7 +211,11 @@ const http = createServer((req, res) => {
   res.end(`<body style="font:14px system-ui;background:#07080a;color:#e7e9ee;padding:24px"><h2>MOONRUSH multiplayer server</h2><p>${rooms.size} room(s) open. Play through the game (npm run dev) and pick "Play with friends".</p></body>`)
 })
 
-const wss = new WebSocketServer({ server: http, path: MP_PATH, perMessageDeflate: { threshold: 1024 }, maxPayload: 2 * 1024 * 1024 })
+// Every message is compressed separately for each connected browser, and with a World tick near 100 KB that was the
+// server's biggest cost per player. Level 1 (fastest) does most of the squeezing for a fraction of the processor
+// time: measured with scripts/load-test.ts. WS_DEFLATE_LEVEL overrides it (the load test uses it to compare).
+const DEFLATE_LEVEL = Math.min(9, Math.max(1, Number(process.env.WS_DEFLATE_LEVEL) || 1))
+const wss = new WebSocketServer({ server: http, path: MP_PATH, perMessageDeflate: { threshold: 1024, zlibDeflateOptions: { level: DEFLATE_LEVEL } }, maxPayload: 2 * 1024 * 1024 })
 
 wss.on('connection', (ws: WebSocket) => {
   let room: Room | null = null
