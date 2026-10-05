@@ -1,0 +1,69 @@
+# Health watch: once an hour GitHub asks the live game "are you all right?" and checks that the database answers.
+# If either check fails, this run fails and GitHub emails the repository owner ("Run failed: Health watch").
+# (GitHub → Settings → Notifications → Actions must have email turned on; "Only notify for failed workflows" is fine.)
+#
+# The game server judges itself (server/health.ts): /status answers 200 {"status":"ok"} when all is well and 503 with
+# the problems in plain words when it isn't (database not answering, the World not saved for 15 minutes, memory nearly
+# full, ...). To try it by hand: the Actions tab → Health watch → Run workflow.
+#
+# How often: hourly while the server is on Render's FREE plan. There the server sleeps when nobody visits and takes
+# about a minute to wake, so most runs last 75-90 seconds, which GitHub bills as 2 minutes: 24 × 30 × 2 = about 1,450
+# of a private repository's 2,000 free Actions minutes a month. Every 30 minutes would use about 2,900 and run out.
+# On the Starter plan (never sleeps) a run takes a few seconds: change the cron to '7,37 * * * *' then.
+# While the server sleeps between visitors this check can only tell that it wakes, loads the World and that the
+# database answers; problems that take minutes to show (saves failing) are caught only while it stays awake.
+name: Health watch
+
+on:
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: health-watch
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # Longer than the worst case below (6 × 75 s + 3 × 35 s + checkout), so a server that never answers ends in a
+    # failed run with its reason, not in a run cut off by the clock (which GitHub reports as cancelled, not failed).
+    timeout-minutes: 13
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: src/net/supabaseConfig.ts
+          sparse-checkout-cone-mode: false
+
+      - name: Game server
+        run: |
+          # Asked up to six times: a sleeping server takes about a minute to wake, and the World takes a moment more
+          # to load. Only the server's own answer counts: "status":"ok" with the World loaded. Any other page (the
+          # game itself answers 200 for unknown addresses) means the status page is not there.
+          for try in 1 2 3 4 5 6; do
+            code=$(curl -s -m 45 -o status.json -w '%{http_code}' https://moonrush-n2ft.onrender.com/status || echo 000)
+            echo "try $try: HTTP $code $(head -c 600 status.json 2>/dev/null | tr -d '\r\n')"
+            if [ "$code" = "200" ] && grep -q '"status":"ok"' status.json && grep -q '"world":true' status.json; then exit 0; fi
+            if [ "$try" != "6" ]; then sleep 30; fi
+          done
+          echo "::error title=MOONRUSH server problem::$(head -c 600 status.json 2>/dev/null | tr -d '\r\n%' || echo 'the server did not answer')"
+          exit 1
+
+      - name: Database
+        if: always()
+        run: |
+          # A tiny public read with the key the game itself ships with (public by design): it must answer within
+          # 15 seconds.
+          URL=$(grep -o "https://[a-z0-9]*\.supabase\.co" src/net/supabaseConfig.ts | head -1)
+          KEY=$(grep -o "sb_publishable_[A-Za-z0-9_-]*" src/net/supabaseConfig.ts | head -1)
+          for try in 1 2 3; do
+            out=$(curl -s -m 15 -o db.json -w '%{http_code} %{time_total}' "$URL/rest/v1/app_flags?select=key&limit=1" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" || echo '000 15')
+            echo "try $try: HTTP $out seconds"
+            if [ "${out%% *}" = "200" ]; then exit 0; fi
+            if [ "$try" != "3" ]; then sleep 20; fi
+          done
+          echo "::error title=MOONRUSH database problem::the database did not answer a simple question within 15 seconds, three times"
+          exit 1

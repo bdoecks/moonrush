@@ -3,6 +3,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AdminMarketAction } from '../src/game/marketEngine'
 import { isAdmin } from './auth'
+import type { AdminOps } from './index'
 import type { Room } from './room'
 
 export type AdminAction =
@@ -40,9 +41,41 @@ function readBody(req: IncomingMessage): Promise<unknown> {
   })
 }
 
-export async function handleAdmin(req: IncomingMessage, res: ServerResponse, path: string, rooms: Map<string, Room>) {
+export async function handleAdmin(req: IncomingMessage, res: ServerResponse, path: string, rooms: Map<string, Room>, ops: AdminOps) {
   const token = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
   if (!(await isAdmin(token))) return json(res, 403, { error: 'Admins only' })
+
+  // Health watch and backups.
+  if (req.method === 'GET' && path === '/admin/api/health') return json(res, 200, ops.health())
+  if (req.method === 'GET' && path === '/admin/api/backups') {
+    try {
+      const rows = await ops.listBackups()
+      return json(res, 200, { set: rows !== null, backups: rows ?? [] })
+    } catch {
+      return json(res, 503, { error: "The database didn't answer" })
+    }
+  }
+  const one = /^\/admin\/api\/backups\/(\d+)$/.exec(path)
+  if (req.method === 'GET' && one) {
+    const b = await ops.loadBackup(Number(one[1])).catch(() => null)
+    if (!b) return json(res, 404, { error: 'No backup with that number' })
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'content-disposition': `attachment; filename="moonrush-${b.row.kind}-${b.row.taken_at.slice(0, 10)}.json"` })
+    return res.end(JSON.stringify({ ...b.row, data: b.data }))
+  }
+  if (req.method === 'POST' && path === '/admin/api/backup') {
+    const a = ((await readBody(req)) ?? {}) as { action?: string; id?: number; confirm?: string }
+    if (a.action === 'take') {
+      const r = await ops.takeBackup('taken by hand')
+      return json(res, r.ok ? 200 : 500, r.ok ? { ok: true, taken: r.taken } : { error: r.error ?? 'The backup failed' })
+    }
+    if (a.action === 'restoreWorld') {
+      // Replaces the running World: the admin has to type the word.
+      if (a.confirm !== 'RESTORE') return json(res, 400, { error: 'Type RESTORE to confirm' })
+      const r = await ops.restoreWorld(Number(a.id))
+      return json(res, r.ok ? 200 : 500, r.ok ? { ok: true } : { error: r.error ?? 'The restore failed' })
+    }
+    return json(res, 400, { error: 'Unknown backup action' })
+  }
 
   if (req.method === 'GET' && path === '/admin/api/rooms') {
     return json(res, 200, { rooms: [...rooms.values()].map((r) => r.summary()), bannedGuests: bannedGuests.size })

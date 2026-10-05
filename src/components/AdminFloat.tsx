@@ -8,7 +8,7 @@ import type { AdminMarketAction } from '../game/marketEngine'
 import { useGame } from '../game/store'
 import { useSelectedToken } from '../hooks/useDerived'
 import { useAccount } from '../net/account'
-import { adminAct, adminApi, adminBan, adminMarketOn, type RoomSummary } from '../net/adminApi'
+import { adminAct, adminApi, adminBan, adminMarketOn, serverStatus, type RoomSummary, type ServerHealth } from '../net/adminApi'
 import type { Archetype, Chain } from '../types'
 import { fmtCompact, fmtUsd } from '../utils/format'
 import { load, save } from '../utils/storage'
@@ -53,6 +53,28 @@ export function AdminFloat() {
   const [pos, setPos] = useState(() => clampPos(load<{ x: number; y: number }>('adminFloatPos') ?? { x: window.innerWidth - W - 24, y: 110 }))
   const [tab, setTab] = useState<Tab>(() => load<Tab>('adminFloatTab') ?? 'coin')
   const drag = useRef<{ dx: number; dy: number } | null>(null)
+  // The admin hears about a server problem wherever they are in the game: the server's own health verdict is asked
+  // once a minute, and a pop-up says when it turns bad (with the first problem in plain words) and when it clears.
+  const notify = useGame((s) => s.notify)
+  const lastStatus = useRef<string | null>(null)
+  useEffect(() => {
+    if (!admin) return
+    const check = async () => {
+      const r = await adminApi<ServerHealth>('/admin/api/health')
+      // The admin route needs the database to confirm who is asking. When it can't answer (exactly the day this is
+      // for), the public status page still can.
+      const pub = r.ok ? null : await serverStatus()
+      const now = r.ok ? { status: r.data!.status, first: r.data!.problems.find((p) => !p.warning)?.text } : pub ? { status: pub.status, first: pub.problems[0] } : null
+      if (!now) return // no server here (solo play), or it is restarting: the outside check covers a server that is down
+      const was = lastStatus.current
+      lastStatus.current = now.status
+      if (now.status === 'degraded' && was !== 'degraded') notify({ title: 'SERVER PROBLEM', body: now.first ?? 'Open Admin → Switches & stats', tone: 'warn', icon: '🩺' })
+      else if (now.status === 'ok' && was === 'degraded') notify({ title: 'SERVER OK AGAIN', body: 'The problem has cleared', tone: 'info', icon: '🩺' })
+    }
+    void check()
+    const id = setInterval(() => void check(), 60_000)
+    return () => clearInterval(id)
+  }, [admin, notify])
   useEffect(() => {
     const onResize = () => setPos((p) => clampPos(p))
     window.addEventListener('resize', onResize)

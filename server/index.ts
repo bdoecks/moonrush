@@ -8,7 +8,9 @@ import { MP_PATH, WORLD_CODE, type ClientMsg, type ServerMsg } from '../src/net/
 import { Room, type RoomSnapshot } from './room'
 import { isBanned, nameTaken, verifyToken } from './auth'
 import { bannedGuests, handleAdmin } from './admin'
-import { deleteRoom, loadRoom, loadWorld, persistOn, saveRoom } from './persist'
+import { deleteRoom, loadRoom, loadWorld, persistOn, pingDb, saveRoom } from './persist'
+import { health, noteDb, noteError, noteSave, noteTick, noteTickError, report, watchLoop } from './health'
+import { backupNow, checkBackups, isRestoring, listBackups, loadBackup, restoreWorldFrom, type WorldCopy } from './backup'
 import { nameBlocked } from './moderation'
 
 /**
@@ -63,9 +65,78 @@ const worldReady: Promise<void> = (async () => {
   if (!world) {
     world = new Room(WORLD_CODE, true)
     console.log('[world] started fresh')
+    // Load testing only (scripts/load-test.ts): grow the brand-new World to a realistic size before anyone joins.
+    // Only ever with no database, so it can never run on, or be saved over, a real World.
+    const warm = persistOn ? 0 : Math.min(20_000, Math.max(0, Number(process.env.WORLD_WARM_TICKS) || 0))
+    if (warm) {
+      world.fastForward(warm)
+      console.log(`[world] warmed up ${warm} ticks for a load test`)
+    }
   }
   rooms.set(WORLD_CODE, world)
+  health.worldLoaded = true
 })()
+
+// ─── Health watch and backups ────────────────────────────────────────────────
+health.saving = persistOn
+watchLoop()
+Room.onTick = (room, ms, error) => {
+  if (!room.world) return
+  noteTick(ms)
+  if (error) noteTickError()
+}
+const worldCopy = (): WorldCopy | null => {
+  const w = rooms.get(WORLD_CODE)
+  return w ? { state: w.snapshot(), charts: w.chartSnapshot(), players: [...w.members.values()].filter((m) => !m.info.bot).length } : null
+}
+let backingUp = false
+/** Take a backup now (the daily timer and the admin's button both come through here, one at a time). */
+async function takeBackup(note?: string) {
+  if (backingUp) return { ok: false, error: 'A backup is already running', taken: [] as string[] }
+  if (isRestoring()) return { ok: false, error: 'A restore is running', taken: [] as string[] }
+  backingUp = true
+  try {
+    const copy = worldCopy()
+    const r = await backupNow(copy ? () => copy : null, note)
+    console.log(`[backup] ${r.ok ? 'done' : 'failed'}: ${r.taken.join(', ') || 'nothing saved'}${r.error ? ` · ${r.error}` : ''}`)
+    return r
+  } finally {
+    backingUp = false
+  }
+}
+if (persistOn) {
+  // Once a minute: does the database answer.
+  setInterval(() => void pingDb().then((r) => noteDb(r.ok, r.ms)), 60_000).unref()
+  void pingDb().then((r) => noteDb(r.ok, r.ms))
+  // Backups are daily. Whether one is due is asked two minutes after the World has loaded and every ten minutes
+  // after that, not on a long timer: on Render's free plan the server rarely stays awake a whole hour. Skipped while
+  // the database is struggling: a backup is a big write.
+  let lastBackupTry = 0
+  const backupIfDue = () => {
+    if (!health.worldLoaded || health.db.fails > 0) return
+    if (health.backup.set !== true) return void checkBackups() // table not there yet (or never asked): look again
+    if (Date.now() - (health.backup.okAt ?? 0) <= 24 * 3600_000) return
+    // One try an hour at most: a backup that keeps failing must not hammer a struggling database with big writes.
+    if (Date.now() - lastBackupTry < 3600_000) return
+    lastBackupTry = Date.now()
+    void takeBackup().catch((e) => console.error('[backup]', e))
+  }
+  void worldReady.then(checkBackups).then(() => setTimeout(backupIfDue, 2 * 60_000).unref())
+  setInterval(backupIfDue, 10 * 60_000).unref()
+}
+/** Put a World backup back in place of the running World (the admin panel's Restore). */
+async function restoreWorld(id: number): Promise<{ ok: boolean; error?: string }> {
+  if (backingUp) return { ok: false, error: 'A backup is running: try again in a minute' }
+  const r = await restoreWorldFrom(rooms, id)
+  if (r.ok) {
+    const w = rooms.get(WORLD_CODE)!
+    void saveRoom(WORLD_CODE, w.snapshot(), w.chartSnapshot())
+    console.log(`[backup] the World was restored from backup #${id}`)
+  }
+  return r
+}
+const adminOps = { health: () => report(), listBackups, takeBackup, loadBackup, restoreWorld }
+export type AdminOps = typeof adminOps
 
 function newCode() {
   for (;;) {
@@ -77,15 +148,52 @@ function newCode() {
 
 const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' }
 
+// Nothing a visitor sends may stop the server. An error with nothing waiting to catch it would end the process: every
+// player dropped, and (being a crash, not a shutdown) the last minutes of the World not saved. So such errors are
+// logged, counted for the health watch, and the server carries on.
+process.on('uncaughtException', (e) => {
+  console.error('[server] unexpected error:', e)
+  noteError()
+})
+process.on('unhandledRejection', (e) => {
+  console.error('[server] unexpected error (promise):', e)
+  noteError()
+})
+
 const http = createServer((req, res) => {
-  const url = new URL(req.url ?? '/', 'http://x')
-  if (url.pathname.startsWith('/admin/api/')) {
-    void handleAdmin(req, res, url.pathname, rooms)
+  // A path like "//" is not a valid address and makes URL throw; it used to take the whole server down.
+  let url: URL
+  try {
+    url = new URL(req.url ?? '/', 'http://x')
+  } catch {
+    res.writeHead(400, { 'content-type': 'text/plain' })
+    res.end('Bad request')
     return
   }
+  if (url.pathname.startsWith('/admin/api/')) {
+    handleAdmin(req, res, url.pathname, rooms, adminOps).catch((e) => {
+      console.error('[admin] request failed:', e)
+      noteError()
+      if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'The server hit an error handling that. Nothing was changed.' }))
+    })
+    return
+  }
+  const online = () => [...rooms.values()].reduce((a, r) => a + [...r.members.values()].filter((m) => m.info.online).length, 0)
+  // /health is Render's "is the process alive" check: it always says ok, or Render would restart a server whose only
+  // problem is a slow database. /status is the real verdict, for the outside checker and for people: 200 when all is
+  // well, 503 with the problems in plain words when it isn't.
   if (url.pathname === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ ok: true, saving: persistOn, rooms: rooms.size, players: [...rooms.values()].reduce((a, r) => a + [...r.members.values()].filter((m) => m.info.online).length, 0) }))
+    res.end(JSON.stringify({ ok: true, saving: persistOn, rooms: rooms.size, players: online() }))
+    return
+  }
+  if (url.pathname === '/status') {
+    const r = report()
+    res.writeHead(r.status === 'ok' ? 200 : 503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    // tickMs: how long this server takes over one market tick. Comparing it with the same World on another machine
+    // says how fast this one is (scripts/load-test.ts --render-tick-ms).
+    res.end(JSON.stringify({ status: r.status, problems: r.problems.filter((p) => !p.warning).map((p) => p.text), upMin: r.upMin, players: online(), world: r.worldLoaded, tickMs: r.tickMs?.avg ?? null, memoryMb: r.memoryMb }))
     return
   }
   // Serve the built game if there is one (production); otherwise a small status page.
@@ -193,7 +301,15 @@ function revive(code: string): Promise<void> {
 
 /** Save rooms (charts too when asked; they're bigger, so only every few minutes and at shutdown). */
 async function saveAll(withCharts: boolean, world = true, worldCharts = withCharts) {
-  await Promise.all([...rooms.values()].filter((r) => world || !r.world).map((r) => saveRoom(r.code, r.snapshot(), (r.world ? worldCharts : withCharts) ? r.chartSnapshot() : undefined)))
+  await Promise.all([...rooms.values()].filter((r) => world || !r.world).map(async (r) => {
+    if (!r.world) return saveRoom(r.code, r.snapshot(), withCharts ? r.chartSnapshot() : undefined)
+    // The World's save is the one the health watch keeps an eye on.
+    const t0 = performance.now()
+    let kb = 0
+    const ok = await saveRoom(r.code, r.snapshot(), worldCharts ? r.chartSnapshot() : undefined, (bytes) => (kb = Math.round(bytes / 1024)))
+    if (persistOn) noteSave(ok, performance.now() - t0, kb)
+    return ok
+  }))
 }
 // Rooms save every 20s (charts every 3 min). The World's save is several MB, and every save rewrites the whole row in
 // the database: at once a minute that was gigabytes of writes a day, enough to slow the database for everything else

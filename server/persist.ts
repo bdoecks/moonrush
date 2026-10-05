@@ -9,15 +9,17 @@ const MAX_AGE_MS = 3 * 60 * 60_000 // rooms nobody saved for 3h aren't brought b
 
 const headers = () => ({ apikey: KEY, Authorization: `Bearer ${KEY}`, 'content-type': 'application/json' })
 
-export async function saveRoom(code: string, state: unknown, charts?: unknown): Promise<boolean> {
+export async function saveRoom(code: string, state: unknown, charts?: unknown, sent?: (bytes: number) => void): Promise<boolean> {
   if (!persistOn) return false
   try {
     const body: Record<string, unknown> = { code, state, updated_at: new Date().toISOString() }
     if (charts !== undefined) body.charts = charts
+    const text = JSON.stringify(body)
+    sent?.(text.length)
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rooms?on_conflict=code`, {
       method: 'POST',
       headers: { ...headers(), Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify(body),
+      body: text,
       signal: AbortSignal.timeout(TIMEOUT),
     })
     if (!res.ok) console.warn(`[persist] save ${code} failed: ${res.status} ${await res.text().catch(() => '')}`)
@@ -52,6 +54,17 @@ export async function loadWorld(code: string, timeoutMs = 90_000): Promise<{ sta
   if (!res.ok) throw new Error(`database answered ${res.status}`)
   const rows = (await res.json()) as { state: unknown; charts: unknown }[]
   return rows[0] ?? null
+}
+
+/** A tiny question for the health watch: does the database answer, and how fast. */
+export async function pingDb(timeoutMs = 10_000): Promise<{ ok: boolean; ms: number }> {
+  const t0 = performance.now()
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/app_flags?select=key&limit=1`, { headers: headers(), signal: AbortSignal.timeout(timeoutMs) })
+    return { ok: res.ok, ms: performance.now() - t0 }
+  } catch {
+    return { ok: false, ms: performance.now() - t0 }
+  }
 }
 
 export async function deleteRoom(code: string) {

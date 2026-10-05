@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { CHAIN_IDS, CHAINS } from '../data/chains'
 import { setFlag, useFlags, type GameFlags } from '../game/flags'
 import type { AdminMarketAction } from '../game/marketEngine'
-import { adminAct, adminApi, adminBan, adminMarketOn, type RoomSummary } from '../net/adminApi'
+import { adminAct, adminApi, adminBan, adminDownload, adminMarketOn, serverStatus, type BackupRow, type RoomSummary, type ServerHealth } from '../net/adminApi'
 import { levelFromXp, xpForLevel } from '../game/progression'
 import { useGame } from '../game/store'
 import { useAccount } from '../net/account'
@@ -518,6 +518,8 @@ function Switches({ rooms }: { rooms: RoomSummary[] }) {
   ]
   return (
     <div className="grid gap-3 lg:grid-cols-2">
+      <HealthCard />
+      <BackupsCard />
       <Card title="🎛 Game switches (live for everyone, no push needed)">
         <div className="space-y-2">
           {rows.map((r) => (
@@ -558,5 +560,145 @@ function Switches({ rooms }: { rooms: RoomSummary[] }) {
       </Card>
       <div className="lg:col-span-2"><PlayerCounters /></div>
     </div>
+  )
+}
+
+// ─── Server health and backups ───────────────────────────────────────────────
+const ago = (sec: number | null) => (sec === null ? 'never' : sec < 90 ? `${Math.round(sec)}s ago` : sec < 5400 ? `${Math.round(sec / 60)} min ago` : `${(sec / 3600).toFixed(1)} h ago`)
+
+/** The server's own verdict on itself (server/health.ts), refreshed every 30 seconds. */
+function HealthCard() {
+  const [h, setH] = useState<ServerHealth | null>(null)
+  const [err, setErr] = useState('')
+  const [pub, setPub] = useState<{ status: 'ok' | 'degraded'; problems: string[] } | null>(null) // the public verdict, when the full one can't be had
+  const load = useCallback(async () => {
+    const r = await adminApi<ServerHealth>('/admin/api/health')
+    if (r.ok) {
+      setH(r.data!)
+      setErr('')
+      setPub(null)
+      return
+    }
+    // The full report needs the database to confirm you are the admin. If that is what is broken, show the public
+    // verdict instead: it has the problems in words, just not the numbers.
+    setH(null)
+    setErr(r.error ?? 'No answer')
+    setPub(await serverStatus())
+  }, [])
+  useEffect(() => {
+    void load()
+    const id = setInterval(() => void load(), 30_000)
+    return () => clearInterval(id)
+  }, [load])
+  const bad = pub ? pub.status === 'degraded' : !!err || h?.status === 'degraded'
+  const cells: [string, ReactNode, string?][] = h ? [
+    ['Running for', h.upMin < 120 ? `${h.upMin} min` : `${(h.upMin / 60).toFixed(1)} h`],
+    ['Memory', `${h.memoryMb} MB`, 'of 512'],
+    ['Market tick', h.tickMs ? `${h.tickMs.avg} ms` : '—', h.tickMs ? `worst ${h.tickMs.max} ms of each 1000` : undefined],
+    ['Database', !h.saving ? 'off' : h.db.fails ? `${h.db.fails} failed` : h.db.ms === null ? '…' : `${h.db.ms} ms`, h.saving ? `answered ${ago(h.db.okAgoSec)}` : 'no database here'],
+    ['World saved', !h.saving ? 'off' : ago(h.save.okAgoSec), h.save.kb ? `${(h.save.kb / 1024).toFixed(1)} MB in ${((h.save.ms ?? 0) / 1000).toFixed(1)}s` : undefined],
+    ['Last backup', h.backup.set === false ? 'not set up' : h.backup.okAgoHours === null ? 'none yet' : `${h.backup.okAgoHours} h ago`, h.backup.error ?? undefined],
+  ] : []
+  return (
+    <Card
+      title={<>🩺 Server health {(h || pub) && <span className={clsx('rounded px-1.5 text-[10px] font-bold', bad ? 'bg-down/15 text-down' : 'bg-up/15 text-up')}>{bad ? 'PROBLEM' : 'ALL GOOD'}</span>}</>}
+      right={<button onClick={() => void load()} className={clsx(btn, 'flex items-center gap-1 border-line2 text-muted hover:text-ink')}><RefreshCw size={11} /> Refresh</button>}
+    >
+      {err && !pub && <div className="mb-2 rounded-md border border-down/40 bg-down/10 px-3 py-2 text-[12px] text-down">The game server gave no answer: {err}</div>}
+      {pub && (
+        <>
+          {pub.problems.map((p) => <div key={p} className="mb-2 rounded-md border border-down/40 bg-down/10 px-3 py-2 text-[12px] text-down">{p}</div>)}
+          <div className="mb-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-warn">Showing the public status only: the full numbers need the database to confirm you are the admin, and it could not ({err}).</div>
+        </>
+      )}
+      {h?.problems.map((p) => (
+        <div key={p.code} className={clsx('mb-2 rounded-md border px-3 py-2 text-[12px]', p.warning ? 'border-warn/40 bg-warn/10 text-warn' : 'border-down/40 bg-down/10 text-down')}>{p.text}</div>
+      ))}
+      {!h && !err ? <div className="text-[12px] text-dim">Loading…</div> : !h ? null : (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {cells.map(([l, v, sub]) => (
+            <div key={l} className="rounded-md border border-line bg-bg px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-dim">{l}</div>
+              <div className="num text-[16px] font-bold">{v}</div>
+              {sub && <div className="truncate text-[10px] text-dim" title={sub}>{sub}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="mt-2 text-[10px] text-dim">An outside check asks the server and the database every 30 minutes and emails you (through GitHub) if either has a problem.</p>
+    </Card>
+  )
+}
+
+/** Daily copies of the World and the account tables (server/backup.ts): take one now, download one, or put a World copy back. */
+function BackupsCard() {
+  const [rows, setRows] = useState<BackupRow[] | null>(null)
+  const [set, setSet] = useState(true)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  const notify = useGame((s) => s.notify)
+  const load = useCallback(async () => {
+    const r = await adminApi<{ set: boolean; backups: BackupRow[] }>('/admin/api/backups')
+    if (!r.ok) return setErr(r.error ?? 'No answer')
+    setErr('')
+    setSet(r.data!.set)
+    setRows(r.data!.backups)
+  }, [])
+  useEffect(() => void load(), [load])
+  const take = async () => {
+    setBusy('take')
+    const r = await adminApi<{ taken: string[] }>('/admin/api/backup', { action: 'take' })
+    setBusy('')
+    notify(r.ok ? { title: 'BACKUP TAKEN', body: r.data!.taken.join(' · '), tone: 'info', icon: '💾' } : { title: 'BACKUP FAILED', body: r.error ?? 'Failed', tone: 'warn', icon: '⚠️' })
+    void load()
+  }
+  const restore = async (b: BackupRow) => {
+    const when = new Date(b.taken_at).toLocaleString()
+    const typed = window.prompt(`Put the World back to how it was on ${when}?\n\nEverything that happened in the World since then is undone for every player, and everyone in the World is sent back to the menu. The World as it is now is kept as a backup first, so this can itself be undone.\n\nType RESTORE to go ahead.`)
+    if (typed !== 'RESTORE') return
+    setBusy(`r${b.id}`)
+    const r = await adminApi('/admin/api/backup', { action: 'restoreWorld', id: b.id, confirm: 'RESTORE' })
+    setBusy('')
+    notify(r.ok ? { title: 'WORLD RESTORED', body: `Back to ${when}`, tone: 'info', icon: '⏪' } : { title: 'RESTORE FAILED', body: r.error ?? 'Failed', tone: 'warn', icon: '⚠️' })
+    void load()
+  }
+  const size = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
+  return (
+    <Card title={<>💾 Backups</>} right={<button onClick={() => void take()} disabled={!!busy || !set} className={clsx(btn, 'border-warn/50 text-warn hover:bg-warn/10')}>{busy === 'take' ? 'Backing up…' : 'Back up now'}</button>}>
+      {!set ? (
+        <div className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+          One-time setup needed: open Supabase → SQL Editor, paste the contents of <b>supabase/008_backups.sql</b> and click Run. The first backup is taken within the hour.
+        </div>
+      ) : err ? (
+        <div className="text-[12px] text-down">{err}</div>
+      ) : !rows ? (
+        <div className="text-[12px] text-dim">Loading…</div>
+      ) : !rows.length ? (
+        <div className="text-[12px] text-dim">No backups yet. One is taken automatically every day; press "Back up now" for the first.</div>
+      ) : (
+        <div className="max-h-[260px] overflow-y-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wider text-dim"><th className="py-1">Taken</th><th>What</th><th className="text-right">Size</th><th className="pl-3">Note</th><th /></tr>
+            </thead>
+            <tbody>
+              {rows.map((b) => (
+                <tr key={b.id} className="border-t border-line/50">
+                  <td className="num whitespace-nowrap py-1.5">{new Date(b.taken_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                  <td className="font-semibold">{b.kind === 'world' ? '🌍 World' : '👤 Accounts'}</td>
+                  <td className="num text-right">{size(b.bytes)}</td>
+                  <td className="max-w-[160px] truncate pl-3 text-dim" title={b.note ?? ''}>{b.note}</td>
+                  <td className="whitespace-nowrap text-right">
+                    <button onClick={() => void adminDownload(`/admin/api/backups/${b.id}`, `moonrush-${b.kind}-${b.taken_at.slice(0, 10)}.json`)} className={clsx(btn, 'border-line2 text-muted hover:text-ink')}>Download</button>
+                    {b.kind === 'world' && <button onClick={() => void restore(b)} disabled={!!busy} className={clsx(btn, 'ml-1 border-down/40 text-down hover:bg-down/10')}>{busy === `r${b.id}` ? 'Restoring…' : 'Restore'}</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="mt-2 text-[10px] text-dim">Taken automatically once a day: a week of daily copies and about a month of weekly ones are kept. A copy holds every wallet and every player's progress, but not logins (emails and passwords are kept by Supabase itself). Download one now and then to keep a copy outside the database.</p>
+    </Card>
   )
 }

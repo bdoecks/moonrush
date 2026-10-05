@@ -70,3 +70,59 @@ export async function adminBan(p: RoomPlayer, room: string) {
   if (p.verified && p.id.startsWith('u-') && supabase) await supabase.from('bans').insert({ user_id: p.id.slice(2), reason: 'Banned by admin' })
   return adminAct({ action: 'kick', room, playerId: p.id, reason: 'You are banned from MOONRUSH rooms' }, `Banned ${p.name}`)
 }
+
+// ─── Health watch and backups (server/health.ts, server/backup.ts) ───────────
+export interface ServerHealth {
+  status: 'ok' | 'degraded'
+  problems: { code: string; text: string; warning?: boolean }[]
+  upMin: number
+  memoryMb: number
+  tickMs: { avg: number; max: number } | null
+  loopLagMs: number
+  saving: boolean
+  worldLoaded: boolean
+  db: { ms: number | null; fails: number; okAgoSec: number | null }
+  save: { okAgoSec: number | null; ms: number | null; kb: number | null; fails: number }
+  backup: { set: boolean | null; okAgoHours: number | null; error: string | null }
+}
+export interface BackupRow {
+  id: number
+  kind: 'world' | 'accounts'
+  taken_at: string
+  bytes: number
+  note: string | null
+}
+
+/**
+ * The server's public verdict on itself (`/status`): no login needed. The admin health route asks the database who you
+ * are, so on a day the database is not answering it refuses everyone; this still works then.
+ */
+export async function serverStatus(): Promise<{ status: 'ok' | 'degraded'; problems: string[] } | null> {
+  try {
+    const res = await fetch('/status', { cache: 'no-store' })
+    if (!/json/.test(res.headers.get('content-type') ?? '')) return null // no game server here (solo play)
+    const j = (await res.json()) as { status?: string; problems?: string[] }
+    return j.status === 'ok' || j.status === 'degraded' ? { status: j.status, problems: j.problems ?? [] } : null
+  } catch {
+    return null
+  }
+}
+
+/** Fetch a file from the admin API with your login and hand it to the browser to save. */
+export async function adminDownload(path: string, filename: string): Promise<boolean> {
+  const token = await accessToken()
+  try {
+    const res = await fetch(path, { headers: { Authorization: `Bearer ${token ?? ''}` } })
+    if (!res.ok) throw new Error(String(res.status))
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    return true
+  } catch {
+    say(false, 'Could not download that backup')
+    return false
+  }
+}

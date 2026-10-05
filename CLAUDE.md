@@ -37,7 +37,9 @@ npx tsx scripts/kol-test.ts                 # KOL copy traders: followers copy a
 npx tsx scripts/charts-test.ts 30           # charts across a restart: short timeframes rebuilt from the real 1m candles
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
+npx tsx scripts/health-test.ts              # safety net: health verdicts, backups (stand-in database), World restore, admin routes
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
+npx tsx scripts/load-test.ts                # how many players the server holds: fake players in steps of 1…200 (5 min; run after wire changes)
 npx tsx scripts/crowd-test.ts 3             # the 100 World bots: skill shows in results, dev dumps, pile-on limit, speed
 npx vite build                              # production build
 npm run bots                                # UI bots: play every page in hidden Chrome, PDF report (see below)
@@ -99,6 +101,25 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
   WebSocket on one port. `/health` reports `{ ok, saving, rooms, players }`.
 - To confirm a deploy, check `/health` or grep the live bundle for new text (Render's asset hashes differ from local).
 
+## The safety net (health watch and backups)
+
+- **`/health` is Render's "is the process alive" check and must always answer 200**, or Render restarts a server whose
+  only problem is a slow database. The real verdict is **`/status`**: 200 `{ status: "ok" }`, or 503 with the problems
+  in plain words. `server/health.ts` keeps the notes and `judge()` (pure, tested) turns them into problems: World not
+  loaded, database not answering / slow, World not saved for 16 min, tick slow / stalled / throwing, memory near 512 MB,
+  no backup for two days. `rooms: 0` on `/health` means the World has not loaded (it waits for the database for ever
+  rather than start empty: `loadWorld` in `server/persist.ts`).
+- **Who gets told:** `.github/workflows/health-watch.yml` asks `/status` and the database every 30 minutes; a failed
+  run makes GitHub email the owner. The admin also gets a pop-up in the game (`AdminFloat`) and a Server health card
+  (Admin → Switches & stats). A tick that throws is caught, counted and reported (`Room.timedTick`), not fatal.
+- **Backups** (`server/backup.ts`, table `backups` from `supabase/008_backups.sql`): once a day the World (state and
+  charts) and the account tables are copied, gzipped, into `backups`; 7 daily + about 4 weekly copies are kept. Admin →
+  Backups: back up now, download, or Restore a World copy (`swapWorld`: the running World is itself backed up first,
+  everyone connected is sent to the menu, and the old World is disposed BEFORE the copy loads because charts are kept
+  by coin id). Logins (Supabase auth) are not in a backup. A backup is skipped while the database is failing checks.
+- The World saves every 5 minutes and its charts every 15 (`WORLD_SAVE_MS`, `WORLD_CHARTS_MS`): each save rewrites a
+  multi-MB row, and once a minute was enough to make the free database unresponsive for everything (2026-10-04).
+
 ## Secrets
 
 - `src/net/supabaseConfig.ts` holds the Supabase URL and **publishable** key. Both are public by design.
@@ -122,6 +143,7 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
 | `server/bots.ts` | World bots: the 100-bot roster (personas, voices), styles, fallback coin picking, chat lines. |
 | `server/brainBots.ts` | The market brain the World bots trade from (`server/data/market-brain.json`). |
 | `server/persist.ts` | Saving rooms / the World to Supabase, gifts. |
+| `server/health.ts`, `server/backup.ts` | The health watch (`/status`) and the daily backups / World restore. |
 | `server/auth.ts`, `server/admin.ts` | Token checks, bans, the admin API. |
 | `src/components`, `src/pages` | UI. |
 

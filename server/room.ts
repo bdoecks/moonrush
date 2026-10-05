@@ -175,12 +175,33 @@ export class Room {
       ? { id: 1, state: 'running', mode: 'practice', durationTicks: null, startTick: 0, seed: 0, startTime: 0, engine: 'realistic', world: true }
       : { id: 0, state: 'lobby', mode: 'practice', durationTicks: null, startTick: 0, seed: 0, startTime: 0 })
     this.ensureBots()
-    this.timer = setInterval(() => this.tick(), 1000)
+    this.timer = setInterval(() => this.timedTick(), 1000)
   }
+
+  /**
+   * The once-a-second tick, as the timer runs it. An error thrown in a tick would otherwise be outside any try: Node
+   * would exit and drop every player in every room. It is logged and counted instead, and the next tick still runs.
+   */
+  private timedTick() {
+    const t0 = performance.now()
+    try {
+      this.tick()
+      Room.onTick?.(this, performance.now() - t0)
+    } catch (e) {
+      console.error(`[room ${this.code}] tick failed:`, e)
+      Room.onTick?.(this, performance.now() - t0, e)
+    }
+  }
+  /** Run this many ticks at once, with no real time passing (load tests grow a fresh World with it). */
+  fastForward(ticks: number) {
+    for (let i = 0; i < ticks; i++) this.tick()
+  }
+  /** Told about every timed tick: how long it took, and the error if it threw (the health watch listens). */
+  static onTick: ((room: Room, ms: number, error?: unknown) => void) | null = null
 
   dispose() {
     clearInterval(this.timer)
-    for (const t of this.market.tokens) candleStore.delete(t.id)
+    for (const t of this.market?.tokens ?? []) candleStore.delete(t.id)
   }
 
   // ─── Saving (Phase 2): a room survives server restarts / updates ─────────────
@@ -216,6 +237,18 @@ export class Room {
   /** Bring a saved room back: its market, round, players (offline until they reconnect) and their wallets. */
   static restore(s: RoomSnapshot, charts?: Record<string, Partial<Record<Timeframe, PackedCandle[]>>> | null): Room {
     const r = new Room(s.code, !!s.world)
+    try {
+      Room.fill(r, s, charts)
+    } catch (e) {
+      // A save that can't be brought to life must not leave its half-built room behind: the constructor has already
+      // started its 1-second timer, and it would tick (or throw) for ever, outside any list of rooms.
+      r.dispose()
+      throw e
+    }
+    return r
+  }
+
+  private static fill(r: Room, s: RoomSnapshot, charts?: Record<string, Partial<Record<Timeframe, PackedCandle[]>>> | null) {
     for (const t of r.market.tokens) candleStore.delete(t.id) // the placeholder market's charts
     r.hostId = s.hostId
     r.round = s.round
@@ -249,7 +282,6 @@ export class Room {
     }
     r.sentTokens.clear() // first tick after restore sends every coin in full
     r.sentWallets.clear()
-    return r
   }
 
   // ─── Players ───────────────────────────────────────────────────────────────
