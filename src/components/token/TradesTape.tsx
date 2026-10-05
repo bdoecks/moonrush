@@ -3,7 +3,7 @@ import { ArrowDownUp, Bell, Eye, Filter, List as ListIcon, X, Zap } from 'lucide
 import { inPick, pickFor, useTradePick } from './tradePick'
 import { useTrickle } from '../../hooks/useTrickle'
 import { addrKey, playerKey, useFriends } from '../../net/friends'
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useWindowed } from '../../hooks/useWindowed'
 import { CHAINS, fmtNative } from '../../data/chains'
 import { LAUNCHPADS } from '../../data/launchpads'
@@ -252,6 +252,25 @@ function TradesTab({ token, walletFilter, setWalletFilter, scroller }: { token: 
     known.current = new Set(live.slice(0, 80).map((t) => t.id))
   })
   const onFilter = walletFilter ? undefined : setWalletFilter
+  // The table sizes its columns from the rows that are drawn, so they would shift sideways as trades arrive and as
+  // you scroll. Each column keeps the widest it has been (the last one, Trader, takes the slack) until the box is
+  // resized or the units shown change.
+  const headRef = useRef<HTMLTableRowElement>(null)
+  useLayoutEffect(() => {
+    const head = headRef.current
+    if (!head || !scroller) return
+    const cells = ([...head.children] as HTMLElement[]).slice(0, -1)
+    const key = `${scroller.clientWidth}|${clock}|${inNative}`
+    if (head.dataset.widths !== key) {
+      for (const c of cells) c.style.minWidth = c.style.width = ''
+      head.dataset.widths = key
+      return // measured afresh on the next draw
+    }
+    for (const c of cells) {
+      const w = c.getBoundingClientRect().width
+      if (w > (parseFloat(c.style.minWidth) || 0) + 0.5) c.style.minWidth = c.style.width = `${w}px`
+    }
+  })
   return (
     <>
       <Toolbar>
@@ -292,7 +311,7 @@ function TradesTab({ token, walletFilter, setWalletFilter, scroller }: { token: 
       ) : (
         <table className="w-full min-w-[720px] text-[12px]">
           <thead className="sticky top-8 z-[1] bg-panel">
-            <tr>
+            <tr ref={headRef}>
               <th className={clsx(th, 'text-left')}>
                 <button onClick={() => setClock((v) => !v)} className="inline-flex items-center gap-1 hover:text-ink" title="Switch between age and time">{clock ? 'Time' : 'Age'} <ArrowDownUp size={10} /></button>
               </th>
@@ -321,7 +340,7 @@ function TradesTab({ token, walletFilter, setWalletFilter, scroller }: { token: 
                   total={inNative ? fmtNative(tr.usd / nativeUsd, token.chain, false) : fmtUsd(tr.usd, tr.usd < 10 ? 3 : 2)}
                   gas={fmtUsd(gasUsd(tr, token.chain), 3)}
                   onFilter={onFilter}
-                  fresh={!!wasKnown && win.start + k < 80 && !wasKnown.has(tr.id)}
+                  fresh={!wasKnown || (win.start + k < 80 && !wasKnown.has(tr.id))}
                 />
               )
             })}

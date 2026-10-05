@@ -83,7 +83,8 @@ export function fmtClock(sec: number): string {
 }
 
 export function fmtTime(simSec: number): string {
-  return timeFmt.format(new Date(simSec * 1000))
+  const d = new Date(simSec * 1000)
+  return Number.isNaN(d.getTime()) ? 'Invalid Date' : timeFmt.format(d) // (the formatter throws on a date that isn't one)
 }
 
 export const toneClass = (v: number) => (v > 0 ? 'text-up' : v < 0 ? 'text-down' : 'text-muted')

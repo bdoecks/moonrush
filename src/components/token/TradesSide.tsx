@@ -51,10 +51,11 @@ export function TradesSide({ token, className }: { token: Token; className?: str
         (!wallet || tr.wallet === wallet) &&
         (who === 'all' || (who === 'you' ? tr.wallet === 'YOU' : who === 'dev' ? tr.wallet === book.devWallet || tagsOf(tr).includes('dev') : trackedNames!.has(tr.wallet) || !!tr.walletId && tracked.includes(tr.walletId))),
     )
-    return { rows: list.length > 400 ? list.slice(0, 400) : list, total: list.length } // the newest 400 are listed
+    return { rows: list, total: list.length }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inCandle, logVersion, wallet, who, trackedKey])
-  const live = useTrickle(rows) // new trades flow in across the second
+  const trickled = useTrickle(rows) // new trades flow in across the second
+  const live = trickled.length > 400 ? trickled.slice(0, 400) : trickled // the newest 400 are listed
   // Candle summary (Axiom shows what happened inside the candle you clicked): only worked out when a candle is picked.
   const summary = useMemo(() => {
     if (!pick) return null

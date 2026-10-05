@@ -392,13 +392,15 @@ export function PriceChart(o: ChartOptions) {
             glide.current.raf = requestAnimationFrame(step)
             return
           }
-          drawnY = y
           const bar = { ...last, close, high: Math.max(prev.high, close, last.open), low: Math.min(prev.low, close, last.open) }
           try {
             put(e >= 1 ? last : bar)
           } catch {
             return
           }
+          // Read back after the update: a candle setting a new visible high or low moves the price scale, and the
+          // next frame has to be compared in that new scale (or the chart would sit still while it should move).
+          drawnY = e < 1 ? main.current?.priceToCoordinate(close * k) ?? null : null
           glide.current.shown = e >= 1 ? { ...last } : bar
           if (e < 1) glide.current.raf = requestAnimationFrame(step)
         }
