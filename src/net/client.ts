@@ -5,7 +5,8 @@ import { newPortfolio, portfolioStats, valuePortfolio } from '../game/portfolioE
 import { levelFromXp } from '../game/progression'
 import { seasonNumber } from '../game/season'
 import { nativePrice } from '../game/tradingEngine'
-import { netHooks, quietly, roomRivals, useGame, type BotTickRun, type ChatLine, type MpSave, type OnlineState } from '../game/store'
+import { freshSocial } from '../game/socialEngine'
+import { netHooks, notifyCallResult, quietly, roomRivals, useGame, type BotTickRun, type ChatLine, type MpSave, type OnlineState } from '../game/store'
 import type { Chain, MarketEngine, MarketState, SimWallet, TapeTrade, Token } from '../types'
 import { walletAddress } from '../utils/address'
 import { fmtCompact, fmtUsd } from '../utils/format'
@@ -338,6 +339,17 @@ function onMessage(msg: ServerMsg) {
       return onRecv(msg)
     case 'wallet':
       return onWallet(msg)
+    case 'social': {
+      // Your followers and reputation as the server has them, and any calls it has just judged.
+      if (!st.online) return
+      for (const r of msg.results ?? []) notifyCallResult(st.notify, r)
+      const online: OnlineState = { ...st.online, social: msg.social }
+      // A friends room started from your own profile, so what you gain or lose there is yours to keep. The World's
+      // count is its own and leaves your solo profile alone.
+      const mine = { ...freshSocial(), ...(st.profile.social ?? {}) }
+      const profile = st.online.round.world ? st.profile : { ...st.profile, social: { ...mine, followers: msg.social.followers, rep: msg.social.rep, gainDay: msg.social.gainDay, gainedToday: msg.social.gainedToday } }
+      return st.patchState({ online, profile })
+    }
     case 'board':
       return useWorldBoard.setState({ board: msg })
     case 'notice':
@@ -373,7 +385,7 @@ function onMessage(msg: ServerMsg) {
 function onWelcome(msg: Extract<ServerMsg, { t: 'welcome' }>) {
   const s = useGame.getState()
   const wasOnline = !!s.online
-  const online: OnlineState = { code: msg.code, you: msg.you, hostId: msg.hostId, players: msg.players, round: msg.round, conn: 'open', chat: s.online?.chat ?? [], spectator: msg.spectator }
+  const online: OnlineState = { code: msg.code, you: msg.you, hostId: msg.hostId, players: msg.players, round: msg.round, conn: 'open', chat: s.online?.chat ?? [], spectator: msg.spectator, social: s.online?.code === msg.code ? s.online.social : undefined } // (a reconnect keeps the count shown until the server sends it again)
   save('mpRoom', { code: msg.code })
   retries = 0
   netHooks.send = send
@@ -506,19 +518,13 @@ function onTick(msg: TickMsg) {
     }
   }
 
-  // Your own posts come back with the crowd's reaction: count the likes toward followers and fill in the call.
-  const mine = msg.posts.filter((p) => p.author?.pid === me)
-  if (mine.length && s.profile.social) {
-    let soc = s.profile.social
-    for (const p of mine) {
-      const i = soc.calls.findIndex((c) => !c.settled && c.likes === 0 && c.tokenId === p.tokenId)
-      const calls = i >= 0 ? soc.calls.map((c, k) => (k === i ? { ...c, postId: p.id, likes: p.likes ?? 0 } : c)) : soc.calls
-      soc = { ...soc, calls, followers: soc.followers + Math.round((p.likes ?? 0) * 0.1) }
-      s.notify(p.tokenId
-        ? { title: 'CALL POSTED', body: `$${p.ticker} · ${p.likes ?? 0} likes · ${p.buyers ? `${p.buyers} aped 🦍` : 'nobody bit yet'}`, tone: p.buyers ? 'up' : 'info', icon: '📣', tokenId: p.tokenId }
-        : { title: 'POSTED', body: `${p.likes ?? 0} likes`, tone: 'info', icon: '🐦' })
-    }
-    s.patchState({ profile: { ...s.profile, social: soc } })
+  // Your own posts come back with the crowd's reaction. (What they did to your followers comes from the server
+  // too, in its `social` message.)
+  for (const p of msg.posts) {
+    if (p.author?.pid !== me) continue
+    s.notify(p.tokenId
+      ? { title: 'CALL POSTED', body: `$${p.ticker} · ${p.likes ?? 0} likes · ${p.buyers ? `${p.buyers} aped 🦍` : 'nobody bit yet'}`, tone: p.buyers ? 'up' : 'info', icon: '📣', tokenId: p.tokenId }
+      : { title: 'POSTED', body: `${p.likes ?? 0} likes`, tone: 'info', icon: '🐦' })
   }
 
   s.tick({

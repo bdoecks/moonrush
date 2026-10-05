@@ -133,6 +133,43 @@ export function saneSocial<T extends { social?: SocialProfile }>(p: T): T {
   return soc && !(soc.followers <= FOLLOWER_CEILING) ? { ...p, social: { ...soc, followers: 100_000 } } : p
 }
 
+/** How one of your calls turned out. `followers`: your count after it. `kol`: it took you past KOL_FOLLOWERS. */
+export interface CallResult { tokenId: string; ticker: string; x: number; dRep: number; dFollowers: number; followers: number; kol?: boolean }
+
+/**
+ * Your calls on the timeline: follow each coin's best price since the call and judge the ones that are
+ * CALL_SETTLE_TICKS old. Returns the same profile when nothing changed. The game runs this in solo play, the server in
+ * rooms and the World (there the server keeps your followers; the game only shows them).
+ */
+export function judgeCalls(s: SocialProfile, tick: number, tokenOf: (id: string) => Pick<Token, 'mcap' | 'status'> | undefined): { social: SocialProfile; results: CallResult[] } {
+  if (!s.calls.some((c) => !c.settled)) return { social: s, results: [] }
+  const due: { tokenId: string; ticker: string; x: number; likes: number }[] = []
+  let changed = false
+  const calls = s.calls.map((c) => {
+    if (c.settled) return c
+    const t = tokenOf(c.tokenId)
+    const peak = t ? Math.max(c.peak, t.mcap) : c.peak
+    if (tick - c.tick >= CALL_SETTLE_TICKS) {
+      // A coin that died or rugged since the call is a miss, however high it went first.
+      const x = t && t.status !== 'rugged' && t.status !== 'dead' ? peak / c.mcapAtPost : Math.min(0.5, peak / c.mcapAtPost)
+      due.push({ tokenId: c.tokenId, ticker: c.ticker, x, likes: c.likes })
+      changed = true
+      return { ...c, peak, settled: true, x }
+    }
+    if (peak !== c.peak) changed = true
+    return peak !== c.peak ? { ...c, peak } : c
+  })
+  if (!changed) return { social: s, results: [] }
+  let soc: SocialProfile = { ...s, calls }
+  const results: CallResult[] = []
+  for (const j of due) {
+    const before = soc
+    soc = settleCall(soc, j.x, j.likes)
+    results.push({ tokenId: j.tokenId, ticker: j.ticker, x: j.x, dRep: Math.round(soc.rep - before.rep), dFollowers: soc.followers - before.followers, followers: soc.followers, ...(before.followers < KOL_FOLLOWERS && soc.followers >= KOL_FOLLOWERS ? { kol: true } : {}) })
+  }
+  return { social: soc, results }
+}
+
 /**
  * After a call settles: did the coin run? Rep moves with the result; followers with engagement and wins.
  * `x` = best price since the call ÷ price at the call.

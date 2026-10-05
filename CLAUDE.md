@@ -34,6 +34,7 @@ npx tsx scripts/bots-test.ts 2              # World bots over 2 simulated hours
 npx tsx scripts/safety-test.ts              # chat safety: filter, rate limit, mute, reports
 npx tsx scripts/seat-test.ts                # guest seats: only the browser with the seat key rejoins as that guest
 npx tsx scripts/kol-test.ts                 # KOL copy traders: followers copy a KOL's buys and sells
+npx tsx scripts/social-test.ts              # followers are the server's count: the World ignores claims, calls judged on the server
 npx tsx scripts/charts-test.ts 30           # charts across a restart: short timeframes rebuilt from the real 1m candles
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
@@ -153,6 +154,13 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
    (optimistic) and tags it with a `ref`; the server runs the same shared function and its answer wins. Any new
    action that moves money must run in `server/room.ts`, through a function in `src/game/orders.ts` that both
    sides share. There is no "trust the client" path, and none may be added.
+   The same goes for anything that moves prices. **Followers and reputation** decide how many people a post reaches
+   and how many copy a buy, so the server keeps them (`socialOf` / `judgeCalls` in `server/room.ts`, sent to the game
+   as `social`; the game reads them through `socialNow`). The World starts everyone fresh and ignores what a message
+   claims; a friends room starts from the player's own profile once. **A new coin's look** (name, ticker, description,
+   picture) is checked by `coinLook` in `server/moderation.ts` before the launch is charged: the game form's rules,
+   the chat filter, and only uploaded pictures (a picture link would make every player's browser call a stranger's
+   computer).
 2. **Wallet messages are numbered.** The game sends `seq`; the server answers `wallet { ack, state }`; the game
    applies the server's balances only when `ack === seq`. Both restart the count on every connection.
 3. Store changes the server also makes are wrapped in `quietly()`. In dev, an unreported money change logs

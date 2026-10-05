@@ -10,7 +10,7 @@ import { generatedLaunch } from '../src/data/tokens'
 import { valuePortfolio } from '../src/game/portfolioEngine'
 import { rollEvents } from '../src/game/eventEngine'
 import { createWallets, tickWallets } from '../src/game/walletEngine'
-import { copyBuys, copySells, type CopyBook, POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
+import { addFollowers, CALL_SETTLE_TICKS, copyBuys, copySells, type CallResult, type CopyBook, FOLLOWER_CEILING, freshSocial, judgeCalls, POST_COOLDOWN_TICKS, shill, tickSocial } from '../src/game/socialEngine'
 import { seasonNumber } from '../src/game/season'
 import { dayKey, worldSeason } from '../src/game/worldSeason'
 import { AUTO_MUTE_MS, coinLook, embeddedImage, moderate, rateCheck, strike, type ChatMeter } from './moderation'
@@ -26,7 +26,7 @@ import { walletAddress } from '../src/utils/address'
 import { airdropFeePerWallet, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
-import type { Candle, Chain, CookSpec, Narrative, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
+import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
 import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, type BoardList, type BoardMsg, type BoardRow, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
@@ -82,6 +82,7 @@ interface Member {
   lastCookTick?: number
   cookTicks?: number[] // the World: when their recent launches were (the hourly limit)
   copyBook?: CopyBook // KOLs: what their followers' copy bots hold, per coin
+  social?: SocialProfile // their followers, reputation and open calls, kept here (see socialOf)
   brain?: BotBrain // World bots only
   // World leaderboards: where this week's profit is measured from, and bankruptcy restarts.
   weekBase?: { week: number; pnl: number }
@@ -215,7 +216,7 @@ export class Room {
       lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()], reports: this.reports.slice(0, 100), hall: this.hall, seasonKey: this.seasonKey,
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: m.info.bot ? m.info.online : false }, seat: m.seat, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
-        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, copyBook: m.copyBook, brain: m.brain,
+        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, copyBook: m.copyBook, social: m.social, brain: m.brain,
         weekBase: m.weekBase, dayBase: m.dayBase, seasonBase: m.seasonBase, chainPnl: m.chainPnl, chainBase: m.chainBase, dev: m.dev, trophies: m.trophies, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
       })),
     }
@@ -311,6 +312,7 @@ export class Room {
     for (const tr of existing?.inbox ?? []) this.send(ws, tr) // transfers that came in while they were away
     const joined = this.members.get(msg.playerId)!
     if (this.walletOf(joined)) this.sendWallet(joined)
+    if (!spectator && (this.world || joined.social)) this.sendSocial(joined, this.socialOf(joined))
     this.broadcastPlayers()
     return true
   }
@@ -648,7 +650,8 @@ export class Room {
       const nt = this.market.tokens.find((x) => x.id === t.id) ?? t
       const rng = new Rng((Math.random() * 2 ** 32) >>> 0)
       const book = (me.copyBook ??= {})
-      const kol = o.side === 'buy' && o.kol ? { followers: Math.max(0, Math.min(5_000_000, Math.round(o.kol.followers) || 0)), rep: Math.max(0, Math.min(100, Math.round(o.kol.rep) || 0)) } : null
+      // How many copy you depends on your followers as the server has them, never on what the message says.
+      const kol = o.side === 'buy' && (this.world || me.social || o.kol) ? this.socialOf(me, o.kol) : null
       const mainFills = r.fills.filter((f) => (f.walletId ?? mainId) === mainId)
       const sold = mainFills.reduce((a, f) => a + f.qty, 0)
       const wave = o.side === 'buy'
@@ -844,16 +847,48 @@ export class Room {
     me.lastPostTick = this.market.tick
     setClock(secPerTickOf(this.market))
     const t = msg.tokenId ? this.market.tokens.find((x) => x.id === msg.tokenId) : undefined
+    // A player's reach comes from the followers the server has for them. (Bots are the server's own: theirs come
+    // with the message.)
+    const soc = me.info.bot ? null : this.socialOf(me, msg)
     const author = {
       name: me.info.name, handle: me.info.name.toLowerCase().replace(/[^a-z0-9_]/g, '') || 'player', avatar: me.info.avatar, pid: me.info.id,
-      followers: Math.max(0, Math.min(5_000_000, Math.round(msg.followers) || 0)), rep: Math.max(0, Math.min(100, Math.round(msg.rep) || 0)),
+      followers: soc ? soc.followers : Math.max(0, Math.min(5_000_000, Math.round(msg.followers) || 0)), rep: soc ? soc.rep : Math.max(0, Math.min(100, Math.round(msg.rep) || 0)),
     }
-    const res = shill(this.market, new Rng((Math.random() * 2 ** 32) >>> 0), t, author, text, Math.max(0, Math.min(10, msg.repeats | 0)))
+    // Calling the same coin again and again reaches fewer people each time.
+    const repeats = soc ? soc.calls.filter((c) => c.tokenId === t?.id && this.market.tick - c.tick < CALL_SETTLE_TICKS).length : Math.max(0, Math.min(10, msg.repeats | 0))
+    const res = shill(this.market, new Rng((Math.random() * 2 ** 32) >>> 0), t, author, text, Math.min(10, repeats))
     this.market.shillQueue = [...(this.market.shillQueue ?? []), ...res.queue]
+    const id = this.market.tick * 1000 + 900 + this.playerPosts.length
     this.playerPosts.push({
-      id: this.market.tick * 1000 + 900 + this.playerPosts.length, tick: this.market.tick, time: this.market.time, accountId: 'player', author, text,
+      id, tick: this.market.tick, time: this.market.time, accountId: 'player', author, text,
       tokenId: t?.id, ticker: t?.ticker, mcapAtPost: t?.mcap, peakMcap: t?.mcap, isCall: !!t, likes: res.likes, rts: res.rts, replies: res.replies, buyers: res.buyers,
     })
+    if (soc) {
+      // Likes bring a few followers now; a call is judged in tick() once it is CALL_SETTLE_TICKS old.
+      me.social = {
+        ...addFollowers(soc, res.likes * 0.1), posts: soc.posts + 1, lastPostTick: this.market.tick,
+        calls: t ? [{ postId: id, tokenId: t.id, ticker: t.ticker, tick: this.market.tick, mcapAtPost: t.mcap, peak: t.mcap, likes: res.likes }, ...soc.calls].slice(0, 30) : soc.calls,
+      }
+      this.sendSocial(me, me.social)
+    }
+  }
+
+  /**
+   * A player's followers, reputation and open calls, kept by the server: followers decide how many people a post
+   * reaches and how many copy a buy, which moves prices, so the count can't come from the browser. The World starts
+   * everyone fresh and what a message claims is ignored. A friends room starts from the player's own profile the
+   * first time it is needed (`claim`), then keeps count itself.
+   */
+  private socialOf(me: Member, claim?: { followers?: unknown; rep?: unknown }): SocialProfile {
+    if (!me.social) {
+      const f = Math.round(Number(claim?.followers)), r = Math.round(Number(claim?.rep))
+      me.social = this.world || !claim ? freshSocial() : { ...freshSocial(), followers: Number.isFinite(f) ? Math.max(10, Math.min(FOLLOWER_CEILING, f)) : freshSocial().followers, rep: Number.isFinite(r) ? Math.max(0, Math.min(100, r)) : freshSocial().rep }
+    }
+    return me.social
+  }
+
+  private sendSocial(m: Member, social: SocialProfile, results?: CallResult[]) {
+    this.sendTo(m.info.id, { t: 'social', social, ...(results?.length ? { results } : {}) })
   }
 
   // ─── The clock ─────────────────────────────────────────────────────────────
@@ -956,6 +991,16 @@ export class Room {
     this.botTick(rng, wr.actions)
     if (this.world && this.market.tick % 60 === 0) this.closeSeasonIfDue() // a new month closes the season even if nobody has the leaderboard open
     for (const m of billed) this.sendWallet(m)
+    // Players' calls on the timeline: the server follows each called coin's best price and judges the call when it is
+    // old enough (their followers and reputation live here: see socialOf).
+    let coinOf: Map<string, Token> | null = null
+    for (const m of this.members.values()) {
+      if (!m.social?.calls.some((c) => !c.settled)) continue
+      coinOf ??= new Map(this.market.tokens.map((t) => [t.id, t]))
+      const j = judgeCalls(m.social, this.market.tick, (id) => coinOf!.get(id))
+      m.social = j.social
+      if (j.results.length) this.sendSocial(m, j.social, j.results)
+    }
 
     // Coins that appeared this tick: send their whole chart instead of points.
     const newCandles: TickMsg['newCandles'] = {}

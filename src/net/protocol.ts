@@ -177,7 +177,9 @@ export type ClientMsg =
   | { t: 'event'; event: MarketEvent } // something you did to your own coin (dev sells, bundle dumps)
   // Send coins to another player: to their main wallet (`to` = player id) or to any wallet address they gave you.
   | { t: 'send'; ref: number; to?: string; toAddr?: string; asset: SendAsset; amount: number; usd: number; main: boolean; fromAddr: string; fromWallet?: string }
-  | { t: 'post'; text: string; tokenId?: string; followers: number; rep: number; repeats: number } // a post / call on the timeline
+  // A post / call on the timeline. The server keeps your followers and reputation itself (see `social` below):
+  // `followers` / `rep` are only read once, to start a friends room from your own profile; the World ignores them.
+  | { t: 'post'; text: string; tokenId?: string; followers: number; rep: number; repeats: number }
 
 // ─── Server → browser ────────────────────────────────────────────────────────
 /** A coin in a tick: `id` plus only the fields that changed since the last tick (`tape` = new trades only). */
@@ -213,6 +215,9 @@ export type ServerMsg =
   // `reset`: an admin wiped your wallet back to the start (applied right away, trade history cleared).
   | { t: 'wallet'; ack: number; state: WalletState; ref?: number; fills?: import('../types').Trade[]; failures?: string[]; reset?: boolean; note?: string }
   | BoardMsg
+  // Your followers and reputation as the server has them, sent when you join and whenever they change (a post, a
+  // call being judged: `results`). The World keeps its own count from a fresh start; a friends room starts from yours.
+  | { t: 'social'; social: import('../types').SocialProfile; results?: import('../game/socialEngine').CallResult[] }
   | { t: 'kicked'; reason: string }
   | { t: 'grant'; usd: number; asset?: 'usd' | 'sol' | 'bsc' | 'hood'; amount?: number }
   | { t: 'sendResult'; ref: number; ok: boolean; error?: string; toName?: string }
