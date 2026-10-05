@@ -49,8 +49,12 @@ export function OnScreen({ children, className, estimate = 0, drawn = true }: { 
     const el = ref.current
     if (!el) return
     return watch(el, (visible) => {
+      // The exact height, not offsetHeight (which rounds to whole pixels): rows are often a fraction of a pixel tall,
+      // and an empty box even slightly off in size moves everything after it, which can carry this row back across
+      // the observer's line, draw it, move it out again, and so on without end.
       // A box that isn't laid out (a column hidden on a phone) measures 0: keep the height we had.
-      if (!visible && el.offsetHeight > 0) height.current = el.offsetHeight
+      const h = el.getBoundingClientRect().height
+      if (!visible && h > 0) height.current = h
       setOn(visible)
     })
   }, [])

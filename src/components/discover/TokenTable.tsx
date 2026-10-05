@@ -61,7 +61,8 @@ export function TokenTable({ tokens, tf, sortKey, sortDir, onSort, cursor }: Pro
   // So each column keeps the widest it has been, until the box is resized or the layout changes.
   // - When the table fits its box, "Pair info" is left free to take up the slack, and if holding the others ever
   //   pushes the table past the box they are let go and measured afresh.
-  // - When the box is narrower than the table's minimum (it scrolls sideways anyway), every column is held.
+  // - When it can't fit (the box is narrower than the table's minimum, or than the rows themselves need), it scrolls
+  //   sideways whatever we do, so every column is held.
   const headRef = useRef<HTMLTableRowElement>(null)
   useLayoutEffect(() => {
     const row = headRef.current
@@ -69,12 +70,21 @@ export function TokenTable({ tokens, tf, sortKey, sortDir, onSort, cursor }: Pro
     const box = table?.parentElement
     if (!row || !table || !box) return
     const cells = [...row.children] as HTMLElement[]
-    const fits = box.clientWidth >= (parseFloat(getComputedStyle(table).minWidth) || 0)
+    const over = table.offsetWidth > box.clientWidth + 1
     const key = `${box.clientWidth}|${compact}|${tf}`
-    if (row.dataset.widths !== key || (fits && table.offsetWidth > box.clientWidth + 1)) {
+    if (row.dataset.widths !== key) {
       for (const c of cells) c.style.minWidth = c.style.width = ''
       row.dataset.widths = key
+      delete row.dataset.wide
       return // measured afresh on the next draw
+    }
+    // Wider than the box with nothing held: the rows themselves need the room. Remembered until the next resize or
+    // layout change; without it the widths would be let go on every draw here and never hold.
+    if (over && !cells.some((c) => c.style.width)) row.dataset.wide = '1'
+    const fits = !row.dataset.wide && box.clientWidth >= (parseFloat(getComputedStyle(table).minWidth) || 0)
+    if (fits && over) {
+      for (const c of cells) c.style.minWidth = c.style.width = ''
+      return
     }
     cells.forEach((c, i) => {
       if (i < (fits ? 2 : 1)) return
