@@ -12,6 +12,7 @@ import { winBuys, winSells, winVolume } from '../../game/windows'
 import { fmtAge, fmtCompact, fmtNum } from '../../utils/format'
 import { EmptyState, Pct, RiskBadge, TokenIcon } from '../ui'
 import type { ChangeTf, SortKey } from './filters'
+import { useWindowed } from '../../hooks/useWindowed'
 
 // Laid out like Axiom's Discover / GMGN's Trending: pair info, market cap with its change, liquidity, volume, txns,
 // then the token's audit ("Token Info"), and the quick buy. Every header sorts; "Token Info" sorts by risk.
@@ -47,11 +48,19 @@ export function TokenTable({ tokens, tf, sortKey, sortDir, onSort, cursor }: Pro
   const held = useGame((s) => s.portfolio.positions)
   const compact = useGame((s) => s.settings.compact)
 
+  // Only the rows on screen are drawn (see useWindowed).
+  const win = useWindowed<HTMLDivElement>(tokens.length, compact ? 46 : 62)
+  const { reveal } = win
+  useEffect(() => {
+    if (cursor >= 0) reveal(cursor)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursor])
+
   if (!tokens.length) return <EmptyState icon="🔭" title="No tokens match" hint="Try another filter or clear the search" />
 
   const arrow = (k: SortKey) => sortKey === k && (sortDir === 'desc' ? <ChevronDown size={11} /> : <ChevronUp size={11} />)
   return (
-    <div className="h-full overflow-auto">
+    <div ref={win.ref} className="h-full overflow-auto">
       <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[12px] sm:min-w-[980px]">
         <thead className="sticky top-0 z-10 bg-panel">
           <tr>
@@ -83,9 +92,11 @@ export function TokenTable({ tokens, tf, sortKey, sortDir, onSort, cursor }: Pro
           </tr>
         </thead>
         <tbody>
-          {tokens.map((t, i) => (
-            <Row key={t.id} t={t} tf={tf} now={now} watched={watchlist.includes(t.id)} held={!!held[t.id]} active={i === cursor} compact={compact} />
+          {win.padTop > 0 && <tr aria-hidden style={{ height: win.padTop }}><td colSpan={COLS.length + 2} /></tr>}
+          {tokens.slice(win.start, win.end).map((t, k) => (
+            <Row key={t.id} t={t} tf={tf} now={now} watched={watchlist.includes(t.id)} held={!!held[t.id]} active={win.start + k === cursor} compact={compact} />
           ))}
+          {win.padBottom > 0 && <tr aria-hidden style={{ height: win.padBottom }}><td colSpan={COLS.length + 2} /></tr>}
         </tbody>
       </table>
     </div>
@@ -117,6 +128,7 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
   return (
     <tr
       ref={ref}
+      data-win
       onClick={() => select(t.id)}
       className={clsx('group cursor-pointer transition-colors', active ? 'bg-raise' : 'hover:bg-panel2', (dead || hidden) && 'opacity-55')}
     >

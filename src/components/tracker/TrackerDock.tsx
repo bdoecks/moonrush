@@ -1,7 +1,8 @@
 import clsx from 'clsx'
 import { ArrowLeftRight, AtSign, ChevronDown, ChevronRight, ExternalLink, PanelLeftClose, PanelRightClose, Radio, Send, UserPlus, Wallet } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
-import { useTokenMap } from '../../hooks/useDerived'
+import { tokenMapOf, useTokenMap } from '../../hooks/useDerived'
+import { OnScreen } from '../OnScreen'
 import { useLiveFeed } from '../../game/liveSocial'
 import { SIM_SEC_PER_TICK } from '../../game/marketEngine'
 import { useGame } from '../../game/store'
@@ -185,7 +186,7 @@ function WalletSection() {
             ? <EmptyState icon={<UserPlus />} title="No tracked wallets yet" hint={<button onClick={() => setView('track')} className="text-accent underline">Track wallets →</button>} />
             : group ? <EmptyState icon="📁" title={`Nothing in ${group} yet`} hint="Click the 📁 on any tracked wallet's trade to put it in this group" />
             : <EmptyState icon="👛" title="No trades yet" />
-        ) : rows.map(({ w, tr, friend }) => <WalletRow key={`${w.id}-${tr.id}`} w={w} tr={tr} friend={friend} groupable={friend || tracked.includes(w.id)} />)}
+        ) : rows.map(({ w, tr, friend }) => <OnScreen key={`${w.id}-${tr.id}`} className="slide-in"><WalletRow w={w} tr={tr} friend={friend} groupable={friend || tracked.includes(w.id)} /></OnScreen>)}
       </div>
     </>
   )
@@ -200,7 +201,7 @@ function WalletRow({ w, tr, friend, groupable }: { w: SimWallet; tr: WalletTrade
   const t = map.get(tr.tokenId)
   const a = ACTION[tr.action ?? (tr.side === 'buy' ? 'first' : 'partial')]
   return (
-    <div className="slide-in border-b border-line/40 px-2 py-1.5 hover:bg-panel2/70">
+    <div className="border-b border-line/40 px-2 py-1.5 hover:bg-panel2/70">
       <div className="flex items-center gap-1.5 text-[11px]">
         <button onClick={() => (friend ? setView('leaderboard') : openWallet(w.id))} className="flex min-w-0 items-center gap-1 font-semibold hover:text-accent" title={friend ? 'A player in your room: open the leaderboard' : 'Open wallet profile'}>
           <span>{w.avatar}</span><span className="truncate">{w.name}</span>
@@ -257,7 +258,7 @@ function SocialSection() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {scope === 'live' ? <LiveXFeed /> : !posts.length ? (
           <EmptyState icon="📣" title={scope === 'following' ? 'No posts from accounts you follow' : 'No posts yet'} hint={scope === 'following' ? 'Hit Follow on any post' : 'Posts appear as the market moves'} />
-        ) : posts.slice(0, 60).map((p) => <PostRow key={p.id} p={p} />)}
+        ) : posts.slice(0, 60).map((p) => <OnScreen key={p.id} className="slide-in"><PostRow p={p} /></OnScreen>)}
       </div>
     </>
   )
@@ -270,10 +271,10 @@ function PostRow({ p }: { p: SocialPost }) {
   const followed = useGame((s) => s.followedAccounts.includes(acc.id))
   const toggleFollow = useGame((s) => s.toggleFollowAccount)
   const select = useGame((s) => s.select)
-  const t = useGame((s) => (p.tokenId ? s.market.tokens.find((x) => x.id === p.tokenId) : undefined))
+  const t = useGame((s) => (p.tokenId ? tokenMapOf(s.market.tokens).get(p.tokenId) : undefined))
   const since = t && p.mcapAtPost ? t.mcap / p.mcapAtPost - 1 : 0
   return (
-    <div className={clsx('slide-in border-b border-line/40 px-2 py-2 hover:bg-panel2/70', acc.player && 'bg-info/[0.04]')}>
+    <div className={clsx('border-b border-line/40 px-2 py-2 hover:bg-panel2/70', acc.player && 'bg-info/[0.04]')}>
       <div className="flex items-center gap-1.5">
         <span className="grid size-6 shrink-0 place-items-center rounded-full bg-raise text-[13px]">{acc.avatar}</span>
         <div className="min-w-0 flex-1 leading-tight">

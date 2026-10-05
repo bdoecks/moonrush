@@ -8,7 +8,7 @@ import { CalloutTracker } from '../components/tracker/CalloutTracker'
 import { WatchedWallets } from '../components/tracker/WatchedWallets'
 import { TrackerSettingsModal } from '../components/tracker/TrackerSettingsModal'
 import { STYLE_META } from '../data/wallets'
-import { useTokenMap } from '../hooks/useDerived'
+import { tokenMapOf, useTokenMap } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { ACCOUNTS } from '../game/socialEngine'
 import { alertText, useGame } from '../game/store'
@@ -392,7 +392,7 @@ function PostCard({ p }: { p: SocialPost }) {
   const toggleFollow = useGame((s) => s.toggleFollowAccount)
   const select = useGame((s) => s.select)
   const openWallet = useGame((s) => s.openWallet)
-  const t = useGame((s) => (p.tokenId ? s.market.tokens.find((x) => x.id === p.tokenId) : undefined))
+  const t = useGame((s) => (p.tokenId ? tokenMapOf(s.market.tokens).get(p.tokenId) : undefined))
   const since = t && p.mcapAtPost ? t.mcap / p.mcapAtPost - 1 : 0
   const parts = p.text.split(/(\$[A-Z0-9]+)/g)
   return (

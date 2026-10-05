@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { AtSign, Crown, Paperclip, Send } from 'lucide-react'
 import { useState } from 'react'
+import { tokenMapOf } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { ACCOUNTS, callAppeal, followerCapPerDay, followersLeftToday, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS } from '../game/socialEngine'
 import { playerAuthor, useGame } from '../game/store'
@@ -152,7 +153,7 @@ function Row({ p }: { p: SocialPost }) {
   const followed = useGame((s) => s.followedAccounts.includes(acc.id))
   const toggleFollow = useGame((s) => s.toggleFollowAccount)
   const select = useGame((s) => s.select)
-  const t = useGame((s) => (p.tokenId ? s.market.tokens.find((x) => x.id === p.tokenId) : undefined))
+  const t = useGame((s) => (p.tokenId ? tokenMapOf(s.market.tokens).get(p.tokenId) : undefined))
   const since = t && p.mcapAtPost ? t.mcap / p.mcapAtPost - 1 : 0
   return (
     <div className={clsx('slide-in flex items-start gap-2 border-b border-line/50 px-3 py-1.5 hover:bg-panel2', acc.player && 'bg-info/[0.04]')}>

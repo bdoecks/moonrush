@@ -7,7 +7,8 @@ import { useHidden, useVisible } from '../../game/hidden'
 import { PadBadge } from '../pad'
 import { LAUNCHPADS } from '../../data/launchpads'
 import { AtSign, Boxes, ChefHat, Crosshair, Eye, Ghost, Globe, GraduationCap, Search, Send, Star, UserRound, Users } from 'lucide-react'
-import { memo, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useWindowed } from '../../hooks/useWindowed'
 import { useTokenMap } from '../../hooks/useDerived'
 import { useGame } from '../../game/store'
 import { publicBundlePct } from '../../game/devTools'
@@ -92,6 +93,14 @@ function Column({ col, list: all, now, visible }: { col: (typeof COLS)[number]; 
   const presets = useFilterPresets(chain)
   const activePreset = presetFor(filter, presets)
   const look = useTrenchDisplay()
+  // Only the cards on screen are drawn (see useWindowed). A card slides in when it joins the list, not when it is
+  // merely scrolled back into view: `known` is the list as last drawn.
+  const win = useWindowed<HTMLDivElement>(display.length, 120, 3, JSON.stringify(look))
+  const known = useRef<Set<string> | null>(null)
+  const wasKnown = known.current
+  useEffect(() => {
+    known.current = new Set(display.map((t) => t.id))
+  })
   return (
     <section className={clsx('relative min-h-0 flex-col border-line md:flex', look.spaced ? 'md:overflow-hidden md:rounded-lg md:border' : 'md:border-r last:border-r-0', visible ? 'flex' : 'hidden')}>
       <header className="flex items-center gap-2 border-b border-line bg-panel px-2 py-1.5">
@@ -125,9 +134,13 @@ function Column({ col, list: all, now, visible }: { col: (typeof COLS)[number]; 
           ⏸ Paused{waiting > 0 ? ` · ${waiting} new` : ''}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+      <div ref={win.ref} className="min-h-0 flex-1 overflow-auto" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
         {display.length ? (
-          display.map((t) => <Card key={t.id} t={t} now={now} col={col.id} />)
+          <>
+            {win.padTop > 0 && <div aria-hidden style={{ height: win.padTop }} />}
+            {display.slice(win.start, win.end).map((t) => <Card key={t.id} t={t} now={now} col={col.id} fresh={!wasKnown || !wasKnown.has(t.id)} />)}
+            {win.padBottom > 0 && <div aria-hidden style={{ height: win.padBottom }} />}
+          </>
         ) : (
           <EmptyState
             icon="🕳️"
@@ -151,7 +164,8 @@ function ringClass(t: Token) {
 // MC colour steps up with size so big caps pop out of the feed.
 const mcClass = (mc: number) => (mc >= 1e6 ? 'text-warn' : mc >= 1e5 ? 'text-info' : mc >= 3e4 ? 'text-up' : 'text-ink')
 
-export const Card = memo(function Card({ t, now, preview, col }: { t: Token; now: number; preview?: boolean; col?: Col }) {
+export const Card = memo(function Card({ t, now, preview, col, fresh = true }: { t: Token; now: number; preview?: boolean; col?: Col; fresh?: boolean }) {
+  const [slide] = useState(fresh) // decided once, when the card is first drawn
   const select = useGame((s) => s.select)
   const toggleWatch = useGame((s) => s.toggleWatch)
   const watched = useGame((s) => s.watchlist.includes(t.id))
@@ -172,8 +186,9 @@ export const Card = memo(function Card({ t, now, preview, col }: { t: Token; now
 
   return (
     <div
+      data-win
       onClick={preview ? undefined : () => select(t.id)}
-      className={clsx('group relative border-b border-line/70 px-2.5 py-2 transition-colors', !preview && 'cursor-pointer hover:bg-panel2 slide-in', (dead || hidden) && 'opacity-50')}
+      className={clsx('group relative border-b border-line/70 px-2.5 py-2 transition-colors', !preview && 'cursor-pointer hover:bg-panel2', !preview && slide && 'slide-in', (dead || hidden) && 'opacity-50')}
     >
       <div className="flex gap-2.5">
         {/* Avatar + address */}
