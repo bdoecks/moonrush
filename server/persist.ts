@@ -13,10 +13,11 @@ const headers = () => ({ apikey: KEY, Authorization: `Bearer ${KEY}`, 'content-t
  * The database keeps a room as jsonb, which refuses two things JSON itself allows: half an emoji (it arrives as a lone
  * \udXXX escape) and the NUL character (\u0000). Text is cleaned where it comes in (server/index.ts), but one stray
  * character anywhere in a multi-megabyte World must never block every save until the next restart: whatever is left is
- * swapped for the "unknown character" mark. (An even number of backslashes before the "u" is a real backslash followed
- * by ordinary letters, and is left alone.)
+ * swapped for the "unknown character" mark. The pattern takes a typed backslash (two in JSON) first, so those are
+ * stepped over in pairs: a real backslash followed by ordinary letters is left alone, and a long run of backslashes
+ * costs no more than its length (one pattern that tried every starting point took minutes on such a run).
  */
-export const saveSafe = (json: string) => json.replace(/\\+u(?:d[89a-f][0-9a-f]{2}|0000)/g, (m) => (m.indexOf('u') % 2 ? m.slice(0, -4) + 'fffd' : m))
+export const saveSafe = (json: string) => json.replace(/\\\\|\\u(?:d[89a-f][0-9a-f]{2}|0000)/g, (m) => (m.length === 2 ? m : '\\ufffd'))
 
 export async function saveRoom(code: string, state: unknown, charts?: unknown, sent?: (bytes: number) => void): Promise<boolean> {
   if (!persistOn) return false

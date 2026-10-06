@@ -12,13 +12,33 @@ import { deleteRoom, loadRoom, loadWorld, persistOn, pingDb, saveRoom } from './
 import { health, noteDb, noteError, noteSave, noteTick, noteTickError, report, watchLoop } from './health'
 import { backupNow, checkBackups, isRestoring, listBackups, loadBackup, restoreWorldFrom, type WorldCopy } from './backup'
 import { nameBlocked } from './moderation'
-import { cut, tidyText, whole } from '../src/game/textRules'
+import { cut, isEmoji, tidyText, whole } from '../src/game/textRules'
 
 // What the database will not store inside a room (see the message handler below).
 const UNSAVEABLE = /[\u0000\uD800-\uDFFF]/
 const NUL = /\u0000/g
+// The same two things written as JSON escapes in the raw text of a message.
+const ESCAPED = /\\u(?:0000|d[89a-f])/i
 /** A message field as text: anything that isn't text (a number, a list, an object) counts as empty. */
 const text = (v: unknown) => (typeof v === 'string' ? v : '')
+/** A player picture is an emoji and nothing else: it is shown beside every chat line and in the server's own event lines. */
+const face = (v: string) => {
+  const a = cut(tidyText(v), 8)
+  return isEmoji(a) ? a : '🐸'
+}
+const cleanText = (v: string) => (UNSAVEABLE.test(v) ? whole(v).replace(NUL, '') : v)
+/** Clean every text value inside a parsed message, in place. (A JSON.parse reviver does the same but is called once per value: half a second for a 2 MB list of zeros.) */
+const cleanDeep = (v: unknown): unknown => {
+  if (typeof v === 'string') return cleanText(v)
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    for (const k of Object.keys(o)) {
+      const x = o[k]
+      if (typeof x === 'string' || (x && typeof x === 'object')) o[k] = cleanDeep(x)
+    }
+  }
+  return v
+}
 
 /**
  * Who's joining: signed in (token checks out) → their account id and name; otherwise a guest, who can't use an
@@ -27,7 +47,7 @@ const text = (v: unknown) => (typeof v === 'string' ? v : '')
 async function identify(msg: Extract<ClientMsg, { t: 'hello' }>): Promise<{ playerId: string; name: string; avatar: string; verified: boolean; banned?: boolean }> {
   const v = await verifyToken(msg.token)
   if (v && (await isBanned(v.id))) return { playerId: `u-${v.id}`, name: v.username, avatar: '', verified: true, banned: true }
-  if (v) return { playerId: `u-${v.id}`, name: v.username, avatar: cut(text(msg.avatar) || v.avatar, 8), verified: true }
+  if (v) return { playerId: `u-${v.id}`, name: v.username, avatar: face(text(msg.avatar) || v.avatar), verified: true }
   // A guest can't sit in an account's seat (u-…) or a World bot's (bot-…): claiming a bot's id used to take the bot
   // over and knock it out of the World. Nor can a guest wear the 🤖 that marks the real bots.
   const raw = text(msg.playerId)
@@ -35,7 +55,7 @@ async function identify(msg: Extract<ClientMsg, { t: 'hello' }>): Promise<{ play
   let name = cut(tidyText(text(msg.name)).replace(/🤖/gu, '').trim(), 16).trim() || 'Anon'
   if (nameBlocked(name)) name = 'Anon'
   if (await nameTaken(name)) name = `${name.slice(0, 11)}_guest`
-  return { playerId: pid, name, avatar: cut(text(msg.avatar) || '🐸', 8), verified: false }
+  return { playerId: pid, name, avatar: face(text(msg.avatar)), verified: false }
 }
 
 const PORT = Number(process.env.PORT) || 8787
@@ -246,7 +266,9 @@ wss.on('connection', (ws: WebSocket) => {
     try {
       // Text is cleaned as it comes in: half an emoji or a NUL character anywhere in a message would end up in the
       // room's save, and the database refuses to store either (see saveSafe in persist.ts).
-      msg = JSON.parse(String(raw), (_k, v) => (typeof v === 'string' && UNSAVEABLE.test(v) ? whole(v).replace(NUL, '') : v))
+      const s = String(raw)
+      msg = JSON.parse(s)
+      if (UNSAVEABLE.test(s) || ESCAPED.test(s)) msg = cleanDeep(msg) as ClientMsg
     } catch {
       return
     }
@@ -258,7 +280,7 @@ wss.on('connection', (ws: WebSocket) => {
     if (!room) {
       if (msg.t !== 'hello' || !msg.playerId) return fail('Say hello first')
       joining = []
-      const code = String(msg.room ?? '').toUpperCase()
+      const code = text(msg.room).toUpperCase()
       void Promise.all([identify(msg), msg.create ? null : code === WORLD_CODE ? worldReady : revive(code)]).then(([who]) => {
         const queued = joining ?? []
         joining = null
@@ -278,7 +300,7 @@ wss.on('connection', (ws: WebSocket) => {
       room = new Room(code)
       rooms.set(code, room)
     } else {
-      room = rooms.get(String(msg.room ?? '').toUpperCase()) ?? null
+      room = rooms.get(text(msg.room).toUpperCase()) ?? null
       if (!room) return fail('No room with that code')
       if (!room.world && !room.members.has(msg.playerId) && room.members.size >= 12) return fail('Room is full (12 players)')
     }

@@ -3,11 +3,20 @@
 // Pure text code: no browser or server APIs, and no look-behind patterns (old Safari can't read them).
 
 // The game's own launchpads are named like websites; naming one is not posting a link.
-const PAD_NAMES = /\b(?:pump|bonk|stonk)\.fun\b|\blong\.xyz\b/gi
-const LINK = /(https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(com|net|org|io|xyz|gg|fun|app|co|ru|me|link|click|top)\b(\/\S*)?/i
+const PAD_NAME = /^(?:(?:pump|bonk|stonk)\.fun|long\.xyz)$/i
+const LINKS = /(https?:\/\/|www\.)\S+|\b[a-z0-9-]+\.(com|net|org|io|xyz|gg|fun|app|co|ru|me|link|click|top)\b(\/\S*)?/gi
 
-/** True if the text contains a web link (the names of the game's own launchpads don't count). */
-export const hasLink = (text: string) => LINK.test(text.replace(PAD_NAMES, ' '))
+/** True if the text contains a web link (the bare names of the game's own launchpads don't count). */
+export const hasLink = (text: string) => {
+  for (const m of text.matchAll(LINKS)) {
+    const at = m.index ?? 0
+    const before = text.charAt(at - 1)
+    const after = text.slice(at + m[0].length, at + m[0].length + 2)
+    // A pad name with a path, with http(s):// or www. in front, or as part of a longer address is a link like any other.
+    if (!PAD_NAME.test(m[0]) || /[.@-]/.test(before) || /^(?:[@-]|\.[a-z0-9])/i.test(after)) return true
+  }
+  return false
+}
 
 // Half an emoji (a lone "surrogate"). Cutting text to a length can leave one behind, and a changed game can send
 // one. The database refuses to save text that has one, so none may get into a room.
@@ -44,7 +53,7 @@ export function tidyText(raw: string): string {
 }
 
 /** How many characters of the text a person can actually see as letters, digits or emoji. */
-export const visibleCount = (s: string) => (s.match(/[\p{L}\p{N}\p{Extended_Pictographic}]/gu) ?? []).length
+export const visibleCount = (s: string) => (s.match(/[\p{L}\p{N}\p{Extended_Pictographic}]|\p{Regional_Indicator}{1,2}/gu) ?? []).length // (a flag is a pair of "regional" letters)
 
 /** True if the text is one or more emoji and nothing else (a coin's icon). */
 export const isEmoji = (s: string) => /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|[\u200d\ufe0f\u{1F3FB}-\u{1F3FF}])+$/u.test(s) && /[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(s)
