@@ -3,7 +3,7 @@
 // cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
 import { createHash } from 'node:crypto'
-import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, secPerTickOf, setCandleLog, setClock, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
+import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, secPerTickOf, setCandleLog, setClock, SUPPLY, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
 import { BOT_BUST_USD, BOT_BY_ID, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, inVoice, mirrorWallet, pickCoin, STYLE, type BotBrain, type BotSpec } from './bots'
 import { BUY_PACE, buysPerMinute, DEV_DUMP_CHANCE, devDumpAfter, draw, eye, safety, TREND_SHARE, trendCoin, groupFor, PILE_ON_LIMIT, planExit, SIZE_SCALE, situation, type BrainGroup } from './brainBots'
 import { generatedLaunch } from '../src/data/tokens'
@@ -184,6 +184,11 @@ export class Room {
   private playersDirty = false
   private lastBotChat = -999 // tick of the last bot chat line (the crowd doesn't all talk at once)
   private botReply: { at: number; text: string } | null = null // a bot's answer to a real player, a few seconds later
+  private botLines: string[] = [] // what the crowd said lately (nobody says the line somebody just said)
+  // Lines the crowd owes the room, a few seconds from now: a reaction to something that just happened (a coin bonded,
+  // a dev dumped, a player launched or bought big) or one bot answering another. `not`: the bot that mustn't say it.
+  private botSay: { at: number; text: string; not?: string }[] = []
+  private eyesOn = new Map<string, number>() // coins the crowd is looking at right now (coin id → until which tick)
   private timer: ReturnType<typeof setInterval>
 
   /** The public World: one round that never ends, never pauses, and keeps everyone's wallet. */
@@ -520,7 +525,7 @@ export class Room {
       const rng = new Rng((Math.random() * 2 ** 32) >>> 0)
       const named = text.match(/\$([A-Za-z0-9]{2,12})/)?.[1]?.toUpperCase()
       const coin = named && this.market.tokens.find((t) => t.ticker.toUpperCase() === named)
-      const line = /\b(gm|good morning|hello|hey|hi|yo|sup)\b/i.test(text) ? chatLine('gm', rng) : coin ? chatLine('coin', rng, coin.ticker) : text.includes('?') ? chatLine('ask', rng) : chatLine('reply', rng)
+      const line = /\b(gm|good morning|hello|hey|hi|yo|sup)\b/i.test(text) ? this.say('gm', rng) : coin ? this.say('coin', rng, coin.ticker) : text.includes('?') ? this.say('ask', rng) : this.say('reply', rng)
       this.botReply = { at: this.market.tick + rng.int(2, 7), text: line }
     }
   }
@@ -688,6 +693,15 @@ export class Room {
     me.wallet = r.portfolio
     this.market = r.market
     this.earn(me, r.fills)
+    if (o.side === 'sell' && this.cooked.get(t.id)?.pid === me.info.id) this.devSold(t.id, w.positions[t.id]?.qty ?? 0, me.wallet.positions[t.id]?.qty ?? 0)
+    // A real player's big buy gets noticed: the crowd looks at the coin, and somebody may say so.
+    if (o.side === 'buy' && !me.info.bot) {
+      const spent = r.fills.reduce((a, x) => a + x.value, 0)
+      if (spent >= Math.max(150, t.liquidity * 0.01)) {
+        this.lookAt(t.id, 45)
+        this.react('bigbuy', t.ticker, 0.35, [3, 9])
+      }
+    }
     // KOLs: their followers' copy bots follow the trade a few seconds later.
     let note: string | undefined
     if (r.fills.length) {
@@ -707,6 +721,16 @@ export class Room {
       }
     }
     this.sendWallet(me, { ref: msg.ref, fills: r.fills.map((f) => ({ ...f, ref: msg.ref })), failures: r.failures, note })
+  }
+
+  /**
+   * A dev sold some of their own coin: the crowd sees the dev wallet selling and part of it leaves (the game does the
+   * same to a solo player's coin). `before` and `after` are all the coins the dev holds, in every wallet.
+   */
+  private devSold(tokenId: string, before: number, after: number) {
+    const frac = before > 0 ? Math.min(1, Math.max(0, (before - after) / before)) : 0
+    if (!(frac > 0)) return
+    this.market = { ...this.market, tokens: this.market.tokens.map((x) => (x.id === tokenId ? { ...x, hype: Math.max(0, x.hype - 30 * frac), sim: { ...x.sim, pressure: x.sim.pressure - 0.012 * frac } } : x)) }
   }
 
   private op(me: Member, msg: Extract<ClientMsg, { t: 'op' }>) {
@@ -865,6 +889,11 @@ export class Room {
     if (firstCandles) candleStore.set(token.id, firstCandles)
     this.freshIds.add(token.id)
     this.cooked.set(token.id, { pid: me.info.id, walletId: devWallet, chain, vault: 0, feeMark: 0, grad: false })
+    // A new coin from a real player: somebody in the room notices, and the snipers take a look.
+    if (!me.info.bot) {
+      this.lookAt(token.id, 90)
+      this.react('fresh', token.ticker, 0.8, [4, 14])
+    }
 
     // Dev buy (shows as the dev wallet), then the bundle (shows as random wallets).
     setClock(secPerTickOf(this.market))
@@ -958,7 +987,18 @@ export class Room {
     // Coins players hold or watch aren't delisted (in the World: only players who are on right now).
     const protectedIds = new Set([...this.members.values()].filter((m) => !this.world || m.info.online).flatMap((m) => m.protect))
     for (const id of this.bots.keys()) protectedIds.add(id)
-    const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds })
+    // The coins in real wallets (players on or off line, and the bots) and in the tracked wallets: the rest of the
+    // simulated crowd can only sell what it bought itself, never these (see sellRoom in the market engine).
+    const held = new Map<string, number>()
+    for (const m of this.members.values()) for (const [id, p] of Object.entries(m.wallet?.positions ?? {})) held.set(id, (held.get(id) ?? 0) + p.qty)
+    for (const w of this.wallets) if (!w.bot) for (const [id, p] of Object.entries(w.positions)) held.set(id, (held.get(id) ?? 0) + p.qty) // (a bot's public wallet mirrors its own)
+    const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds, held })
+    // The crowd talks about what just happened: a coin that bonded, a dev that dumped.
+    for (const e of e1) {
+      if (e.kind === 'graduation' && e.ticker) this.react('grad', e.ticker, 0.45, [2, 8])
+      else if (e.kind === 'rug' && e.ticker) this.react('rug', e.ticker, 0.45, [2, 7])
+      else if (e.kind === 'devsell' && e.ticker && e.text.includes('whole bag')) this.react('rug', e.ticker, 0.2, [2, 7])
+    }
     const e2 = rollEvents(market, rng)
     const wr = tickWallets(this.wallets.filter((w) => !w.bot), market, rng)
     const posts = [...tickSocial(market, rng, wr.actions, [...e1, ...e2]), ...this.playerPosts]
@@ -1014,6 +1054,13 @@ export class Room {
       let usd = Math.max(0, fees - c.feeMark)
       c.feeMark = Math.max(c.feeMark, fees)
       const dev = this.members.get(c.pid)
+      // What the dev really holds shows on the coin's page and in how the crowd takes to it (see stepFlow). A bot
+      // never reports its bag, and a game that understates one is put right here.
+      if (dev?.wallet && (t.status === 'bonding' || t.status === 'graduated')) {
+        const held = ((dev.wallet.positions[id]?.qty ?? 0) / SUPPLY) * 100
+        if (dev.info.bot) t.devPct = held
+        else if (t.devPct + (t.bundlePct ?? 0) < held - 0.05) t.devPct = Math.min(100, held - (t.bundlePct ?? 0))
+      }
       if (!c.grad && t.status === 'graduated') {
         c.grad = true
         usd += GRAD_BONUS
@@ -1307,6 +1354,25 @@ export class Room {
     this.wallets = this.wallets.map((x, k) => (k === i ? w : x))
   }
 
+  /** A chat line of this kind that nobody in the room said lately. */
+  private say(kind: Parameters<typeof chatLine>[0], rng: Rng, ticker = '', pct = 0) {
+    return chatLine(kind, rng, ticker, pct, this.botLines)
+  }
+
+  /** Something happened that people would talk about: maybe one of the crowd says so, a few seconds later. */
+  private react(kind: Parameters<typeof chatLine>[0], ticker: string, chance: number, delay: [number, number], not?: string) {
+    if (!this.world || Math.random() >= chance || this.botSay.length >= 8) return
+    const rng = new Rng((Math.random() * 2 ** 32) >>> 0)
+    this.botSay.push({ at: this.market.tick + rng.int(delay[0], delay[1]), text: this.say(kind, rng, ticker), not })
+  }
+
+  /** The crowd looks at this coin for a while: bots choosing what to buy are likelier to pick it. */
+  private lookAt(tokenId: string, ticks: number) {
+    if (!this.world) return
+    this.eyesOn.set(tokenId, this.market.tick + ticks)
+    if (this.eyesOn.size > 200) for (const [id, until] of this.eyesOn) if (until < this.market.tick) this.eyesOn.delete(id)
+  }
+
   private botChat(m: Member, text: string, reply = false) {
     // Each bot keeps quiet for a while after talking, and the crowd leaves gaps between lines; answers skip the wait.
     if (!reply && (this.market.tick - (m.brain?.lastChat ?? -999) < 90 || this.market.tick - this.lastBotChat < 20)) return
@@ -1314,6 +1380,8 @@ export class Room {
     this.lastBotChat = this.market.tick
     const said = inVoice(BOT_BY_ID.get(m.info.id), text, new Rng((Math.random() * 2 ** 32) >>> 0)) // each bot talks its own way
     this.broadcast({ t: 'chat', from: m.info.id, name: m.info.name, avatar: m.info.avatar, text: said, time: Date.now() })
+    // Now and then somebody answers: a room where nobody ever replies to anybody reads as a wall of announcements.
+    if (!reply) this.react('agree', '', 0.22, [4, 12], m.info.id)
   }
 
   /** A bot looks at the market and maybe buys, the way real traders of its style and level did (server/brainBots.ts). */
@@ -1338,11 +1406,14 @@ export class Room {
     if (rng.chance(p.mistake)) t = [...live].sort((a, c) => c.change['5m'] - a.change['5m'])[0] // FOMO into whatever is already up the most
     else {
       // Weigh coins by how much more often real traders like this bought in that kind of moment.
-      const pool = live.length > 40 ? [...live.slice(0, 20), ...Array.from({ length: 20 }, () => live[rng.int(0, live.length - 1)])] : live
+      // (Coins the crowd is looking at, a player's fresh launch or a coin somebody just bought big, are always in view.)
+      const watched = live.filter((x) => (this.eyesOn.get(x.id) ?? 0) > this.market.tick)
+      const some = live.length > 40 ? [...live.slice(0, 20), ...Array.from({ length: 20 }, () => live[rng.int(0, live.length - 1)])] : live
+      const pool = watched.length ? [...watched, ...some.filter((x) => !watched.includes(x))] : some
       const safe = pool.map(safety)
       const order = [...safe].sort((a, c) => a - c)
       const rank = (v: number) => (order.indexOf(v) + 1) / order.length // 1 = the safest coin in view
-      const weights = pool.map((x, i) => (g.buyLift[situation(x, now, solUsd)] ?? 0.15) * eye(spec.tier, rank(safe[i]), x))
+      const weights = pool.map((x, i) => (g.buyLift[situation(x, now, solUsd)] ?? 0.15) * eye(spec.tier, rank(safe[i]), x) * (watched.includes(x) ? 3 : 1))
       let r = rng.next() * weights.reduce((a, c) => a + c, 0)
       t = pool.find((_, i) => (r -= weights[i]) <= 0) ?? pool[pool.length - 1]
     }
@@ -1355,7 +1426,7 @@ export class Room {
     // Dumpers sell their whole bag into the first decent pump.
     if (b.style === 'dumper') Object.assign(plan, { target: Math.min(plan.target, rng.range(1.1, 1.5)), frac: 1, holdToEnd: false })
     ;(b.plans ??= {})[t.id] = plan
-    if (rng.chance(0.25)) this.botChat(m, chatLine(b.style === 'sniper' || b.style === 'dumper' ? 'snipe' : b.style === 'whale' ? 'whale' : 'buy', rng, t.ticker))
+    if (rng.chance(0.25)) this.botChat(m, this.say(b.style === 'sniper' || b.style === 'dumper' ? 'snipe' : b.style === 'whale' ? 'whale' : 'buy', rng, t.ticker))
     if (rng.chance(0.06)) this.botPost(m, t, `${t.ticker} ${rng.chance(0.5) ? 'looks ready 🚀' : 'is the play today'}`)
   }
 
@@ -1382,7 +1453,7 @@ export class Room {
       return
     }
     b.streak = x >= 1 ? Math.max(1, (b.streak ?? 0) + 1) : Math.min(-1, (b.streak ?? 0) - 1)
-    if (rng.chance(0.3)) this.botChat(m, chatLine(x >= 1 ? 'win' : 'loss', rng, t.ticker, pnl))
+    if (rng.chance(0.3)) this.botChat(m, this.say(x >= 1 ? 'win' : 'loss', rng, t.ticker, pnl))
   }
 
   /** Bots' big sells per coin in the last 10 seconds (the pile-on limit). */
@@ -1416,9 +1487,20 @@ export class Room {
       if (m && this.botReply && tick >= this.botReply.at) this.botChat(m, this.botReply.text, true)
       else if (m && rng.chance(0.3)) {
         const hot = this.market.tokens.filter((t) => (t.status === 'bonding' || t.status === 'graduated') && t.change['5m'] > 40 && t.liquidity > 5_000).sort((a, b) => b.change['5m'] - a.change['5m'])[0]
-        if (hot) this.botChat(m, chatLine('hype', rng, hot.ticker, hot.change['5m'] / 100))
+        if (hot) this.botChat(m, this.say('hype', rng, hot.ticker, hot.change['5m'] / 100))
+        else {
+          const cold = this.market.tokens.filter((t) => t.status === 'graduated' && t.change['5m'] < -30 && t.liquidity > 5_000).sort((a, b) => a.change['5m'] - b.change['5m'])[0]
+          if (cold) this.botChat(m, this.say('dip', rng, cold.ticker))
+        }
       }
       if (this.botReply && tick >= this.botReply.at) this.botReply = null
+    }
+    // What the crowd owes the room (see botSay): one line at a time, a few seconds apart.
+    const owed = this.botSay.findIndex((q) => tick >= q.at)
+    if (owed >= 0 && tick - this.lastBotChat >= 4) {
+      const q = this.botSay.splice(owed, 1)[0]
+      const awake = BOT_ROSTER.map((x) => this.members.get(x.id)).filter((x): x is Member => !!x?.brain && x.info.online && x.info.id !== q.not)
+      if (awake.length) this.botChat(awake[rng.int(0, awake.length - 1)], q.text, true)
     }
     for (const spec of BOT_ROSTER) {
       const m = this.members.get(spec.id)
@@ -1445,7 +1527,7 @@ export class Room {
         if (!t || !live(t)) {
           if (b.entries[pos.tokenId]) {
             b.streak = Math.min(-1, (b.streak ?? 0) - 1)
-            if (t && rng.chance(0.4)) this.botChat(m, chatLine('loss', rng, t.ticker, -0.9))
+            if (t && rng.chance(0.4)) this.botChat(m, this.say('loss', rng, t.ticker, -0.9))
           }
           this.botWriteOff(m, pos.tokenId, t?.chain ?? 'sol')
           continue
@@ -1462,7 +1544,7 @@ export class Room {
         const exit = pnl >= st.tp || (st.sl !== null && pnl <= -st.sl) || (st.hold !== null && tick - e.tick > st.hold)
         if (!exit || !rng.chance(0.5)) continue
         const f = this.botSell(m, t, pos.qty, actions)
-        if (f && rng.chance(0.3)) this.botChat(m, chatLine(pnl >= 0 ? 'win' : 'loss', rng, t.ticker, pnl))
+        if (f && rng.chance(0.3)) this.botChat(m, this.say(pnl >= 0 ? 'win' : 'loss', rng, t.ticker, pnl))
       }
 
       const learned = b.style === 'chef' ? null : groupFor(b.style, spec.tier)
@@ -1479,13 +1561,13 @@ export class Room {
           if (t && usd >= 20) {
             const f = this.botBuy(m, t, Math.min(usd, t.liquidity * 0.03), actions)
             if (f) {
-              if (rng.chance(0.25)) this.botChat(m, chatLine(b.style === 'sniper' ? 'snipe' : b.style === 'whale' ? 'whale' : 'buy', rng, t.ticker))
+              if (rng.chance(0.25)) this.botChat(m, this.say(b.style === 'sniper' ? 'snipe' : b.style === 'whale' ? 'whale' : 'buy', rng, t.ticker))
               if (rng.chance(0.12)) this.botPost(m, t, `${t.ticker} ${rng.chance(0.5) ? 'looks ready 🚀' : 'is the play today'}`)
             }
           }
         }
       }
-      if (tick - b.lastChat > 600 && rng.chance(0.002)) this.botChat(m, chatLine('idle', rng))
+      if (tick - b.lastChat > 600 && rng.chance(0.002)) this.botChat(m, this.say('idle', rng))
 
       // Scoreboard, public bags, coins to keep listed, and going broke.
       if (tick % 5 === 0) {
@@ -1508,7 +1590,7 @@ export class Room {
           b.busts++
           const i = this.wallets.findIndex((x) => x.id === spec.id)
           if (i >= 0) this.wallets = this.wallets.map((x, k) => (k === i ? { ...x, cash: BOT_RESTART_USD, positions: {} } : x))
-          this.botChat(m, chatLine('bust', rng))
+          this.botChat(m, this.say('bust', rng))
         }
       }
     }
@@ -1531,22 +1613,25 @@ export class Room {
       const ran = t.mcap >= c.mcap * 2.5 && rng.chance(0.02)
       const old = tick - c.tick > 1800
       const dump = c.dumpAt !== undefined && tick >= c.dumpAt // the planned dev dump, timed like real devs'
-      if (!ran && !old && !dump) continue
-      const frac = old ? 1 : dump ? rng.range(0.5, 1) : rng.range(0.3, 0.6)
+      // The buyers have gone: a dev doesn't sit on a bag in a coin that is going quiet on its curve.
+      const fading = !ran && !old && !dump && t.status === 'bonding' && !!t.sim.flow && t.sim.flow.att < 0.1 && tick - c.tick > 40 && rng.chance(0.2)
+      if (!ran && !old && !dump && !fading) continue
+      const frac = old || fading ? 1 : dump ? rng.range(0.5, 1) : rng.range(0.3, 0.6)
       if (dump && !this.mayDump(id)) {
         c.dumpAt = tick + rng.int(3, 10)
         continue
       }
       const f = this.botSell(m, t, held * frac, actions)
       if (!f) continue
+      this.devSold(id, held, m.wallet?.accounts?.[0]?.positions[id]?.qty ?? 0)
       if (dump) {
         c.dumpAt = undefined
         this.noteDump(id)
       }
-      if (old) delete b.cooked[id]
+      if (old || fading) delete b.cooked[id]
       else c.mcap = t.mcap // next dump only after another run
       this.playerEvents.push({ by: m.info.id, id: tick * 100 + 96, tick, time: this.market.time, kind: 'devsell', tokenId: t.id, ticker: t.ticker, text: `Dev (${m.info.name}) sold ${Math.round(frac * 100)}% of their ${t.ticker} bag`, icon: '🧑‍💻', tone: 'down' })
-      if (rng.chance(0.5)) this.botChat(m, chatLine('devsell', rng, t.ticker))
+      if (!fading && rng.chance(0.5)) this.botChat(m, this.say('devsell', rng, t.ticker))
     }
     // Creator fees: claimed now and then.
     if (tick % 300 === 0) {
@@ -1593,7 +1678,7 @@ export class Room {
     const dumps = me ? DEV_DUMP_CHANCE[me.tier] : 0.5
     b.cooked[id] = { mcap: after.mcap, tick, dumpAt: rng.chance(dumps) ? tick + Math.round(devDumpAfter(rng) * (me?.persona.patience ?? 1)) : undefined }
     this.playerEvents.push({ by: m.info.id, id: tick * 100 + 97, tick, time: this.market.time, kind: 'cook', tokenId: id, ticker, text: `${m.info.avatar} ${m.info.name} cooked ${ticker}`, icon: '🍳', tone: 'info' })
-    this.botChat(m, trend && rng.chance(0.5) ? `${trend.theme} szn. just cooked $${ticker} 🍳` : chatLine('cook', rng, ticker))
+    this.botChat(m, trend && rng.chance(0.5) ? `${trend.theme} szn. just cooked $${ticker} 🍳` : this.say('cook', rng, ticker))
     b.lastPost = tick - 900 // always shills its own launch
     this.botPost(m, after, trend ? `${ticker} just launched, ${trend.theme} meta is running 🍳 early` : `${ticker} just launched on pump 🍳 early`)
   }

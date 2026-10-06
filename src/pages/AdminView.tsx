@@ -286,7 +286,7 @@ function Market({ rooms }: { rooms: RoomSummary[] }) {
               {SIZES.map((v) => <button key={v} disabled={!sel} onClick={() => run({ kind: 'dump', tokenId: sel!.id, usd: size(v) }, `Dumped $${sel!.ticker} ${fmtUsd(size(v), 0)}`)} className={clsx(btn, 'border-down/50 text-down hover:bg-down/10')}>{custom ? fmtUsd(Number(custom), 0) : `$${fmtCompact(v).replace('$', '')}`}</button>)}
             </div>
             <button disabled={!sel} onClick={() => confirm(`Rug $${sel!.ticker}? It plays out like a normal rug on the next tick.`) && run({ kind: 'rug', tokenId: sel!.id }, `Rugged $${sel!.ticker}`)} className={clsx(btn, 'border-down bg-down/10 text-down hover:bg-down hover:text-white')}>💀 Rug it</button>
-            <p className="text-[10px] text-dim">Hidden: pumps and dumps are split across made-up wallets on the trades tab, and a rug looks like the dev pulled.</p>
+            <p className="text-[10px] text-dim">Hidden: pumps and dumps are split across made-up wallets on the trades tab, and a rug looks like any other: insiders dumping their bags.</p>
           </div>
         </Card>
         <Card title="Spawn a coin">

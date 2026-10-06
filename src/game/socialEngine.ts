@@ -264,7 +264,7 @@ export function tickSocial(m: MarketState, rng: Rng, actions: WalletAction[], ev
     if (!rng.chance(e.kind === 'rug' || e.kind === 'graduation' ? 0.8 : 0.35)) continue
     switch (e.kind) {
       case 'graduation': if (t) post('x-trenchnews', `🎓 ${T(t)} just graduated to the ${CHAINS[t.chain].dex} pool at ${fmtCompact(t.mcap)} MC\n${CA(t)}`, t); break
-      case 'rug': if (t) post('x-memealerts', `💀 ${T(t)} rugged. liquidity pulled. stay safe out there`, t); break
+      case 'rug': if (t) post('x-memealerts', `💀 ${T(t)} rugged. insiders dumped everything. stay safe out there`, t); break
       case 'trending': case 'viral': if (t) post('x-memealerts', `🔥 ${T(t)} trending across the timeline · MC ${fmtCompact(t.mcap)}\n${CA(t)}`, t); break
       case 'whale': if (t) post('x-trenchnews', `🐋 whale just bought ${T(t)}\n${CA(t)}`, t); break
       case 'devsell': if (t) post('x-chartcrimes', `dev wallet on ${T(t)} is selling. you've been warned 👀`, t); break

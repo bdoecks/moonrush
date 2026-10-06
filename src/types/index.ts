@@ -338,6 +338,8 @@ export interface TokenSim {
   pressure: number // decaying extra buy(+)/sell(-) pressure from events and flow
   volBoost: number // decaying extra volatility multiplier
   rugAt: number | null // tick at which a scheduled rug executes
+  pend?: number // the market's pull on the price (log return) that no trade has carried yet: prices only move on trades
+  held?: number // coins in real wallets (players and bots), as of the last tick: the simulated crowd can't sell those
   baseTurnover: number
   flow?: FlowState // realistic engine only
 }

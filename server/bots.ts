@@ -188,26 +188,68 @@ export function pickCoin(style: BotStyle, tokens: Token[], now: number, held: Se
 }
 
 // ─── Chat ────────────────────────────────────────────────────────────────────
+// What the crowd says. $T is a coin's ticker, P% a percentage. The pools are big and nobody says the line somebody
+// just said: a chat where the same nine sentences come round every minute reads as a machine at once. Most lines are
+// about the market in general, not "I bought X": real people in a trenches chat mostly react, ask and complain.
 const LINES: Record<string, string[]> = {
-  buy: ['aped $T 🦍', 'in $T, lfg', 'bought some $T, chart looks clean', 'small bag of $T 👀', '$T sending? im in', 'starter bag of $T', 'ok fine i bought $T', '$T dip looked too good', 'adding $T here'],
-  snipe: ['sniped $T at launch 🎯', 'first block on $T', 'early on $T, lets see', 'got $T under 10k mc', '$T fresh out the oven, im in'],
-  whale: ['loaded up on $T 🐋', 'size in $T. dont fade me', 'accumulating $T'],
-  win: ['took profit on $T +P% 💰', '$T paid +P%, ty', 'out of $T +P%. easy', 'secured the bag on $T (+P%)', '+P% on $T, ill take it', '$T printed. +P%', 'sold $T +P%, watch it double now lol'],
-  loss: ['cut $T -P% 🩸', '$T rugged me -P%', 'paper handed $T -P%, next', 'stop loss hit on $T', '$T -P%. pain', 'never buying $T again (-P%)', 'exit liquidity on $T again 🤡'],
-  cook: ['just cooked $T 🍳 dev is based', '$T is live, fair launch fr', 'new coin $T, get in early 👨‍🍳'],
-  devsell: ['took some off $T, still believe 🫡', 'dev wallet needs gas money, $T'],
-  bust: ['rekt 💀 starting over with $1k', 'account blown. back to $1k', 'gg. $0. restarting'],
-  idle: ['market kinda slow rn', 'who is in something good?', 'sol trenches cooking today', 'anyone watching the graduates?', 'gm', 'lfg world 🌍', 'patience pays', 'new pairs looking spicy', 'whats the play', 'need one good runner today', 'who cooked that last one lol', 'leaderboard looking tight this week', 'anyone else get rugged this morning', 'trenches never sleep'],
+  buy: [
+    'aped $T 🦍', 'in $T, lfg', 'bought some $T, chart looks clean', 'small bag of $T 👀', '$T sending? im in', 'starter bag of $T', 'ok fine i bought $T',
+    '$T dip looked too good', 'adding $T here', 'took a position in $T', 'grabbed a little $T', 'im in $T. dont ask me why', '$T looks like it wants higher',
+    'bid $T', 'couldnt help it, bought $T', 'got filled on $T', 'half size on $T, will add if it holds', '$T has buyers, im following', 'back in $T',
+    'nibbled $T', 'ok $T i see you', 'threw a little at $T', '$T volume picking up so i bought', 'long $T from here', 'in on $T, stop is tight',
+  ],
+  snipe: [
+    'sniped $T at launch 🎯', 'first block on $T', 'early on $T, lets see', 'got $T under 10k mc', '$T fresh out the oven, im in', 'in $T seconds after launch',
+    'caught $T at the bottom of the curve', 'bought $T before the bots woke up', '$T at launch price, free roll', 'early $T. dev better behave',
+    'in $T from the first candle', 'quick one on $T, just launched',
+  ],
+  whale: ['loaded up on $T 🐋', 'size in $T. dont fade me', 'accumulating $T', 'real size on $T now', 'building a position in $T', 'took a proper bag of $T', '$T is my biggest hold rn', 'scaling into $T', 'bought the $T wall', 'quietly loading $T'],
+  win: [
+    'took profit on $T +P% 💰', '$T paid +P%, ty', 'out of $T +P%. easy', 'secured the bag on $T (+P%)', '+P% on $T, ill take it', '$T printed. +P%',
+    'sold $T +P%, watch it double now lol', 'closed $T for +P%', 'trimmed $T, up P%', '$T did its job, +P%', 'thank you $T, +P%', 'banked +P% on $T',
+    '+P% on $T. dinner is on the dev', 'sold $T into strength, +P%', 'finally a green one, $T +P%', 'scaled out of $T, +P% overall', 'tp hit on $T +P%', '$T was kind to me, +P%',
+  ],
+  loss: [
+    'cut $T -P% 🩸', '$T rugged me -P%', 'paper handed $T -P%, next', 'stop loss hit on $T', '$T -P%. pain', 'never buying $T again (-P%)', 'exit liquidity on $T again 🤡',
+    'out of $T, -P%', 'i was the top on $T, -P%', '$T round tripped on me, -P%', 'sold $T for a loss, moving on', '-P% on $T. my fault, chased it', 'got dumped on in $T, -P%',
+    'held $T too long, -P%', 'took the L on $T (-P%)', '$T -P%, should have listened', 'that $T entry was terrible, -P%', 'rekt on $T, -P%',
+  ],
+  cook: ['just cooked $T 🍳 dev is based', '$T is live, fair launch fr', 'new coin $T, get in early', 'launched $T, lets see if it runs', '$T just dropped from my kitchen', 'cooked $T. no bundle, no games', '$T is out, dev buy was small', 'fresh launch: $T', 'my new one is $T, be gentle', 'put $T on the curve just now'],
+  devsell: ['took some off $T, still believe 🫡', 'dev wallet needs gas money, $T', 'sold a bit of my $T dev bag, rest is riding', 'trimmed $T, devs gotta eat', 'took profit on $T dev bag, not all of it', 'paid myself a little from $T'],
+  bust: ['rekt 💀 starting over with $1k', 'account blown. back to $1k', 'gg. $0. restarting', 'thats the account. reloading 1k', 'liquidated my own patience. starting from 1k', 'blew it. fresh 1k, new me'],
+  idle: [
+    'market kinda slow rn', 'who is in something good?', 'trenches cooking today', 'anyone watching the graduates?', 'gm', 'lfg world 🌍', 'patience pays', 'new pairs looking spicy',
+    'whats the play', 'need one good runner today', 'who cooked that last one lol', 'leaderboard looking tight this week', 'anyone else get rugged this morning', 'trenches never sleep',
+    'so many launches, so few runners', 'volume feels thin', 'everything bonding is getting sold right after', 'whats the meta rn', 'is it just me or are devs dumping faster today',
+    'need to stop buying the first green candle', 'sitting on my hands for a bit', 'anyone have a good read on the top gainers', 'the final stretch column is where the money is',
+    'i keep selling too early', 'who is top of the board today', 'half these coins die in a minute', 'waiting for a clean setup', 'that last candle was wild', 'bonding curves are brutal today',
+    'any chefs cooking something decent?', 'three reds in a row, taking a break', 'small size until i get a win', 'anyone else only trading new pairs', 'checking dev wallets before i touch anything',
+    'liquidity is thin on the small ones, careful', 'how are people sizing today', 'this is why i dont hold overnight', 'the good ones always dip first', 'gonna watch for a bit', 'coffee then charts',
+  ],
   // Calling out what the market is doing.
-  hype: ['$T up P% in 5m 👀', 'who is in $T?? +P%', '$T is sending rn (+P%)', 'missed $T, already +P% 😭', '$T chart is crazy'],
+  hype: ['$T up P% in 5m 👀', 'who is in $T?? +P%', '$T is sending rn (+P%)', 'missed $T, already +P% 😭', '$T chart is crazy', '$T wont stop, +P%', 'is anyone actually in $T? +P%', '$T +P% and i watched the whole thing', 'ok $T is real, +P%', '$T going vertical', 'how is $T up P% already', 'fading $T here is brave, +P%', '$T holders eating, +P%', 'look at $T go'],
+  dip: ['$T giving it all back', '$T down bad now', 'that $T dump was fast', 'who sold $T like that', '$T chart just fell off a cliff', 'ouch $T', 'bought the $T dip, pray for me', '$T retracing hard'],
+  grad: ['$T just bonded 🎓', '$T migrated, lets see if it holds', 'gz $T holders', '$T made it off the curve', 'another graduate: $T', '$T bonded. now the real test', 'told you $T would bond', '$T on the dex now', 'nice, $T graduated', '$T through the curve, who held?'],
+  rug: ['$T dev just nuked it 💀', 'rip $T', 'who was holding $T', 'another one. $T gone', 'thats why you check the dev wallet. $T', '$T insiders dumped everything', 'gg $T', 'saw that $T dump coming', '$T rugged, classic', 'well that was $T', 'dev sold all of $T. shocker', 'hope nobody had size in $T'],
+  // A real player did something: nobody should feel alone in the room.
+  fresh: ['who cooked $T?', '$T just launched, anyone in?', 'new one: $T. checking the dev', 'looking at $T, fair launch?', '$T fresh, might take a small bag', 'ooh $T just dropped', 'someone launched $T, lets see', '$T looks interesting for a new launch', 'early eyes on $T', 'new chef in the kitchen: $T'],
+  bigbuy: ['someone just sent a big buy into $T 👀', 'whale alert on $T', 'who is loading $T??', 'big bid on $T just now', '$T just got a serious buy', 'somebody knows something about $T', 'size just came into $T', 'that $T buy moved the chart'],
+  agree: ['fr', 'same', 'im in that too', 'nah im fading that', 'careful, top holders look heavy', 'sold too early on that one', 'lol true', 'real', 'facts', 'this', 'been saying this', 'eh, not convinced', 'good call', 'late but in', 'how much size?', 'dev still holding?', 'watching it', 'that one burned me before', 'respect', 'big if true'],
   // Answers to real players, so nobody talks to an empty room.
-  gm: ['gm', 'gm 🫡', 'gm gm', 'gm, what are we buying'],
-  reply: ['fr', 'lol true', 'real', 'same tbh', 'facts', '👀', 'lfg', 'wagmi', 'big if true', 'haha', 'not financial advice 🤖'],
-  coin: ['watching $T too 👀', '$T? might take a look', 'how early are you on $T', 'careful with $T, check the dev', 'i like $T ngl'],
-  ask: ['new pairs in trenches are moving', 'check the final stretch column', 'im mostly sniping launches today', 'top gainers on discover, 5m', 'depends, how much risk you want lol'],
+  gm: ['gm', 'gm 🫡', 'gm gm', 'gm, what are we buying', 'gm trenches', 'morning', 'gm, any runners overnight?', 'yo gm'],
+  reply: ['fr', 'lol true', 'real', 'same tbh', 'facts', '👀', 'lfg', 'wagmi', 'big if true', 'haha', 'yeah', 'could be', 'no idea honestly', 'for real', 'thats what i heard', 'lets see', 'maybe', 'i was thinking the same', 'not wrong', 'hard to say'],
+  coin: ['watching $T too 👀', '$T? might take a look', 'how early are you on $T', 'careful with $T, check the dev', 'i like $T ngl', '$T has a decent chart', 'whats the dev holding on $T', 'been eyeing $T', '$T looks risky to me', 'im already in $T lol', 'not touching $T after that wick', '$T could run if volume comes'],
+  ask: ['new pairs in trenches are moving', 'check the final stretch column', 'im mostly sniping launches today', 'top gainers on discover, 5m', 'depends, how much risk you want lol', 'i just watch the tape and follow size', 'small size on new launches, bigger on graduates', 'look for low dev holding and real volume', 'whatever bonds usually gets a second leg', 'i sort discover by 5m and work down', 'honestly the leaderboard wallets are worth tracking', 'try the migrated ones, less rugs'],
 }
 
-export function chatLine(kind: keyof typeof LINES, rng: Rng, ticker = '', pct = 0) {
+/** A line of this kind. `recent`: lines said lately in the room, which are not said again (the caller keeps the list). */
+export function chatLine(kind: keyof typeof LINES, rng: Rng, ticker = '', pct = 0, recent?: string[]) {
   const arr = LINES[kind]
-  return arr[rng.int(0, arr.length - 1)].replace('$T', `$${ticker}`).replace('P%', `${Math.round(Math.abs(pct * 100))}%`)
+  let line = arr[rng.int(0, arr.length - 1)]
+  for (let tries = 0; recent && recent.includes(line) && tries < 6; tries++) line = arr[rng.int(0, arr.length - 1)]
+  if (recent) {
+    recent.push(line)
+    if (recent.length > 40) recent.shift()
+  }
+  return line.replace('$T', `$${ticker}`).replace('P%', `${Math.round(Math.abs(pct * 100))}%`)
 }

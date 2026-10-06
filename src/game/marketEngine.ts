@@ -1,4 +1,5 @@
 import { CHAIN_IDS, CHAINS } from '../data/chains'
+import { EVENT_TEMPLATES } from '../data/events'
 import { NARRATIVES } from '../data/narratives'
 import { generatedLaunch, INITIAL_TOKENS, LAUNCH_POOL, WALLET_PREFIXES, WALLET_SUFFIXES } from '../data/tokens'
 import type { Archetype, Candle, Chain, CookSpec, DevTrade, NativeQuote, MarketEngine, MarketEvent, MarketState, PadId, Regime, RiskLevel, TapeTrade, Timeframe, Token, TokenSim } from '../types'
@@ -22,8 +23,17 @@ export function setClock(secPerTick: number) {
   SIM_SEC_PER_TICK = secPerTick
   HOUR_TICKS = 3600 / secPerTick
   DECAY_1H = 1 - 1 / HOUR_TICKS
+  DT = secPerTick / CLASSIC_SEC_PER_TICK
   setWinClock(secPerTick)
 }
+// The market's own model (regimes, drift, volatility, hazards) is written "per classic tick" of 6 simulated seconds.
+// DT is how much of such a step one tick is: 1 on a classic market, 1/6 on a real-time one. Without it a real-time
+// coin did in one real second what the model means for six: a migrated coin moved 10% in a typical minute.
+let DT = 1
+/** How much of a classic 6-second step one tick is on the current clock (1, or 1/6 in real time). */
+export const clockStep = () => DT
+/** A per-classic-tick multiplier (0.88 a tick…) as it applies to one tick on the current clock. */
+const per = (rate: number) => (DT === 1 ? rate : Math.pow(rate, DT))
 export const SUPPLY = 1_000_000_000
 const MAX_CANDLES = 200
 // Second-level charts fill ~6 candles per real second, so they keep a deeper buffer.
@@ -77,7 +87,9 @@ const REGIME_DRIFT: Record<Regime, [number, number]> = {
 const MOON_WEIGHT: Record<Archetype, number> = { bluechip: 0, runner: 0.08, grinder: 0.006, bleeder: 0.002, chaotic: 0.05, rugger: 0.045, sleeper: 0.01 }
 // Memecoins bleed by default: a small negative drift (in sigma units) on top of every regime.
 /** A coin feels gravity above this many times its archetype's usual top market cap; 40x further is a hard ceiling. */
-const SIZE_CAP_MULT = 25
+const SIZE_CAP_MULT = 10
+/** A migrated coin's pool is never thinner than this share of its market cap (see tickMarket). */
+const POOL_FLOOR = 0.02
 const BLEED: Record<Archetype, number> = { bluechip: -0.01, runner: -0.05, grinder: 0.01, bleeder: -0.08, chaotic: -0.06, rugger: -0.07, sleeper: -0.02 }
 const REGIME_VOL: Record<Regime, number> = { sideways: 0.7, accumulation: 0.9, pump: 1.7, moon: 2.1, distribution: 1, dump: 1.9, recovery: 1.2, rug: 1 }
 const REGIME_ACTIVITY: Record<Regime, number> = { sideways: 0.7, accumulation: 1, pump: 2.6, moon: 4, distribution: 1.1, dump: 2.2, recovery: 1.4, rug: 3 }
@@ -521,7 +533,7 @@ export function touchCandles(t: Token, time: number, prevPrice: number, usd: num
  */
 export function poolFollows(t: Token, prevPrice: number) {
   if (t.status !== 'graduated' || !(prevPrice > 0) || !(t.price > 0)) return
-  t.liquidity = clamp(t.liquidity * Math.sqrt(t.price / prevPrice), t.price * SUPPLY * 0.02, t.price * SUPPLY * 0.4)
+  t.liquidity = Math.max(2, t.liquidity * Math.sqrt(t.price / prevPrice))
 }
 
 /**
@@ -555,13 +567,14 @@ function addTape(m: MarketState, t: Token, trade: Omit<TapeTrade, 'id'>) {
   t.tape = [{ ...trade, id: m.nextTradeId++ }, ...t.tape].slice(0, TAPE_LEN)
 }
 
-// ─── Realistic engine: pump.fun order flow ───────────────────────────────────
+// ─── Realistic engine: launchpad order flow ──────────────────────────────────
 // Calibrated to pump.fun (2026): ~30–50k launches a day, median fill ~$10, average ~$40, and a graduation rate
 // "juiced" to ~3% (real: 0.2–2.7%) so a 20-minute round reliably has winners. On the curve, price is nothing but the
-// sum of buys and sells: every simulated trade goes through the curve math, exactly like a player's.
+// sum of buys and sells: every simulated trade goes through the curve math, exactly like a player's. Every launchpad
+// trades this way, each on its own curve (its own virtual reserves, raise and end): the crowd is the same crowd.
 export const FLOW = {
-  launchPerSec: 0.4, // pump.fun launches per real second (~24 a minute; real: ~21–36)
-  maxLive: 70, // pump.fun coins alive on their curves at once
+  launchPerSec: 0.6, // launches per real second over all launchpads (~36 a minute; pump.fun alone does ~21–36)
+  maxLive: 110, // coins alive on their curves at once (all launchpads)
   buyMedian: 12,
   buySigma: 1.6, // lognormal: median $12, mean ≈ $43
   sellMedian: 10,
@@ -571,27 +584,40 @@ export const FLOW = {
   decayGood: 0.995, // …up to ~2 min for the coins that catch on
   feedback: 0.00012, // attention gained per $ of net buying, scaled by quality
   deadAfter: 25, // seconds with no trades (and no attention) before a coin is dead
+  devNews: 40, // a dev selling their whole bag is news once the coin is this far up its curve (%)
+  devQuiet: 180, // …and for a coin somebody cooked: its dev gets a few minutes to work it before it's written off
+  pressureAtt: 5, // attention gained (lost) per second for each unit of `pressure`: a dev tool working, a scandal
   delistAfter: 60, // seconds a dead coin lingers before it leaves the lists (unless you hold/watch it)
   kothProgress: 50, // "king of the hill": the attention bump pump.fun gives coins about halfway up the curve
   churn: 3, // traders per unit of attention (buys and sells both, so it adds activity without adding direction)
   heatSize: 0.8, // hot coins draw real degens (0.1–2 SOL), not just $10 dust: size scales up with attention
+  hotPace: 1.2, // attention × trade size above which a coin's clock starts to slow (see `pace` in stepFlow)…
+  hotCurve: 0.8, // …and how hard: 1 would hold every hot coin to the same dollars a second, 0 is no slowing
   botPairs: 0.3, // fresh coins: volume-bot / MEV buy+sell pairs per second for their first 3 minutes
   minTrade: 1,
 }
 
+// How a launch's score (0..1, see cookQuality) becomes the pull it has on the crowd in the real-time engine: the same
+// `q` every launch there has (median ≈ 0.07 for the crowd's own launches; above ≈ 1.4 a coin feeds on its own buying).
+const COOK_FLOW = { base: -3.0, perScore: 3.0, luck: 0.5 }
+
+const DEV_ICON = EVENT_TEMPLATES.find((e) => e.kind === 'devsell')?.icon ?? '📉'
+
 const lognormal = (rng: Rng, median: number, sigma: number) => median * Math.exp(sigma * rng.gauss())
 
-/** A realistic pump.fun launch: starts at the bottom of its curve, plus whatever the dev bought in the launch block. */
+/** A realistic launch on any launchpad: starts at the bottom of its curve, plus whatever the dev bought in the launch block. */
 function launchFlowToken(rng: Rng, m: MarketState, base: { ticker: string; name: string; emoji: string }): Token {
+  const chain = pickChain(rng)
+  const pad = pickPad(rng, chain)
   const q = Math.exp(rng.gauss() * 1.25 - 2.6) // median ≈ 0.07; top 1% ≈ 1.4
   const archetype: Archetype = q > 1.2 ? rng.weighted<Archetype>({ runner: 5, chaotic: 3, grinder: 1 }) : rng.weighted<Archetype>({ chaotic: 3, rugger: 3, bleeder: 3, runner: 1 })
-  const t = makeToken(rng, { ...base, archetype, chain: 'sol', pad: 'pump' }, m.time, true, m.native)
-  const nu = nativeUsdOf(m.native, 'sol')
-  const p = LAUNCHPADS.pump
+  const t = makeToken(rng, { ...base, archetype, chain, pad }, m.time, true, m.native)
+  const nu = nativeUsdOf(m.native, chain)
+  const p = LAUNCHPADS[pad]
   // Dev buy on the curve: price after `sold` tokens leave it is k / (vTokens − sold)².
   const sold = Math.min(p.curveTokens * 0.3, (t.devPct / 100) * SUPPLY)
   const y = p.vTokens - sold
-  t.price = (curveK('pump') / y / y) * nu * 1.0005
+  t.price = (curveK(pad) / y / y) * nu * 1.0005
   t.mcap = t.ath = t.price * SUPPLY
   syncCurve(t, nu)
   t.volume = (t.devPct / 100) * t.mcap
@@ -600,6 +626,7 @@ function launchFlowToken(rng: Rng, m: MarketState, base: { ticker: string; name:
   t.sells = 0
   t.win = undefined
   t.rugProb = 0 // on this engine the dev "rugs" by dumping their bag into the curve (see stepFlow)
+  if (!(t.devPct > 0.3)) t.devTrades = undefined // (makeToken logged a launch-block dev buy only when there was one)
   t.volatility = 0.02
   t.holders = 1
   t.snipers = 0
@@ -617,13 +644,18 @@ function migrate(t: Token, m: MarketState, nu: number, emit: (e: Omit<MarketEven
   t.mcap = t.price * SUPPLY
   t.ath = Math.max(t.ath, t.mcap)
   t.sim.anchor = Math.log(t.price)
+  t.sim.pend = 0
   t.liquidity = migratedLiquidityUsd(t.pad, nu)
+  // The crowd's own launches can't rug on the curve (their dev just dumps, see stepFlow), but once there is a pool
+  // the insiders who rode the curve up can dump into it, as on any coin of its kind. (Not a cooked coin: its only
+  // insider is its dev.)
+  if (t.sim.flow && t.creator !== 'you' && !(t.rugProb > 0)) t.rugProb = PROFILES[t.sim.archetype].rug * 2.5
   t.sim.pressure += 0.006
   t.hype = Math.min(100, t.hype + 15)
   emit({ kind: 'graduation', tokenId: t.id, ticker: t.ticker, text: `$${t.ticker} completed its ${LAUNCHPADS[t.pad].name} curve and migrated to ${LAUNCHPADS[t.pad].dex}`, icon: '🎓', tone: 'up' })
 }
 
-/** One real second of trading on a realistic pump.fun coin. Returns false once it's dead (and should be delisted). */
+/** One real second of trading on a coin that is still on its curve. */
 function stepFlow(t: Token, m: MarketState, rng: Rng, native: MarketState['native'], emit: (e: Omit<MarketEvent, 'id' | 'tick' | 'time'>) => void) {
   const f = t.sim.flow!
   const nu = nativeUsdOf(native, t.chain)
@@ -634,8 +666,16 @@ function stepFlow(t: Token, m: MarketState, rng: Rng, native: MarketState['nativ
 
   // Who shows up this second.
   const heat = 1 + FLOW.heatSize * Math.min(6, f.att)
-  let nBuy = rng.poisson(FLOW.churn * f.att * (0.62 + 0.35 * clamp(t.momentum * 25, -0.4, 0.6)))
-  let nSell = rng.poisson(FLOW.churn * f.att * 0.55 + Math.sqrt(Math.max(0, t.holders - 1)) * 0.02 * Math.max(0, run - 0.9) * 4)
+  // A coin that catches on doesn't trade a hundred times a second: the hotter it runs, the slower its clock next to
+  // a quiet coin's (the same buyers and sellers, spread over minutes). Without this a winner was through its whole
+  // curve in half a minute: nobody could trade it, and the final stretch was a list of coins flashing past.
+  const pace = Math.min(1, (FLOW.hotPace / Math.max(1e-9, f.att * heat)) ** FLOW.hotCurve)
+  // A cooked coin whose dev (and bundle) sit on a big share of the supply puts the crowd off, as the launch screen
+  // says it will: fewer people show up at all.
+  const cooked = t.creator === 'you'
+  const crowd = FLOW.churn * f.att * (cooked ? Math.exp((-COOK_FLOW.perScore * Math.max(0, t.devPct + (t.bundlePct ?? 0) - 3)) / 50) : 1)
+  let nBuy = rng.poisson(crowd * pace * (0.62 + 0.35 * clamp((t.momentum / pace) * 25, -0.4, 0.6)))
+  let nSell = rng.poisson((crowd * 0.55 + Math.sqrt(Math.max(0, t.holders - 1)) * 0.02 * Math.max(0, run - 0.9) * 4) * pace)
   nBuy = Math.min(nBuy, 40)
   nSell = Math.min(nSell, 40)
 
@@ -643,26 +683,17 @@ function stepFlow(t: Token, m: MarketState, rng: Rng, native: MarketState['nativ
   let nb = 0
   let ns = 0
   let netUsd = 0
-  const trade = (side: 'buy' | 'sell', usd: number, tag?: TapeTrade['tag'], bot = false) => {
-    usd = Math.max(FLOW.minTrade, usd)
-    const prev = t.price
-    if (side === 'buy') t.price = quoteBuy(t, usd).newPrice
-    else {
-      // A seller can't get more out than the curve actually holds (the SOL raised so far).
-      usd = Math.min(usd, curveAt(t.pad, t.price / nu).raised * nu * 0.95)
-      if (usd < 1) return
-      t.price = Math.max(launchPx * 1.0005, quoteSell(t, usd / t.price).newPrice)
-    }
-    t.mcap = t.price * SUPPLY
-    t.ath = Math.max(t.ath, t.mcap)
-    touchCandles(t, m.time, prev, usd, native) // also keeps the curve (liquidity, progress) in sync
-    addTape(m, t, { time: m.time, side, usd, price: t.price, wallet: walletName(rng), tag })
+  const trade = (side: 'buy' | 'sell', usd: number, tag?: TapeTrade['tag'], bot = false, wallet?: string) => {
+    // A seller can't get more out than the curve actually holds (the SOL raised so far); fillSim sees to that, and
+    // to a buy at the very end of the curve.
+    usd = fillSim(m, t, side, Math.max(FLOW.minTrade, side === 'sell' ? Math.min(usd, curveAt(t.pad, t.price / nu).raised * nu * 0.95) : usd), m.time, wallet ?? walletName(rng), tag)
+    if (!(usd >= 1)) return
     vol += usd
     if (side === 'buy') nb++
     else ns++
     if (bot) return // bot churn: activity on the tape, but it isn't real interest
     netUsd += side === 'buy' ? usd / heat : -usd / heat // attention follows how many people buy, not how big
-    f.lastTrade = m.time
+    if (side === 'buy') f.lastTrade = m.time // a coin is alive while somebody still buys it (holders trickling out isn't life)
   }
   // Snipers land in the first seconds with real size (0.3–2 SOL); on hyped launches there are a lot of them.
   if (age <= 3) {
@@ -678,6 +709,10 @@ function stepFlow(t: Token, m: MarketState, rng: Rng, native: MarketState['nativ
       trade('sell', usd * rng.range(0.9, 1.05), undefined, true)
     }
   }
+  // Mayhem coins: an AI agent trades them for their first day, in both directions, with real size.
+  if (LAUNCHPADS[t.pad].mayhem && age < D && t.status === 'bonding' && rng.chance(0.12)) {
+    trade(rng.chance(0.5 + clamp(t.momentum * 10, -0.2, 0.2)) ? 'buy' : 'sell', lognormal(rng, 40, 0.8), 'agent', true, 'MayhemAI')
+  }
   const whale = () => (rng.chance(0.003 + 0.004 * Math.min(f.q, 3)) ? rng.range(8, 40) : 1)
   for (let i = 0, j = 0; i < nBuy || j < nSell; ) {
     // Interleave buys and sells in random order through the second.
@@ -691,34 +726,42 @@ function stepFlow(t: Token, m: MarketState, rng: Rng, native: MarketState['nativ
     if (t.status !== 'bonding') break
   }
 
-  // Devs love to dump into a pump.
-  if (t.devPct > 0.2 && t.price > launchPx * 1.6 && rng.chance(0.012)) {
+  // Devs love to dump into a pump. (A cooked coin's dev is a player or a bot with a real bag: that one is theirs to sell.)
+  if (!cooked && t.devPct > 0.2 && t.price > launchPx * 1.6 && rng.chance(0.012 * pace)) {
     const frac = rng.chance(0.5) ? 1 : rng.range(0.3, 0.7)
-    const usd = (t.devPct / 100) * frac * t.mcap * 0.9
+    const usd = quoteSell(t, (t.devPct / 100) * frac * SUPPLY).usdOut // what that many coins fetch from the curve
+    const before = t.bondingProgress
     t.devPct *= 1 - frac
     logDev(t, { time: m.time, side: 'sell', usd })
     trade('sell', usd, 'dev')
     f.att *= 0.7
+    if (frac === 1 && before >= FLOW.devNews) emit({ kind: 'devsell', tokenId: t.id, ticker: t.ticker, text: `$${t.ticker} dev dumped their whole bag`, icon: DEV_ICON, tone: 'down' })
     t.hype = Math.max(0, t.hype - 10 * frac)
   }
 
   // Attention: fades on its own, grows with net buying (more for coins that have "it"), plus rare viral moments.
-  f.att = f.att * (FLOW.decay + (FLOW.decayGood - FLOW.decay) * Math.min(1, f.q / 2)) + Math.max(0, netUsd) * FLOW.feedback * Math.min(f.q, 4)
+  f.att = f.att * (FLOW.decay + (FLOW.decayGood - FLOW.decay) * Math.min(1, f.q / 2)) ** pace + Math.max(0, netUsd) * FLOW.feedback * Math.min(f.q, 4)
+  // What pushes a coin from outside (a dev's volume bot or marketing, a KOL's call, a flagged bundle, a dev sell) is
+  // `pressure`: on a curve it doesn't move the price, it brings buyers or drives them off.
+  if (t.sim.pressure) {
+    f.att = Math.max(0, f.att + t.sim.pressure * FLOW.pressureAtt)
+    t.sim.pressure = Math.abs(t.sim.pressure) < 1e-6 ? 0 : t.sim.pressure * 0.88
+  }
   if (!f.koth && t.bondingProgress >= FLOW.kothProgress) {
     f.koth = true
     f.att += 1.5 + f.q
-    emit({ kind: 'trending', tokenId: t.id, ticker: t.ticker, text: `$${t.ticker} is king of the hill on pump.fun`, icon: '👑', tone: 'up' })
+    emit({ kind: 'trending', tokenId: t.id, ticker: t.ticker, text: `$${t.ticker} is king of the hill on ${LAUNCHPADS[t.pad].name}`, icon: '👑', tone: 'up' })
   }
-  if (rng.chance(0.0008 * Math.min(f.q, 3))) {
+  if (rng.chance(0.0008 * Math.min(f.q, 3) * pace)) {
     f.att = f.att * 3 + 2
     emit({ kind: 'viral', tokenId: t.id, ticker: t.ticker, text: `$${t.ticker} is going parabolic`, icon: '🚀', tone: 'up' })
   }
-  f.ema = f.ema * 0.97 + t.price * 0.03
+  f.ema = t.price + (f.ema - t.price) * 0.97 ** pace
 
   // Bookkeeping, same shape as the classic engine.
   const r = Math.log(t.price / p0)
   t.momentum = t.momentum * 0.75 + r * 0.25
-  t.momentumScore = Math.round(clamp(50 + 50 * Math.tanh(t.momentum / (t.volatility * 1.1)), 0, 100))
+  t.momentumScore = Math.round(clamp(50 + 50 * Math.tanh(t.momentum / pace / (t.volatility * 1.1)), 0, 100))
   t.volume = t.volume * DECAY_1H + vol
   t.buys = t.buys * DECAY_1H + nb
   t.sells = t.sells * DECAY_1H + ns
@@ -728,7 +771,7 @@ function stepFlow(t: Token, m: MarketState, rng: Rng, native: MarketState['nativ
   t.hype = clamp(t.hype + (hypeTarget - t.hype) * 0.05, 0, 100)
 
   if (t.status === 'bonding' && syncCurve(t, nu)) migrate(t, m, nu, emit)
-  else if (m.time - f.lastTrade > FLOW.deadAfter && f.att < 0.05 && t.status === 'bonding') {
+  else if (m.time - f.lastTrade > (t.creator === 'you' ? FLOW.devQuiet : FLOW.deadAfter) && f.att < 0.05 && t.status === 'bonding') {
     // Nobody left: the coin sits on its curve forever. (On pump.fun that's ~97%+ of launches.)
     t.status = 'dead'
     t.diedAt = m.time
@@ -742,6 +785,7 @@ function stepFlow(t: Token, m: MarketState, rng: Rng, native: MarketState['nativ
 export interface TickOptions {
   rugMult: number
   protectedIds: Set<string> // held or watched tokens are never delisted
+  held?: Map<string, number> // coins in real wallets (players, bots), by coin id: the simulated crowd can't sell those
 }
 
 /** Advance the market one tick. Returns a new MarketState (tokens are fresh copies) and emitted events. */
@@ -751,21 +795,22 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
   const emit = (e: Omit<MarketEvent, 'id' | 'tick' | 'time'>) => events.push({ ...e, id: m.tick * 100 + events.length, tick: m.tick, time: m.time })
 
   // 1. Market-wide sentiment: a slow mean-reverting process all tokens load on (creates correlation).
-  if (rng.chance(0.004)) {
+  const sdt = Math.sqrt(DT)
+  if (rng.chance(0.004 * DT)) {
     const up = rng.chance(0.5 - prev.sentiment * 0.3)
     m.sentimentTrend = up ? rng.range(0.4, 1) : -rng.range(0.4, 1)
     emit({ kind: up ? 'marketup' : 'marketdown', text: up ? 'Degen season: risk-on across the trenches' : 'Risk-off: the whole market is bleeding', icon: up ? '🌙' : '🥶', tone: up ? 'up' : 'down' })
   }
-  m.sentimentTrend *= 0.985
-  m.sentiment = clamp(prev.sentiment * 0.992 + m.sentimentTrend * 0.012 + rng.gauss() * 0.02, -1, 1)
-  const marketShock = rng.gauss() * 0.0025
+  m.sentimentTrend *= per(0.985)
+  m.sentiment = clamp(prev.sentiment * per(0.992) + m.sentimentTrend * 0.012 * DT + rng.gauss() * 0.02 * sdt, -1, 1)
+  const marketShock = rng.gauss() * 0.0025 * sdt
 
   // Chain coins (SOL / BNB / ETH) drift slowly, lean on market mood, and revert to their anchors.
   const native = { ...(prev.native ?? initNative()) }
   for (const c of CHAIN_IDS) {
     const q = native[c]
     const lp = Math.log(q.price)
-    const next = lp + rng.gauss() * 0.0012 + m.sentiment * 0.0002 + (Math.log(CHAINS[c].basePrice) - lp) * 0.002
+    const next = lp + rng.gauss() * 0.0012 * sdt + (m.sentiment * 0.0002 + (Math.log(CHAINS[c].basePrice) - lp) * 0.002) * DT
     native[c] = { ...q, price: Math.exp(next) }
   }
   m.native = native
@@ -784,8 +829,22 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
   for (const old of prev.tokens) {
     const t: Token = { ...old, sim: { ...old.sim, ...(old.sim.flow ? { flow: { ...old.sim.flow } } : {}) }, change: { ...old.change } }
     const s = t.sim
-    const prevPrice = t.price
     const age = m.time - t.createdAt
+    if (opts.held) s.held = opts.held.get(t.id) ?? 0
+    // A curve or pool holds the chain's coin, not dollars: when SOL (BNB, ETH) moves, a coin's dollar price and its
+    // pool's dollar size move with it, with no trade. (Its price in SOL is what only trades can change.)
+    const fx = nativeUsdOf(native, t.chain) / nativeUsdOf(prev.native, t.chain)
+    if (fx !== 1 && fx > 0) {
+      t.price *= fx
+      t.liquidity *= fx
+      t.mcap = t.price * SUPPLY
+    }
+    // A curve that sold out since the last tick (a player's or a bot's buy took the last tokens) migrates first: a
+    // completed curve is closed, nobody can sell back into it.
+    if (curveDone(t) && s.rugAt === null) {
+      migrate(t, m, nativeUsdOf(native, t.chain), emit)
+      pushCandles(t, m.time, t.price, 0)
+    }
 
     // Creator fees: this tick's volume plus anything traded since the last tick (bot wallets, players, follower buys),
     // at the coin's current creator rate (pump.fun: 0.30% on the curve, PumpSwap's tiered 0.95%→0.05% after).
@@ -799,7 +858,9 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
       t.volMark = t.volume
     }
 
-    // Realistic engine: pump.fun coins on their curve trade by order flow; dead ones leave the lists within a minute.
+    // Realistic engine: a coin on its curve trades by order flow, whoever launched it; dead ones leave the lists within
+    // a minute. (A curve coin with no flow yet was launched before that was true of every launch, or by an admin.)
+    if (realistic && !s.flow && t.status === 'bonding') s.flow = { q: clamp(0.1 + t.hype / 100, 0.1, 1.1), att: 0.3, ema: t.price, lastTrade: m.time }
     if (realistic && s.flow) {
       if ((t.status === 'dead' || t.status === 'rugged') && t.diedAt && m.time - t.diedAt > FLOW.delistAfter && !opts.protectedIds.has(t.id) && t.creator !== 'you') {
         candleStore.delete(t.id)
@@ -819,43 +880,71 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
       continue
     }
 
-    let r: number
-    let activity: number
+    // A coin's price is its curve's / pool's reserves, so it only moves when somebody trades. The market's pull on the
+    // coin (its regime, the mood, news, momentum) is worked out every tick as before, but it adds up in `pend` and
+    // reaches the price when trades come in, as exactly the buying or selling it takes to move the reserves that far.
+    const nu = nativeUsdOf(native, t.chain)
+    let r = 0
+    let activity = 0
+    let vol = 0
+    let nb = 0
+    let ns = 0
+    const add = (side: 'buy' | 'sell', usd: number) => {
+      if (!(usd > 0)) return
+      vol += usd
+      if (side === 'buy') nb++
+      else ns++
+    }
     if (t.status === 'rugged' || t.status === 'dead') {
-      r = rng.gauss() * 0.01 - 0.002
-      activity = 0.05
+      // Nobody trades a dead coin, so its price stays where the last trade left it. (Holders can still sell into
+      // whatever is left in the curve / pool.)
       t.hype = Math.max(0, t.hype - 1)
+      s.pend = 0
     } else {
       // 2. Rug scheduling: hazard depends on base probability, hype and mode. Warnings usually precede it.
       if (s.rugAt === null && t.rugProb > 0) {
         const hazard = t.rugProb * opts.rugMult * (1 + t.hype / 100) * (t.status === 'bonding' ? 1.4 : 1)
-        if (rng.chance(hazard)) {
-          s.rugAt = m.tick + rng.int(18, 45)
-          if (rng.chance(0.75)) emit({ kind: 'liquidity', tokenId: t.id, ticker: t.ticker, text: `Liquidity dropping on $${t.ticker}`, icon: '⚠️', tone: 'warn' })
+        if (rng.chance(hazard * DT)) {
+          s.rugAt = m.tick + Math.round(rng.int(18, 45) / DT)
+          if (rng.chance(0.75)) emit({ kind: 'liquidity', tokenId: t.id, ticker: t.ticker, text: `Insider wallets are starting to sell $${t.ticker}`, icon: '⚠️', tone: 'warn' })
         }
       }
       if (s.rugAt !== null && m.tick < s.rugAt) {
-        if (t.status !== 'bonding') t.liquidity *= 0.985 // curve liquidity can't be pulled, only a DEX pool's
-        t.devPct = Math.max(0, t.devPct * 0.97)
-        s.pressure -= 0.0008
+        // Before the dump the insiders start unloading: small dev sells, real ones, that you can see on the tape.
+        if (t.devPct > 0.05 && rng.chance(0.5 * DT)) {
+          const qty = (t.devPct / 100) * SUPPLY * 0.06
+          add('sell', fillSim(m, t, 'sell', quoteSell(t, qty).usdOut, m.time, walletName(rng), 'dev'))
+          t.devPct *= 0.94
+        }
+        s.pressure -= 0.0008 * DT
       }
       if (s.rugAt !== null && m.tick >= s.rugAt) {
-        // 3. Execute the rug. On a curve the dev can only dump their bag into it (price falls toward the curve's
-        // start); after migration they can pull the pool.
+        // 3. The rug. Liquidity on these launchpads is burned or locked, so nobody can pull the pool: a rug is the
+        // insiders dumping their bags, on the curve or into the pool, and the price falls by exactly what that much
+        // selling does to the reserves.
         const onCurve = t.status === 'bonding'
-        const floor = startPriceNative(t.pad) * nativeUsdOf(native, t.chain) * 1.02
-        r = onCurve ? Math.log(Math.max(floor, t.price * Math.exp(-rng.range(0.7, 0.92))) / t.price) : -rng.range(0.85, 0.97)
-        logDev(t, { time: m.time, side: 'sell', usd: Math.max(50, (t.devPct / 100) * t.mcap + t.liquidity * 0.3) })
+        const T = Math.max(1, t.liquidity / 2) / t.price
+        const qty = onCurve
+          ? Math.max(0, LAUNCHPADS[t.pad].vTokens - T - (s.held ?? 0)) * rng.range(0.6, 0.9) // most of what the crowd ever bought
+          : Math.max(((t.devPct + t.insidersPct) / 100) * SUPPLY, T * rng.range(0.7, 1.6))
+        const parts = rng.int(2, 4)
+        let got = 0
+        for (let k = 0; k < parts; k++) {
+          const usd = fillSim(m, t, 'sell', quoteSell(t, qty / parts).usdOut, m.time, walletName(rng), 'dev')
+          got += usd
+          add('sell', usd)
+        }
+        logDev(t, { time: m.time, side: 'sell', usd: Math.max(1, got) })
         t.devPct = 0
+        t.insidersPct = 0
         t.status = 'rugged'
         t.diedAt = m.time
-        t.liquidity *= onCurve ? 0.2 : 0.04
         setRegime(t, 'rug', rng)
-        activity = 3
-        emit({ kind: 'rug', tokenId: t.id, ticker: t.ticker, text: onCurve ? `$${t.ticker} rugged — dev dumped the whole bag into the curve` : `$${t.ticker} rugged — liquidity pulled`, icon: '💀', tone: 'down' })
+        s.pend = 0
+        emit({ kind: 'rug', tokenId: t.id, ticker: t.ticker, text: onCurve ? `$${t.ticker} rugged — dev dumped the whole bag into the curve` : `$${t.ticker} rugged — insiders dumped their bags into the pool`, icon: '💀', tone: 'down' })
       } else {
         // 4. Regime-driven return with momentum, mean reversion, market beta and fat tails.
-        if (--s.regimeTicks <= 0) {
+        if ((s.regimeTicks -= DT) <= 0) {
           nextRegime(t, rng)
           if (s.regime === 'moon') {
             // Parabolic runs draw a crowd; most get noticed (the quiet ones reward whoever was watching the chart).
@@ -864,124 +953,140 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
           }
         }
         const sigma = t.volatility * s.volMult * (1 + s.volBoost)
-        const logP = Math.log(t.price)
+        const logP = Math.log(t.price) + (s.pend ?? 0) // where the market is pulling the coin to
         r =
-          s.drift +
-          BLEED[s.archetype] * t.volatility +
-          0.12 * t.momentum +
-          s.meanRev * (s.anchor - logP) +
-          s.beta * (m.sentiment * 0.0012 + marketShock) +
-          s.pressure +
-          sigma * rng.gauss() +
-          (rng.chance(0.012) ? sigma * 4 * rng.gauss() : 0)
+          (s.drift + BLEED[s.archetype] * t.volatility + 0.12 * t.momentum + s.meanRev * (s.anchor - logP) + s.beta * m.sentiment * 0.0012 + s.pressure) * DT +
+          s.beta * marketShock +
+          sigma * sdt * rng.gauss() +
+          (rng.chance(0.012 * DT) ? sigma * 4 * rng.gauss() : 0)
         // Gravity: far above its weight class a coin gets heavy (the pull grows the further it goes), and a steady
         // climber eventually tops out and starts to bleed. Rounds rarely get here; a market that never stops would
         // otherwise compound its climbers into the trillions.
         const sizeCap = PROFILES[s.archetype].mcap[1] * SIZE_CAP_MULT
         if (t.mcap > sizeCap) {
-          r -= 0.002 * Math.log(t.mcap / sizeCap)
-          if (s.archetype === 'grinder' && rng.chance(0.0004)) s.archetype = 'bleeder'
+          r -= 0.002 * Math.log(t.mcap / sizeCap) * DT
+          if (s.archetype === 'grinder' && rng.chance(0.0004 * DT)) s.archetype = 'bleeder'
         }
         r = clamp(r, -0.4, 0.5)
-        s.anchor = s.anchor * 0.996 + logP * 0.004
+        s.anchor = s.anchor * per(0.996) + logP * (1 - per(0.996))
         activity = REGIME_ACTIVITY[s.regime]
+        s.pend = (s.pend ?? 0) + r
+        // A curve has two ends: nothing to sell into below its start, nothing left to buy above its end. A pool has a
+        // floor too: the price with every coin that exists sold into it.
+        const T = Math.max(1, t.liquidity / 2) / t.price
+        if (t.status === 'bonding') {
+          const pad = LAUNCHPADS[t.pad]
+          s.pend = clamp(s.pend, 2 * Math.log(Math.min(1, T / Math.max(1, pad.vTokens - (s.held ?? 0)))), 2 * Math.log(Math.max(1, T / (pad.vTokens - pad.curveTokens))))
+        } else s.pend = Math.max(s.pend, 2 * Math.log(Math.min(1, T / Math.max(1, SUPPLY - (s.held ?? 0)))))
       }
-      s.pressure *= 0.88
-      s.volBoost *= 0.93
+      s.pressure *= per(0.88)
+      s.volBoost *= per(0.93)
     }
 
-    // 5. Price, market cap, ATH. A coin that died or rugged on its curve can't trade below the curve's start price.
-    t.price = Math.max(1e-13, t.price * Math.exp(r))
-    if ((t.status === 'rugged' || t.status === 'dead') && t.bondingProgress < 100) {
-      t.price = Math.max(t.price, startPriceNative(t.pad) * nativeUsdOf(native, t.chain) * 1.0005)
+    // 5. This tick's trades. How many show up follows the coin's turnover and how lively its regime is; together they
+    // carry the price to where the market was pulling it.
+    let live = t.status === 'bonding' || t.status === 'graduated'
+    const z = Math.abs(r) / Math.max(1e-6, t.volatility * sdt)
+    const baseTickVol = (t.mcap * s.baseTurnover) / HOUR_TICKS
+    const wantVol = live ? baseTickVol * (0.45 + 0.35 * z) * (0.5 + t.hype / 100) * activity * Math.exp(0.3 * rng.gauss()) : 0
+    const avgSize = clamp(t.mcap * 0.0004, 25, 2500)
+    const n = live ? Math.min(14, rng.poisson(wantVol / avgSize)) : 0
+    let traded = false
+    if (live && n > 0) {
+      const p0 = t.price
+      const res = tradeTo(m, t, t.price * Math.exp(s.pend ?? 0), rng, {
+        wantVol, n, avgSize, seconds: SIM_SEC_PER_TICK,
+        tag: (side, usd) => (usd > avgSize * 6 ? 'whale' : rng.chance(0.04) ? 'smart' : age < 300 && side === 'buy' && rng.chance(0.3) ? 'sniper' : undefined),
+      })
+      traded = res.traded
+      vol += res.vol
+      nb += res.nb
+      ns += res.ns
+      s.pend = (s.pend ?? 0) - Math.log(t.price / p0) // what the trades didn't carry stays pending
+      if (Math.abs(s.pend) < 1e-9) s.pend = 0
     }
+    if (!traded) for (let x = 1; x <= SIM_SEC_PER_TICK; x++) pushCandles(t, m.time - SIM_SEC_PER_TICK + x, t.price, 0) // a quiet tick: flat
+
+    // NPC devs: most sell into early pumps, a few top up. Real trades, in pieces a pool can take: a dev who holds a
+    // few percent of the supply can't leave in one go without wrecking the price they're selling at.
+    if (live && t.creator !== 'you' && t.devPct > 0.2 && s.rugAt === null) {
+      const T = Math.max(1, t.liquidity / 2) / t.price
+      if (r > 0 && rng.chance((t.status === 'bonding' ? 0.006 : 0.0015) * DT)) {
+        const frac = rng.chance(0.4) ? 1 : rng.range(0.25, 0.7)
+        const qty = Math.min((t.devPct / 100) * frac * SUPPLY, T * rng.range(0.04, 0.1))
+        const usd = fillSim(m, t, 'sell', quoteSell(t, qty).usdOut, m.time, walletName(rng), 'dev')
+        if (usd > 0) {
+          add('sell', usd)
+          t.devPct = Math.max(0, t.devPct - (qty / SUPPLY) * 100)
+          t.hype = Math.max(0, t.hype - 8 * frac)
+          logDev(t, { time: m.time, side: 'sell', usd })
+        }
+      } else if (t.status === 'bonding' && rng.chance(0.0008 * DT)) {
+        const before = t.liquidity / 2 / t.price
+        const usd = fillSim(m, t, 'buy', (t.liquidity / 2) * rng.range(0.01, 0.04), m.time, walletName(rng), 'dev')
+        if (usd > 0) {
+          add('buy', usd)
+          t.devPct += (Math.max(0, before - t.liquidity / 2 / t.price) / SUPPLY) * 100
+          logDev(t, { time: m.time, side: 'buy', usd })
+        }
+      }
+    }
+    // Mayhem coins: an AI agent trades them for their first day. Its trades are real too, which is where the wilder
+    // candles come from.
+    if (live && LAUNCHPADS[t.pad].mayhem && age < D && rng.chance(0.45 * DT)) {
+      const side = rng.chance(0.5 + clamp(s.pressure * 40, -0.2, 0.2)) ? 'buy' : 'sell'
+      add(side, fillSim(m, t, side, avgSize * rng.range(0.5, 3), m.time, 'MayhemAI', 'agent'))
+    }
+
+    // A coin that has outgrown the pool it migrated with draws other liquidity providers (a deposit adds to both sides
+    // of a pool, so it moves no price): big real coins hold a few percent of their market cap in their pools, not the
+    // fraction of a percent the launch pool alone would have thinned out to.
+    if (t.status === 'graduated' && t.liquidity < t.price * SUPPLY * POOL_FLOOR) t.liquidity = t.price * SUPPLY * POOL_FLOOR
+
+    // 6. Volume, buys / sells and holders: counted from the trades that happened.
+    t.mcap = t.price * SUPPLY
+    t.ath = Math.max(t.ath, t.mcap)
+    t.momentum = t.momentum * per(0.75) + (r / DT) * (1 - per(0.75))
+    t.momentumScore = Math.round(clamp(50 + 50 * Math.tanh(t.momentum / ((t.volatility / sdt) * 1.1)), 0, 100))
+    t.volume = t.volume * DECAY_1H + vol
+    if (t.washVol) t.washVol = t.washVol < 1 ? 0 : t.washVol * DECAY_1H
+    t.buys = t.buys * DECAY_1H + nb
+    t.sells = t.sells * DECAY_1H + ns
+    t.win = stepWin(getWin(old, m.time), vol, nb, ns)
+    t.holders = Math.max(1, Math.round(t.holders + nb * rng.range(0.2, 0.5) - ns * rng.range(0.15, 0.4) + (live && rng.chance((t.hype / 400) * DT) ? 1 : 0)))
+
     // Hard ceiling (only ever hit by a market saved before gravity existed): back to a sane price, history and all.
     const ceiling = PROFILES[s.archetype].mcap[1] * SIZE_CAP_MULT * 40
     if (!(t.price * SUPPLY <= ceiling)) {
       t.price = (PROFILES[s.archetype].mcap[1] * SIZE_CAP_MULT) / SUPPLY
+      t.mcap = t.price * SUPPLY
       s.anchor = Math.log(t.price)
-      t.ath = t.price * SUPPLY
-      t.volume = Math.min(t.volume, t.price * SUPPLY)
+      s.pend = 0
+      t.ath = t.mcap
+      t.volume = Math.min(t.volume, t.mcap)
       t.volMark = t.volume
       t.momentum = 0
-      if (t.status === 'graduated') t.liquidity = t.price * SUPPLY * 0.1
-    }
-    t.mcap = t.price * SUPPLY
-    t.ath = Math.max(t.ath, t.mcap)
-    t.momentum = t.momentum * 0.75 + r * 0.25
-    t.momentumScore = Math.round(clamp(50 + 50 * Math.tanh(t.momentum / (t.volatility * 1.1)), 0, 100))
-
-    // 6. Volume, buys/sells, holders.
-    const live = t.status === 'bonding' || t.status === 'graduated'
-    const z = Math.abs(r) / Math.max(1e-6, t.volatility)
-    const baseTickVol = (t.mcap * s.baseTurnover) / HOUR_TICKS
-    const tickVol = live ? baseTickVol * (0.45 + 0.35 * z) * (0.5 + t.hype / 100) * activity * Math.exp(0.3 * rng.gauss()) : 0
-    t.volume = t.volume * DECAY_1H + tickVol
-    if (t.washVol) t.washVol = t.washVol < 1 ? 0 : t.washVol * DECAY_1H
-    const avgSize = clamp(t.mcap * 0.0004, 25, 2500)
-    const n = live ? Math.min(14, rng.poisson(tickVol / avgSize)) : 0
-    const buyShare = 1 / (1 + Math.exp(-(1.4 * Math.sign(r) * Math.min(z, 3) + s.pressure * 150)))
-    let nb = 0
-    for (let i = 0; i < n; i++) {
-      const side = rng.chance(buyShare) ? 'buy' : 'sell'
-      if (side === 'buy') nb++
-      if (i < 3) {
-        const usd = avgSize * Math.exp(0.9 * rng.gauss())
-        const tag = usd > avgSize * 6 ? 'whale' : rng.chance(0.04) ? 'smart' : age < 300 && side === 'buy' && rng.chance(0.3) ? 'sniper' : undefined
-        addTape(m, t, { time: m.time, side, usd, price: t.price, wallet: walletName(rng), tag })
-      }
-    }
-    const ns = n - nb
-    t.buys = t.buys * DECAY_1H + nb
-    t.sells = t.sells * DECAY_1H + ns
-    t.win = stepWin(getWin(old, m.time), tickVol, nb, ns)
-    t.holders = Math.max(1, Math.round(t.holders + nb * rng.range(0.2, 0.5) - ns * rng.range(0.15, 0.4) + (live && rng.chance(t.hype / 400) ? 1 : 0)))
-
-    // NPC devs: most sell into early pumps, a few top up. Their trades become DEV markers on the chart.
-    if (live && t.creator !== 'you' && t.devPct > 0.2 && s.rugAt === null) {
-      if (r > 0 && rng.chance(t.status === 'bonding' ? 0.006 : 0.0015)) {
-        const frac = rng.chance(0.4) ? 1 : rng.range(0.25, 0.7)
-        const usd = (t.devPct / 100) * frac * t.mcap
-        t.devPct *= 1 - frac
-        s.pressure -= 0.004 * frac
-        t.hype = Math.max(0, t.hype - 8 * frac)
-        logDev(t, { time: m.time, side: 'sell', usd })
-        addTape(m, t, { time: m.time, side: 'sell', usd, price: t.price, wallet: walletName(rng), tag: 'dev' })
-      } else if (t.status === 'bonding' && rng.chance(0.0008)) {
-        const usd = t.liquidity * rng.range(0.02, 0.06)
-        t.devPct += (usd / t.mcap) * 100
-        s.pressure += 0.002
-        logDev(t, { time: m.time, side: 'buy', usd })
-        addTape(m, t, { time: m.time, side: 'buy', usd, price: t.price, wallet: walletName(rng), tag: 'dev' })
-      }
-    }
-    // Mayhem coins: an AI agent trades them for their first day.
-    if (live && LAUNCHPADS[t.pad].mayhem && age < D) {
-      s.volBoost = Math.max(s.volBoost, 0.35)
-      if (rng.chance(0.45)) addTape(m, t, { time: m.time, side: rng.chance(0.5 + clamp(s.pressure * 40, -0.2, 0.2)) ? 'buy' : 'sell', usd: avgSize * rng.range(0.5, 3), price: t.price, wallet: 'MayhemAI', tag: 'agent' })
+      if (t.status === 'graduated') t.liquidity = t.mcap * 0.1
     }
 
-    // 7. Liquidity & bonding curve.
+    // 7. The curve: complete (the raise and the leftover tokens seed a DEX pool), or abandoned.
+    live = t.status === 'bonding' || t.status === 'graduated'
     if (t.status === 'bonding') {
-      const nu = nativeUsdOf(native, t.chain)
       const complete = syncCurve(t, nu)
       if (complete && s.rugAt === null) {
-        // Curve sold out: the raise and the leftover tokens seed a DEX pool.
         migrate(t, m, nu, emit)
+        s.pend = 0
       } else if (age > 1200 && t.bondingProgress < 1.5) {
         // Nobody left buying: the coin sits at the bottom of its curve.
         t.status = 'dead'
         t.diedAt = m.time
       }
-    } else if (t.status === 'graduated') {
-      t.liquidity = clamp(t.liquidity * Math.exp(0.5 * r) * (1 + (t.hype - 40) * 0.00002), t.mcap * 0.02, t.mcap * 0.4)
     }
 
     // 8. Social hype drifts toward activity level.
     const hypeTarget = live ? clamp(20 + t.momentumScore * 0.5 + Math.min(30, (t.volume / Math.max(1, t.mcap)) * 20), 0, 100) : 0
-    t.hype = clamp(t.hype + (hypeTarget - t.hype) * 0.015 + rng.gauss() * 0.6, 0, 100)
+    t.hype = clamp(t.hype + (hypeTarget - t.hype) * 0.015 * DT + rng.gauss() * 0.6 * sdt, 0, 100)
 
-    pushCandles(t, m.time, prevPrice, tickVol, rng)
     refreshChanges(t, m.time)
     const risk = computeRisk(t, m.time)
     t.riskScore = risk.score
@@ -997,32 +1102,25 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
     for (const q of due) {
       const t = tokens.find((x) => x.id === q.tokenId)
       if (!t || (t.status !== 'bonding' && t.status !== 'graduated')) continue
-      const prev = t.price
       if (q.side === 'sell') {
         // An airdrop recipient cashing out what the dev gave them.
         const qty = Math.max(0, q.qty ?? 0)
         if (!(qty > 0)) continue
-        const usd = qty * t.price
-        t.price = Math.max(1e-13, quoteSell(t, qty).newPrice)
-        t.mcap = t.price * SUPPLY
-        touchCandles(t, m.time, prev, usd, native)
+        const usd = fillSim(m, t, 'sell', quoteSell(t, qty).usdOut, m.time, q.wallet)
+        if (!(usd > 0)) continue
         t.volume += usd
         t.sells += 1
         t.win = addWin(getWin(t, m.time), usd, 0, 1)
         t.holders = Math.max(1, t.holders - 1)
-        addTape(m, t, { time: m.time, side: 'sell', usd, price: t.price, wallet: q.wallet })
-        if (t.status === 'bonding') syncCurve(t, nativeUsdOf(native, t.chain))
         continue
       }
-      t.price = quoteBuy(t, q.usd).newPrice
-      t.mcap = t.price * SUPPLY
-      t.ath = Math.max(t.ath, t.mcap)
-      touchCandles(t, m.time, prev, q.usd, native)
-      t.volume += q.usd
+      const usd = fillSim(m, t, 'buy', q.usd, m.time, q.wallet)
+      if (!(usd > 0)) continue
+      t.volume += usd
       t.buys += 1
-      t.win = addWin(getWin(t, m.time), q.usd, 1, 0)
+      t.win = addWin(getWin(t, m.time), usd, 1, 0)
       t.holders += 1
-      addTape(m, t, { time: m.time, side: 'buy', usd: q.usd, price: t.price, wallet: q.wallet })
+      if (t.sim.flow) t.sim.flow.lastTrade = m.time
       if (t.status === 'bonding' && syncCurve(t, nativeUsdOf(native, t.chain))) migrate(t, m, nativeUsdOf(native, t.chain), emit)
     }
   }
@@ -1038,23 +1136,21 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
   }
   const liveFlow = realistic ? tokens.filter((t) => t.sim.flow && t.status === 'bonding').length : 0
   if (realistic && liveFlow < FLOW.maxLive && rng.chance(FLOW.launchPerSec)) {
-    // Realistic: pump.fun launches arrive at its real pace; most will be dead within a minute.
+    // Realistic: launches arrive at the real pace, on every launchpad; most will be dead within a minute.
     const base = nextName()
     if (base) {
       const t = launchFlowToken(rng, m, base)
       pushCandles(t, m.time, t.price, 0)
       tokens.unshift(t)
-      emit({ kind: 'launch', tokenId: t.id, ticker: t.ticker, text: `$${t.ticker} just launched on pump.fun`, icon: '🆕', tone: 'info' })
+      emit({ kind: 'launch', tokenId: t.id, ticker: t.ticker, text: `$${t.ticker} just launched on ${LAUNCHPADS[t.pad].name}`, icon: '🆕', tone: 'info' })
     }
   }
   const liveClassic = tokens.filter((t) => !t.sim.flow && (t.status === 'bonding' || t.status === 'graduated')).length
-  if (liveClassic < MAX_TOKENS && rng.chance(LAUNCH_CHANCE)) {
+  if (!realistic && liveClassic < MAX_TOKENS && rng.chance(LAUNCH_CHANCE)) {
     const base = nextName()
     if (base) {
-      // On the realistic engine pump.fun coins come from the order-flow launcher above; the other pads stay classic.
       const chain = pickChain(rng)
-      const pad = realistic && chain === 'sol' ? rng.pick(padsFor('sol').filter((p) => p.id !== 'pump')).id : undefined
-      const t = makeToken(rng, { ...base, chain, pad, archetype: rng.weighted<Archetype>({ rugger: 3, chaotic: 3, runner: 2, sleeper: 1, bleeder: 2 }) }, m.time, true, m.native)
+      const t = makeToken(rng, { ...base, chain, archetype: rng.weighted<Archetype>({ rugger: 3, chaotic: 3, runner: 2, sleeper: 1, bleeder: 2 }) }, m.time, true, m.native)
       pushCandles(t, m.time, t.price, 0)
       tokens.unshift(t)
       emit({ kind: 'launch', tokenId: t.id, ticker: t.ticker, text: `$${t.ticker} just launched on the curve`, icon: '🆕', tone: 'info' })
@@ -1067,23 +1163,184 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
 }
 
 // ─── Constant-product pool math (used by the trading engine) ─────────────────
-/** Pool quote reserve = half the liquidity. Returns fill info for a USD buy (after fee). */
+// One formula for every coin, the one the real launchpads and DEX pools use: reserves x · y = k. Q is the money side
+// of the pool in USD (half the liquidity; on a bonding curve the VIRTUAL reserve) and T = Q / price the token side.
+// A price is nothing but those two numbers, so the only thing that can move it is a trade.
+
+/**
+ * Fill info for a buy of `usdIn` (after fee). On a bonding curve a buy can't take more tokens than the curve has
+ * left: `used` is the part of `usdIn` that was spent (the launchpad doesn't charge the rest), and the coin then sits
+ * exactly at the end of its curve, ready to migrate.
+ */
 export function quoteBuy(t: Token, usdIn: number) {
   const Q = Math.max(1, t.liquidity / 2)
   const T = Q / t.price
-  const qty = (T * usdIn) / (Q + usdIn)
-  const avgPrice = usdIn / Math.max(1e-18, qty)
-  const newPrice = t.price * ((Q + usdIn) / Q) ** 2
-  return { qty, avgPrice, newPrice, slippage: avgPrice / t.price - 1 }
+  let used = Math.max(0, usdIn)
+  let qty = (T * used) / (Q + used)
+  if (t.status === 'bonding') {
+    const pad = LAUNCHPADS[t.pad]
+    const left = Math.max(0, T - (pad.vTokens - pad.curveTokens)) // tokens still for sale on the curve
+    if (qty > left) {
+      qty = left
+      used = (Q * left) / Math.max(1e-9, T - left)
+    }
+  }
+  const avgPrice = used / Math.max(1e-18, qty)
+  const newPrice = t.price * ((Q + used) / Q) ** 2
+  return { qty, avgPrice, newPrice, slippage: qty > 0 ? avgPrice / t.price - 1 : 0, used }
 }
 
+/** Fill info for a sell of `qty` tokens. On a curve no more can come back than the curve ever sold. */
 export function quoteSell(t: Token, qty: number) {
   const Q = Math.max(1, t.liquidity / 2)
   const T = Q / t.price
-  const usdOut = (Q * qty) / (T + qty)
+  const sold = t.status === 'graduated' || t.bondingProgress >= 100 ? Infinity : Math.max(0, LAUNCHPADS[t.pad].vTokens - T)
+  const q = Math.min(Math.max(0, qty), sold)
+  const usdOut = (Q * q) / (T + q)
   const avgPrice = usdOut / Math.max(1e-18, qty)
-  const newPrice = t.price * (T / (T + qty)) ** 2
+  const newPrice = t.price * (T / (T + q)) ** 2
   return { usdOut, avgPrice, newPrice, slippage: 1 - avgPrice / t.price }
+}
+
+/** True once a curve has sold everything it had. From then on it is closed: it only migrates. */
+export const curveDone = (t: Token) => t.status === 'bonding' && t.liquidity / 2 / t.price <= (LAUNCHPADS[t.pad].vTokens - LAUNCHPADS[t.pad].curveTokens) * (1 + 1e-7)
+
+/**
+ * The most money a simulated sell can take out right now. From a curve: only what buyers put in. From a pool: only
+ * what selling every coin that exists outside it would fetch (which is why a dead migrated coin still shows a few
+ * thousand dollars of market cap: a pool can't be sold down to nothing). And never the coins in a real wallet: the
+ * crowd can sell what the crowd bought, so the money behind a player's own bag stays in the curve / pool until that
+ * player sells. (Without this a made-up whale could sell more than had ever been bought by anyone but the dev, and a
+ * dev who was first in found their coins worth less than the curve's own starting price.)
+ */
+function sellRoom(t: Token) {
+  const Q = Math.max(1, t.liquidity / 2)
+  const mine = t.sim.held ?? 0 // coins in real wallets are not the crowd's to sell
+  if (t.status !== 'bonding') return Math.max(0, Q * Math.min(0.9, 1 - Q / t.price / Math.max(1, SUPPLY - mine)))
+  // Q − Q at the curve's floor (syncCurve holds a coin a hair above its start price: 1.0005 ×, so √ of that in Q).
+  return Math.max(0, Q * (1 - (Q / t.price / Math.max(1, LAUNCHPADS[t.pad].vTokens - mine)) * Math.sqrt(1.0005)))
+}
+
+export const walletNameFrom = (rand: () => number) => `${WALLET_PREFIXES[Math.floor(rand() * WALLET_PREFIXES.length) % WALLET_PREFIXES.length]}…${WALLET_SUFFIXES[Math.floor(rand() * WALLET_SUFFIXES.length) % WALLET_SUFFIXES.length]}`
+
+/**
+ * One simulated wallet's trade. `usd` is the money that goes into the curve / pool (a buy) or comes out of it (a sell);
+ * the price moves by exactly what that does to the reserves, the trade goes on the tape and the chart gets the print.
+ * Returns the money that really traded (a buy is cut at the end of a curve, a sell at what the curve / pool holds).
+ */
+export function fillSim(m: MarketState, t: Token, side: 'buy' | 'sell', usd: number, time: number, wallet: string, tag?: TapeTrade['tag'], more?: Partial<TapeTrade>): number {
+  if (curveDone(t)) return 0 // sold out: nothing trades on it until it has migrated
+  const Q = Math.max(1, t.liquidity / 2)
+  const prev = t.price
+  if (side === 'buy') {
+    const q = quoteBuy(t, usd)
+    usd = q.used
+    if (!(usd > 0)) return 0
+    t.price = q.newPrice
+  } else {
+    usd = Math.min(usd, sellRoom(t))
+    if (!(usd > 0)) return 0
+    t.price = prev * ((Q - usd) / Q) ** 2
+  }
+  t.mcap = t.price * SUPPLY
+  if (t.mcap > t.ath) t.ath = t.mcap
+  if (t.status === 'bonding') syncCurve(t, nativeUsdOf(m.native, t.chain))
+  else t.liquidity = 2 * (side === 'buy' ? Q + usd : Q - usd)
+  pushCandles(t, time, prev, usd)
+  addTape(m, t, { time, side, usd, price: t.price, wallet, tag, ...more })
+  return usd
+}
+
+/**
+ * Take a coin to `target` price the only way a price can move: with trades. The trades are sized so that buys minus
+ * sells is exactly the money the curve / pool needs to get there, and at least `wantVol` changes hands (a move needs
+ * at least its own money; quiet coins trade little more than that, busy ones a lot more, in both directions).
+ * `seconds` spreads them over the tick. Returns what traded.
+ */
+function tradeTo(m: MarketState, t: Token, target: number, rng: Rng, o: { wantVol: number; n: number; avgSize: number; seconds: number; tag?: (side: 'buy' | 'sell', usd: number) => TapeTrade['tag'] }) {
+  const out = { vol: 0, nb: 0, ns: 0, traded: false }
+  const Q = Math.max(1, t.liquidity / 2)
+  const delta = Q * (Math.sqrt(Math.max(1e-12, target / t.price)) - 1) // + money in, − money out
+  const need = Math.abs(delta)
+  const V = Math.max(o.wantVol, need * (1 + (o.n > 1 ? rng.range(0.05, 0.6) : 0)))
+  const count = Math.max(1, Math.min(14, Math.max(o.n, Math.round(V / (o.avgSize * 1.8)))))
+  let buyUsd = (V + delta) / 2
+  let sellUsd = (V - delta) / 2
+  // A lone trade, or one side too small to be a trade: everything goes the way the price is going.
+  if (count === 1 || Math.min(buyUsd, sellUsd) < 1) {
+    buyUsd = delta > 0 ? need : 0
+    sellUsd = delta > 0 ? 0 : need
+  }
+  if (buyUsd + sellUsd < 1) return out // nothing worth a trade: what was pending waits for the next one
+  const nBuys = buyUsd <= 0 ? 0 : sellUsd <= 0 ? count : Math.max(1, Math.min(count - 1, Math.round((count * buyUsd) / (buyUsd + sellUsd))))
+  const weights = Array.from({ length: count }, () => Math.exp(0.9 * rng.gauss()))
+  const wBuy = weights.slice(0, nBuys).reduce((a, w) => a + w, 0)
+  const wSell = weights.slice(nBuys).reduce((a, w) => a + w, 0)
+  const legs = weights.map((w, i) => (i < nBuys ? { side: 'buy' as const, usd: (buyUsd * w) / wBuy } : { side: 'sell' as const, usd: (sellUsd * w) / wSell }))
+  // Random order, but never an order the reserves can't do (on a curve, a sell before the buys that pay for it).
+  const start = m.time - o.seconds
+  let sec = 0
+  for (let k = 1; legs.length; k++) {
+    let i = rng.int(0, legs.length - 1)
+    if (legs[i].side === 'sell' && legs[i].usd > sellRoom(t) + 1e-9) {
+      const j = legs.findIndex((l) => l.side === 'buy')
+      if (j >= 0) i = j
+    }
+    const leg = legs.splice(i, 1)[0]
+    const at = Math.max(sec, Math.max(1, Math.ceil((k / count) * o.seconds)))
+    for (let x = sec + 1; x < at; x++) pushCandles(t, start + x, t.price, 0) // the seconds nobody traded in are flat
+    sec = at
+    const usd = fillSim(m, t, leg.side, leg.usd, start + at, walletName(rng), o.tag?.(leg.side, leg.usd))
+    if (!(usd > 0)) continue
+    out.traded = true
+    out.vol += usd
+    if (leg.side === 'buy') out.nb++
+    else out.ns++
+  }
+  for (let x = sec + 1; x <= o.seconds; x++) pushCandles(t, start + x, t.price, 0)
+  return out
+}
+
+/**
+ * An outside push on a coin's price (news, a whale, a dev taking profits) as what it really is: trades. Moves the
+ * price by `pct` (a fraction, + or −) through the curve / pool and returns the money that traded.
+ */
+export function joltByTrades(m: MarketState, t: Token, pct: number, rng: Rng, tag?: TapeTrade['tag'], parts = 1) {
+  if (t.status !== 'bonding' && t.status !== 'graduated') return 0
+  const Q = Math.max(1, t.liquidity / 2)
+  const total = Math.abs(Q * (Math.sqrt(Math.max(1e-12, 1 + pct)) - 1))
+  const side = pct >= 0 ? 'buy' : 'sell'
+  let done = 0
+  for (let i = 0; i < parts; i++) done += fillSim(m, t, side, total / parts, m.time, walletName(rng), tag)
+  if (done > 0) {
+    t.volume += done
+    if (side === 'buy') t.buys += parts
+    else t.sells += parts
+    t.win = addWin(getWin(t, m.time), done, side === 'buy' ? parts : 0, side === 'sell' ? parts : 0)
+  }
+  return done
+}
+
+/**
+ * Somebody else's trade landing between two of a player's steps (the buyers who got in first while an order was on its
+ * way, a sandwich bot's two legs). Give the money into the curve / pool for a buy, or out of it for a sell (`usd`),
+ * or a number of tokens to sell (`qty`). Returns the new market and what changed hands.
+ */
+export function applySimTrade(m: MarketState, tokenId: string, side: 'buy' | 'sell', amount: { usd: number } | { qty: number }, wallet: string, tag?: TapeTrade['tag']): { market: MarketState; usd: number; qty: number } {
+  const old = m.tokens.find((x) => x.id === tokenId)
+  if (!old || (old.status !== 'bonding' && old.status !== 'graduated')) return { market: m, usd: 0, qty: 0 }
+  const t: Token = { ...old, sim: { ...old.sim }, change: { ...old.change } }
+  const next: MarketState = { ...m }
+  const tokensBefore = t.liquidity / 2 / t.price
+  const want = 'usd' in amount ? amount.usd : quoteSell(t, amount.qty).usdOut
+  const usd = fillSim(next, t, side, want, m.time, wallet, tag)
+  if (!(usd > 0)) return { market: m, usd: 0, qty: 0 }
+  t.volume += usd
+  if (side === 'buy') t.buys += 1
+  else t.sells += 1
+  t.win = addWin(getWin(old, m.time), usd, side === 'buy' ? 1 : 0, side === 'sell' ? 1 : 0)
+  refreshChanges(t, m.time)
+  return { market: { ...next, tokens: m.tokens.map((x) => (x.id === tokenId ? t : x)) }, usd, qty: Math.abs(tokensBefore - t.liquidity / 2 / t.price) }
 }
 
 /** Apply a player trade's price impact to the token and add it to the tape. */
@@ -1104,6 +1361,9 @@ export function applyPlayerTrade(m: MarketState, tokenId: string, side: 'buy' | 
     // Sells move the curve too: without this, the next wallet selling in the same tick is paid off the pre-sell reserves.
     if (t.status === 'bonding') syncCurve(t, nativeUsdOf(m.native, t.chain))
     else poolFollows(t, prevPrice)
+    if (t.sim.flow && side === 'buy') t.sim.flow = { ...t.sim.flow, lastTrade: m.time } // somebody is still buying it: not a dead coin
+    // These coins are in a real wallet now (or have left one): see sellRoom. The next tick counts the wallets again.
+    if (t.sim.held !== undefined) t.sim.held = Math.max(0, t.sim.held + old.liquidity / 2 / prevPrice - t.liquidity / 2 / t.price)
     // Multiplayer: the server tags another player's trade with their name and id (each browser shows its own as YOU).
     const entry: TapeTrade = who ? { id: m.nextTradeId, time: m.time, side, usd, price: newPrice, wallet: who.name, ...(who.pid ? { pid: who.pid } : {}), ...(who.addr ? { addr: who.addr } : {}), ...(who.walletId ? { walletId: who.walletId } : {}) } : { id: m.nextTradeId, time: m.time, side, usd, price: newPrice, wallet: 'YOU', tag: 'you' }
     t.tape = [entry, ...t.tape].slice(0, TAPE_LEN)
@@ -1204,6 +1464,19 @@ export function cookToken(prev: MarketState, rng: Rng, spec: CookSpec): { market
   if (spec.style === 'hyped') t.sim.volBoost += 0.8
   if (rng.chance(score)) setRegime(t, 'pump', rng)
   else setRegime(t, rng.chance(0.5) ? 'accumulation' : 'sideways', rng)
+  if (prev.engine === 'realistic') {
+    // On the real-time engine a launch lives the way launches do: by who shows up to trade it (see stepFlow). How
+    // much of the crowd that is follows how good the launch looks, with a lot of luck on top: a lazy launch is dead
+    // in a minute like most real ones, a strong one in the hot meta bonds more often than not.
+    const q = Math.exp(COOK_FLOW.base + COOK_FLOW.perScore * score + COOK_FLOW.luck * rng.gauss())
+    t.sim.flow = { q, att: q * rng.range(0.8, 1.6), ema: t.price, lastTrade: prev.time }
+    // It starts with nothing but its dev: no made-up holders, trades or snipers (the real ones arrive in stepFlow, and
+    // holders who never bought would be selling the dev's own money back out of the curve).
+    t.holders = 0
+    t.snipers = 0
+    t.volume = t.volMark = t.buys = t.sells = t.feesPaid = 0
+    t.win = undefined
+  }
   const risk = computeRisk(t, prev.time)
   t.riskScore = risk.score
   t.riskLevel = risk.level

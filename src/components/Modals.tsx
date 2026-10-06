@@ -308,7 +308,7 @@ function HelpModal() {
           <p><span className="font-semibold text-ink">MOONRUSH is a game.</span> Every token, price, trade, wallet and rival is simulated. No wallets, no blockchain, no real money.</p>
           <p><span className="font-semibold text-ink">The market has memory.</span> Tokens move through regimes (accumulation, pumps, distribution, dumps, recoveries), so moves tend to persist. Stretched prices tend to revert.</p>
           <p><span className="font-semibold text-ink">Liquidity is everything.</span> Fills use a constant-product pool: size up in a thin pool and slippage will eat you. There's a 1% arena fee on every trade.</p>
-          <p><span className="font-semibold text-ink">Rugs happen.</span> High-risk tokens (concentrated holders, big dev bags, thin liquidity) can collapse. ⚠️ liquidity warnings and 🧑‍💻 dev sells often come first.</p>
+          <p><span className="font-semibold text-ink">Rugs happen.</span> High-risk tokens (concentrated holders, big dev bags, thin liquidity) can collapse. ⚠️ insider warnings and 🧑‍💻 dev sells often come first.</p>
           <p><span className="font-semibold text-ink">Graduation.</span> New tokens start on a bonding curve and graduate once their launchpad's curve sells out (around $50–120K market cap depending on the pad), then trade in a DEX pool.</p>
           <p><span className="font-semibold text-ink">Progress.</span> Earn XP from profitable trades, early discoveries, missions and milestones. Levels unlock themes and Hardcore mode.</p>
         </div>

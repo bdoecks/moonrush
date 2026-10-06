@@ -2,7 +2,7 @@ import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
 import { LAUNCHPADS, PUMPSWAP_FEES } from '../data/launchpads'
 import { SPEED_REF_USD } from '../data/tradeSettings'
 import type { Chain, MarketState, Portfolio, Position, Token, Trade, TradeSetting } from '../types'
-import { applyPlayerTrade, quoteBuy, quoteSell } from './marketEngine'
+import { applyPlayerTrade, applySimTrade, curveDone, quoteBuy, quoteSell, walletNameFrom } from './marketEngine'
 
 // A trade record keeps a copy of the coin's picture so your history can still show it after the coin is gone. That
 // suits a browser. On the server every wallet's trades are kept in memory and saved, and a picture can be tens of KB:
@@ -73,10 +73,13 @@ export interface SellPreview {
 }
 
 export function previewBuy(t: Token, usd: number): BuyPreview {
-  const fee = usd * tradeFee(t, 'buy')
-  const netIn = Math.max(0, usd - fee)
-  const q = quoteBuy(t, netIn)
-  return { total: usd, fee, netIn, qty: q.qty, avgPrice: q.avgPrice, newPrice: q.newPrice, slippage: q.slippage }
+  const rate = tradeFee(t, 'buy')
+  const q = quoteBuy(t, Math.max(0, usd * (1 - rate)))
+  // At the very end of a curve there may be less left to buy than the order asked for: like the launchpad, only
+  // what the curve can still sell is charged (`total` is then less than `usd`).
+  const netIn = q.used
+  const total = netIn < usd * (1 - rate) - 1e-9 ? netIn / (1 - rate) : usd
+  return { total, fee: total - netIn, netIn, qty: q.qty, avgPrice: q.avgPrice, newPrice: q.newPrice, slippage: q.slippage }
 }
 
 export function previewSell(t: Token, qty: number, pos?: Position): SellPreview {
@@ -228,13 +231,32 @@ export function executeBuy(p: Portfolio, m: MarketState, tokenId: string, usd: n
   if (!(usd >= MIN_TRADE)) return { ok: false, error: bal * px < MIN_TRADE ? `Not enough ${coin} — swap some USD into ${coin} first` : `Minimum trade is $${MIN_TRADE}` }
 
   const q0 = previewBuy(t, usd)
+  const soldOut = { ok: false as const, error: `$${t.ticker} has sold out its curve and is migrating. Try again in a moment` }
+  if (!(q0.qty > 0)) return soldOut
   const f = opts.setting ? frictions(t, q0.slippage, opts.setting, px, opts.rand) : undefined
   const extra = f ? f.lag + f.mev : 0
   if (f && q0.slippage + extra > f.tolerance) {
     return { ok: false, error: slipError(q0.slippage + extra, f.tolerance, opts.setting!.priority, chain), burn: { chain, native: opts.setting!.priority } }
   }
-  // You land after the price moved (lag) and, if sandwiched, after a bot bought ahead of you (mev).
-  const q = { ...q0, qty: q0.qty / (1 + extra), avgPrice: q0.avgPrice * (1 + extra), newPrice: q0.newPrice * (1 + (f?.lag ?? 0)), slippage: q0.slippage + extra }
+  // While the order was on its way other people's buys landed first (lag), and a sandwich bot may have bought just
+  // ahead of it (mev). Those are real trades on the same curve / pool, shown on the tape; the order is then filled at
+  // exactly what the reserves give, so the price never moves by more than the money that went in.
+  const rand = opts.rand ?? Math.random
+  const ahead = (pct: number, cur: Token) => Math.max(1, cur.liquidity / 2) * (Math.sqrt(1 + pct) - 1)
+  let market = m
+  let botQty = 0
+  if (f && f.lag > 0) market = applySimTrade(market, tokenId, 'buy', { usd: ahead(f.lag, t) }, walletNameFrom(rand)).market
+  if (f?.sandwiched) {
+    const bot = applySimTrade(market, tokenId, 'buy', { usd: ahead(f.mev, market.tokens.find((x) => x.id === tokenId) ?? t) }, 'MEV bot')
+    market = bot.market
+    botQty = bot.qty
+  }
+  const fill = previewBuy(market.tokens.find((x) => x.id === tokenId) ?? t, usd)
+  if (!(fill.qty > 0)) return soldOut
+  // (At the end of a curve the order is cut to what was left: the rest of the money stays in the wallet.)
+  usd = fill.total
+  needed = usd / px
+  const q = { ...fill, slippage: fill.avgPrice / t.price - 1 }
   const gasUsd = f?.gasUsd ?? 0
   const prev = p.positions[tokenId]
   const qty = (prev?.qty ?? 0) + q.qty
@@ -262,7 +284,9 @@ export function executeBuy(p: Portfolio, m: MarketState, tokenId: string, usd: n
     feesPaid: p.feesPaid + q.fee + gasUsd,
     tradedTokens: firstTimeToken ? [...p.tradedTokens, tokenId] : p.tradedTokens,
   }
-  return { ok: true, portfolio, market: applyPlayerTrade(m, tokenId, 'buy', usd, q.newPrice, opts.who), trade, firstTimeToken, swapped, exec: f }
+  market = applyPlayerTrade(market, tokenId, 'buy', usd, q.newPrice, opts.who)
+  if (botQty > 0) market = applySimTrade(market, tokenId, 'sell', { qty: botQty }, 'MEV bot').market // the other half of the sandwich
+  return { ok: true, portfolio, market, trade, firstTimeToken, swapped, exec: f }
 }
 
 export function executeSell(p: Portfolio, m: MarketState, tokenId: string, qty: number, nextId: number, opts: ExecOpts = {}): Result {
@@ -271,6 +295,7 @@ export function executeSell(p: Portfolio, m: MarketState, tokenId: string, qty: 
   if (!t || !pos) return { ok: false, error: 'No position to sell' }
   qty = Math.min(qty, pos.qty)
   if (!(qty > 0)) return { ok: false, error: 'Enter an amount to sell' }
+  if (curveDone(t)) return { ok: false, error: `$${t.ticker} has sold out its curve and is migrating. Try again in a moment` }
 
   const chain = t.chain ?? 'sol'
   const px = nativePrice(m, chain)
@@ -280,13 +305,26 @@ export function executeSell(p: Portfolio, m: MarketState, tokenId: string, qty: 
   if (f && q0.slippage + extra > f.tolerance) {
     return { ok: false, error: slipError(q0.slippage + extra, f.tolerance, opts.setting!.priority, chain), burn: { chain, native: opts.setting!.priority } }
   }
-  // Price ran down before you landed (lag) and/or a sandwich bot sold ahead of you (mev). Network fee comes off the top.
+  // While the order was on its way other sellers landed first (lag), and a sandwich bot may have sold just ahead of
+  // it (mev): real trades on the same curve / pool, shown on the tape. The order then gets exactly what the reserves
+  // pay. Network fee comes off the top.
   const gasUsd = f?.gasUsd ?? 0
-  const gross = q0.gross * (1 - Math.min(0.95, extra))
-  const fee = gross * tradeFee(t, 'sell')
+  const rand = opts.rand ?? Math.random
+  const ahead = (pct: number, cur: Token) => Math.max(1, cur.liquidity / 2) * (1 - Math.sqrt(Math.max(0, 1 - Math.min(0.95, pct))))
+  let market = m
+  let botQty = 0
+  if (f && f.lag > 0) market = applySimTrade(market, tokenId, 'sell', { usd: ahead(f.lag, t) }, walletNameFrom(rand)).market
+  if (f?.sandwiched) {
+    const bot = applySimTrade(market, tokenId, 'sell', { usd: ahead(f.mev, market.tokens.find((x) => x.id === tokenId) ?? t) }, 'MEV bot')
+    market = bot.market
+    botQty = bot.qty
+  }
+  const fill = previewSell(market.tokens.find((x) => x.id === tokenId) ?? t, qty, pos)
+  const gross = fill.gross
+  const fee = fill.fee
   const net = gross - fee - gasUsd
   const cost = pos.avgEntry * qty
-  const q = { ...q0, gross, fee, net, avgPrice: gross / qty, newPrice: q0.newPrice * (1 - (f?.lag ?? 0)), slippage: q0.slippage + extra, pnl: net - cost, pnlPct: cost > 0 ? net / cost - 1 : 0 }
+  const q = { ...fill, net, avgPrice: gross / qty, slippage: 1 - gross / qty / t.price, pnl: net - cost, pnlPct: cost > 0 ? net / cost - 1 : 0 }
   // Proceeds arrive in the token's chain coin.
   const balances = p.balances ?? emptyBalances()
   const nativeOut = q.net / px
@@ -312,5 +350,13 @@ export function executeSell(p: Portfolio, m: MarketState, tokenId: string, qty: 
     realized: p.realized + q.pnl,
     feesPaid: p.feesPaid + q.fee + gasUsd,
   }
-  return { ok: true, portfolio, market: applyPlayerTrade(m, tokenId, 'sell', q.gross, q.newPrice, opts.who), trade, firstTimeToken: false, exec: f }
+  market = applyPlayerTrade(market, tokenId, 'sell', q.gross, q.newPrice, opts.who)
+  if (botQty > 0) {
+    // The other half of the sandwich: the bot buys back what it sold.
+    const cur = market.tokens.find((x) => x.id === tokenId)
+    const Q = cur ? Math.max(1, cur.liquidity / 2) : 0
+    const T = cur ? Q / cur.price : 0
+    if (cur && botQty < T * 0.9) market = applySimTrade(market, tokenId, 'buy', { usd: (Q * botQty) / (T - botQty) }, 'MEV bot').market
+  }
+  return { ok: true, portfolio, market, trade, firstTimeToken: false, exec: f }
 }

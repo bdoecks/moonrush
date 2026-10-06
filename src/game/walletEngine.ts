@@ -3,7 +3,7 @@ import { WALLET_SEEDS } from '../data/wallets'
 import { addWin, getWin } from './windows'
 import type { MarketState, SimWallet, Token, WalletAction, WalletHistory, WalletStyle, WalletTrade } from '../types'
 import { clamp, type Rng } from '../utils/rng'
-import { HOUR_TICKS, quoteBuy, quoteSell, SUPPLY, touchCandles } from './marketEngine'
+import { fillSim, HOUR_TICKS, quoteBuy, quoteSell, SUPPLY, touchCandles, walletName } from './marketEngine'
 
 // Simulated trader wallets that really trade the market. Their fills move prices through the same pool
 // the player uses, so anyone copying them enters after them, at a worse price.
@@ -314,16 +314,19 @@ export function tickWallets(wallets: SimWallet[], m: MarketState, rng: Rng): { w
           t.mcap = t.price * SUPPLY
           t.ath = Math.max(t.ath, t.mcap)
           // A KOL's call pulls in a wave of followers right behind them.
+          touchCandles(t, m.time, prev, usd, m.native)
+          fill(t, w, 'buy', usd, q.avgPrice)
           if (w.style === 'kol') {
-            const followers = quoteBuy(t, usd * rng.range(1, 3))
-            t.price = followers.newPrice
-            t.mcap = t.price * SUPPLY
-            t.ath = Math.max(t.ath, t.mcap)
+            // A KOL's call pulls in followers right behind them: a few real buys, on the tape like any other.
+            const crowd = usd * rng.range(1, 3)
+            const k = rng.int(2, 4)
+            let bought = 0
+            for (let i = 0; i < k; i++) bought += fillSim(m, t, 'buy', crowd / k, m.time, walletName(rng))
+            t.volume += bought
+            t.buys += k
             t.hype = Math.min(100, t.hype + 10)
             t.sim.pressure += 0.004
           }
-          touchCandles(t, m.time, prev, usd, m.native)
-          fill(t, w, 'buy', usd, q.avgPrice)
           w.cash -= usd
           w.positions[t.id] = { qty: q.qty, cost: usd, openedTick: m.tick }
           w.live.buys++

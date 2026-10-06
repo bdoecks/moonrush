@@ -56,6 +56,17 @@ ok((lastWallet().failures ?? [])[0]?.includes('cooling') && me().wallet.cash ===
 r.handle('p1', { t: 'order', seq: 4, ref: 4, order: { side: 'buy', tokenId: cooked.token.id, walletIds: [main().id], usdEach: 100 } })
 ok((me().cashback?.sol ?? 0) > cb1, 'cashback grows on orders')
 
+// The dev sells a quarter of their own coin: the crowd sees the dev wallet selling (the server works that out from
+// its own count of the bag, not from anything the game says).
+{
+  const coin = () => room.market.tokens.find((t) => t.id === cooked.token.id)!
+  const held = me().wallet.positions[cooked.token.id].qty
+  const before = { pressure: coin().sim.pressure, hype: coin().hype }
+  r.handle('p1', { t: 'order', seq: 40, ref: 40, order: { side: 'sell', tokenId: cooked.token.id, legs: [{ walletId: main().id, qty: held / 4 }] } })
+  const frac = 1 - me().wallet.positions[cooked.token.id].qty / held
+  ok(Math.abs(frac - 0.25) < 1e-6 && Math.abs(before.pressure - coin().sim.pressure - 0.012 * frac) < 1e-9 && coin().hype <= before.hype - 30 * frac + 1e-9, `a dev selling ${(frac * 100).toFixed(0)}% of their own coin costs it some of the crowd, on the server`)
+}
+
 // Volume bot: paid from the dev wallet on the server.
 const solBot = main().balances.sol
 r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, rate: 2000, budget: 50, spent: 0, volume: 0, startedTick: 0 } })

@@ -1,7 +1,7 @@
 import { EVENT_TEMPLATES, type EventTemplate } from '../data/events'
 import type { MarketEvent, MarketState, Token } from '../types'
 import { clamp, type Rng } from '../utils/rng'
-import { SUPPLY, setRegime, walletName } from './marketEngine'
+import { clockStep, joltByTrades, setRegime, SUPPLY } from './marketEngine'
 
 const EVENT_CHANCE = 0.18
 const lastMoveAlert = new Map<string, number>()
@@ -38,30 +38,27 @@ export function rollEvents(m: MarketState, rng: Rng): MarketEvent[] {
     if (t) {
       const s = t.sim
       if (tpl.jump) {
+        // The jump is what it claims to be: a whale's buy, a dev's sell, a crowd following a call. Real trades through
+        // the coin's curve / pool, sized to move the price that far, on the tape for everyone to see.
         const j = rng.range(tpl.jump[0], tpl.jump[1])
-        t.price *= 1 + j
-        t.mcap = t.price * SUPPLY
-        t.ath = Math.max(t.ath, t.mcap)
-        if (tpl.kind === 'whale') {
-          t.tape = [{ id: m.nextTradeId++, time: m.time, side: 'buy' as const, usd: t.liquidity * j, price: t.price, wallet: walletName(rng), tag: 'whale' as const }, ...t.tape].slice(0, 40)
-        }
-        if (tpl.kind === 'devsell') {
-          t.devPct = Math.max(0, t.devPct * 0.5)
-          t.devTrades = [{ time: m.time, side: 'sell' as const, usd: t.liquidity * -j }, ...(t.devTrades ?? [])].slice(0, 24)
-          t.tape = [{ id: m.nextTradeId++, time: m.time, side: 'sell' as const, usd: t.liquidity * -j, price: t.price, wallet: walletName(rng), tag: 'dev' as const }, ...t.tape].slice(0, 40)
+        const tokensBefore = t.liquidity / 2 / t.price
+        const usd = joltByTrades(m, t, j, rng, tpl.kind === 'whale' ? 'whale' : tpl.kind === 'devsell' ? 'dev' : undefined, tpl.kind === 'kol' ? rng.int(2, 4) : 1)
+        if (tpl.kind === 'devsell' && usd > 0) {
+          // The dev's bag shrinks by the tokens that went into the pool.
+          t.devPct = Math.max(0, t.devPct - (Math.max(0, t.liquidity / 2 / t.price - tokensBefore) / SUPPLY) * 100)
+          t.devTrades = [{ time: m.time, side: 'sell' as const, usd }, ...(t.devTrades ?? [])].slice(0, 24)
         }
       }
       if (tpl.pressure) s.pressure += tpl.pressure
       if (tpl.hype) t.hype = clamp(t.hype + tpl.hype, 0, 100)
       if (tpl.volBoost) s.volBoost += tpl.volBoost
-      if (tpl.liquidity) t.liquidity *= tpl.liquidity
       if (tpl.regime) {
         const [lo, hi] = tpl.regimeTicks ?? [10, 20]
         setRegime(t, tpl.regime, rng, rng.int(lo, hi))
       }
       // Warning-type events on shady tokens sometimes precede a real rug: reading them matters.
       if ((tpl.kind === 'liquidity' || tpl.kind === 'devsell') && t.rugProb > 0.0002 && s.rugAt === null && rng.chance(0.35)) {
-        s.rugAt = m.tick + rng.int(15, 40)
+        s.rugAt = m.tick + Math.round(rng.int(15, 40) / clockStep())
       }
       emit({ kind: tpl.kind, tokenId: t.id, ticker: t.ticker, text: rng.pick(tpl.texts).replace('{T}', `$${t.ticker}`), icon: tpl.icon, tone: tpl.tone })
     }

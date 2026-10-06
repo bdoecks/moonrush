@@ -931,7 +931,11 @@ export const useGame = create<GameState>()((set, get) => {
     const rng = new Rng(s.market.seed)
     const held = Object.keys(s.portfolio.positions)
     const protectedIds = new Set([...held, ...s.watchlist, s.selectedId ?? ''])
-    const { market, events: e1 } = tickMarket(s.market, rng, { rugMult: MODES[s.mode].rugMult, protectedIds })
+    // Your coins are yours, and a tracked wallet's are its own: the rest of the simulated crowd can only sell what
+    // it bought itself (see sellRoom in the market engine).
+    const mine = new Map(Object.entries(s.portfolio.positions).map(([id, p]) => [id, p.qty]))
+    for (const w of s.wallets) for (const [id, p] of Object.entries(w.positions)) mine.set(id, (mine.get(id) ?? 0) + p.qty)
+    const { market, events: e1 } = tickMarket(s.market, rng, { rugMult: MODES[s.mode].rugMult, protectedIds, held: mine })
     const e2 = rollEvents(market, rng)
     const wr = tickWallets(s.wallets, market, rng)
     const newPosts = tickSocial(market, rng, wr.actions, [...e1, ...e2])

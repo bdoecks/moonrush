@@ -28,7 +28,8 @@ npm run server:dev     # the room server, http://localhost:8787 (WebSocket path 
 ```bash
 npx tsc --noEmit -p tsconfig.app.json       # the game
 npx tsc --noEmit -p tsconfig.server.json    # the server
-npx tsx scripts/p2c-test.ts                 # 20 checks: server-run money (orders, cooking, bots, fees, cashback)
+npx tsx scripts/curve-test.ts               # every price move is trades through the launchpads' own curve / pool maths; a player's fill is exact
+npx tsx scripts/p2c-test.ts                 # server-run money (orders, cooking, bots, fees, cashback) and what a launch may carry
 npx tsx scripts/world-test.ts               # World rules: always on, guests watch, wallets kept, admin reset
 npx tsx scripts/bots-test.ts 2              # World bots over 2 simulated hours
 npx tsx scripts/safety-test.ts              # chat safety: filter, rate limit, mute, reports
@@ -40,6 +41,7 @@ npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Ligh
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/health-test.ts              # safety net: health verdicts, backups (stand-in database), World restore, admin routes
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
+npx tsx scripts/market-report.ts            # the World in numbers (not pass/fail): read before and after tuning the market
 npx tsx scripts/load-test.ts                # how many players the server holds: fake players in steps of 1…200 (5 min; run after wire changes)
 npx tsx scripts/crowd-test.ts 3             # the 100 World bots: skill shows in results, dev dumps, pile-on limit, speed
 npx vite build                              # production build
@@ -84,6 +86,11 @@ Without the brain file the bots fall back to the old `STYLE` rules. To keep the 
 any bag in a dead or delisted coin as a realized loss (`botWriteOff`, through `runGiveAway`), and its own wallet keeps
 only its last `BOT_TRADES_KEPT` trades (lifetime counts live in `brain.fills` / `brain.wins`; the public wallet still
 shows 60). Without those, bags and history pile up for ever: check with `crowd-test` and `world-soak` after bot changes.
+The crowd also talks like a room, not a trade log (`LINES` in `server/bots.ts`, never the line somebody just said): it
+reacts to coins bonding and devs dumping, to a real player's launch or big buy (`react`, and `lookAt` makes bots likelier
+to buy that coin for a while), and answers itself now and then. A chef sells out of a coin whose buyers have gone
+(`fading`), and a bot dev's real bag shows as its coin's dev share (set in `tick()`; a player's understated one too).
+Any dev selling their own coin, player or bot, costs it some of the crowd (`devSold`, the same rule the solo game has).
 
 **Trend coins**: the learner also writes `trends` (theme words found in real launch names, ranked by SOL traded). Only words on
 the allow-list in `server/trendThemes.ts` count, so real people, brands, politics and crude words never reach the game;
@@ -180,7 +187,38 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
    account id (`u-<uid>`). Guests are spectators. It must stay a steady size: see `WORLD_FADE_*` and run the soak
    test after touching market or delisting logic.
 6. Solo play must keep working with no server at all.
-7. Player-facing behaviour follows Axiom Pro / GMGN where they have an equivalent. Check how they do it first.
+7. **A price only moves when somebody trades.** A coin's price IS its reserves: on a launchpad curve the pad's
+   virtual reserves (`src/data/launchpads.ts`, `src/game/curve.ts`: pump.fun's 30 SOL / 1,073,000,000 tokens and so
+   on), after migration a constant-product pool seeded with the raise and the pad's LP tokens. `quoteBuy` /
+   `quoteSell` are the only price maths. Nothing sets `t.price` by hand: simulated wallets trade
+   through `fillSim`, players and bots through `applyPlayerTrade`, and the market's own pull on a coin (its regime,
+   the mood, news, a rug) is worked out as before but only adds up in `sim.pend` until the tick's trades carry it
+   (`tradeTo`, `joltByTrades`), as exactly the buying or selling it takes. So the tape always adds up to the chart,
+   volume is at least what the move cost, a rug is insiders dumping real bags (liquidity is burned: nobody pulls a
+   pool), a buy at the end of a curve is cut to what is left, a sold-out curve is closed until it migrates, and
+   other people's trades that land before a player's order (lag, a sandwich) are real trades on the tape. The
+   one thing that moves a dollar price without a trade is the chain coin itself (the reserves are SOL / BNB / ETH).
+   `scripts/curve-test.ts` holds all of this; run it after touching the market.
+   The regime model is written per classic 6-second tick and follows the clock (`DT`, `clockStep()`): on the
+   real-time World one tick is a sixth of a step, so a migrated coin moves about 3% in a typical minute, not 10%.
+   Two things besides trades touch a pool, and neither moves a price: other liquidity providers top up a coin that
+   has outgrown its launch pool (`POOL_FLOOR`: never under 2% of market cap), and a pool can't be sold below the
+   price it has with the whole supply in it (`sellRoom`: a dead migrated coin keeps a few $K of market cap).
+   **The simulated crowd can only sell what it bought**: the coins in real wallets (players on or off line, bots,
+   tracked wallets: `TickOptions.held`, kept per coin in `sim.held`) are never the crowd's to sell, so the money
+   behind a player's own bag stays in the curve / pool until that player sells. Whoever ticks a market passes
+   `held` (the room and the solo store both do); without it a made-up whale can empty a curve under a dev who was
+   first in.
+8. **On the real-time engine (the World) every coin on a curve lives by order flow** (`stepFlow`), on every
+   launchpad, whoever launched it: the crowd's own launches, the bot chefs' and a player's. A cooked coin's pull on
+   the crowd (`flow.q`) comes from its launch score (`COOK_FLOW`); a big dev bag puts buyers off; what the classic
+   engine calls `pressure` (a volume bot, marketing, a flagged bundle) is attention gained or lost; and it is
+   written off only after `FLOW.devQuiet` without one buyer. A hot coin's clock slows (`pace`), so a winner takes
+   minutes to bond, not half a minute, and the Final Stretch column holds coins people can trade. Once migrated, a
+   crowd launch's insiders can dump into the pool (`rugProb` by archetype). Tuning any of it: read
+   `npx tsx scripts/market-report.ts` before and after (columns, time to bond, launch odds, rugs an hour), then run
+   `curve-test`, `crowd-test` and a long `world-soak` (coins must not pile up; `SIZE_CAP_MULT` keeps the giants few).
+9. Player-facing behaviour follows Axiom Pro / GMGN where they have an equivalent. Check how they do it first.
 
 ## Conventions
 
