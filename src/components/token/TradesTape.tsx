@@ -664,6 +664,7 @@ function DevTokenTab({ token }: { token: Token }) {
   const book = bookOf(token, now)
   const yours = token.creator === 'you'
   const creatorName = (token as Token & { creatorName?: string }).creatorName
+  const botDev = !!token.creatorId?.startsWith('bot-') // a World bot launched it
   type Coin = { id?: string; ticker: string; name: string; emoji: string; ago: number; athMc: number; mc: number; status: string; holders: number; current?: boolean }
   const others: Coin[] = yours
     ? launches.filter((l) => l.tokenId !== token.id).map((l) => {
@@ -696,7 +697,7 @@ function DevTokenTab({ token }: { token: Token }) {
   const verdict = score >= 70 ? { label: 'Trusted builder', cls: 'text-up', ring: '#19d989' } : score >= 45 ? { label: 'Mixed record', cls: 'text-warn', ring: '#ffb020' } : { label: 'High risk', cls: 'text-down', ring: '#ff4d6a' }
   const tags: { label: string; cls: string }[] = []
   if (yours) tags.push({ label: '⭐ Your coin', cls: 'border-accent/40 bg-accent/10 text-accent' })
-  if (creatorName?.includes('🤖')) tags.push({ label: '🤖 Bot dev', cls: 'border-info/40 bg-info/10 text-info' })
+  if (botDev) tags.push({ label: 'Simulated trader', cls: 'border-line2 bg-panel2 text-muted' })
   if (rugged >= 3) tags.push({ label: '⚠ Serial rugger', cls: 'border-down/40 bg-down/10 text-down' })
   if (migrated >= 2) tags.push({ label: '🏆 Proven builder', cls: 'border-up/40 bg-up/10 text-up' })
   if (n === 1) tags.push({ label: '🌱 First coin', cls: 'border-line2 bg-panel2 text-muted' })

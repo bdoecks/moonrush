@@ -12,6 +12,14 @@ export interface TrackerRow {
   friend?: boolean // a real player's wallet: opens the leaderboard instead of a bot wallet profile
 }
 
+/** Where a tracker row leads: a room player to the leaderboard, anybody else (a watched World bot too) to their wallet page. */
+export function openRow(row: Pick<TrackerRow, 'w' | 'friend'>, go: { leaderboard: () => void; wallet: (id: string) => void }) {
+  const bot = row.w.id.startsWith('p:bot-') ? row.w.id.slice(2) : null
+  if (bot) go.wallet(bot)
+  else if (row.friend) go.leaderboard()
+  else go.wallet(row.w.id)
+}
+
 export function useFriendRows(): { rows: TrackerRow[]; count: number } {
   const trades = useFriends((s) => s.trades)
   const watch = useFriends((s) => s.watch)

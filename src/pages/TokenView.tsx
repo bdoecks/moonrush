@@ -292,7 +292,7 @@ function Header({ t }: { t: Token }) {
             <RiskBadge level={t.riskLevel} score={t.riskScore} />
             {t.creator === 'you' && <span className="rounded bg-warn/15 px-1 text-[9px] font-bold text-warn" title={t.description}>🍳 COOKED BY YOU</span>}
             {t.vampOf && <button onClick={() => select(t.vampOf!.id)} className="rounded bg-accent/15 px-1 text-[9px] font-bold uppercase text-accent hover:bg-accent/25" title="A copycat launch: open the original">🧛 Vamp of ${t.vampOf.ticker}</button>}
-            {t.creator !== 'you' && t.creatorName && <span className="rounded bg-info/15 px-1 text-[9px] font-bold uppercase text-info" title={`A player in your room cooked this. ${t.description ?? ''}`}>🍳 Cooked by {t.creatorName}</span>}
+            {t.creator !== 'you' && t.creatorName && <span className="rounded bg-info/15 px-1 text-[9px] font-bold uppercase text-info" title={`${t.creatorId?.startsWith('bot-') ? 'A simulated trader cooked this.' : 'A player in your room cooked this.'} ${t.description ?? ''}`}>🍳 Cooked by {t.creatorName}</span>}
             {t.socials && (
               <span className="flex items-center gap-1 text-dim" title="Socials (fictional)">
                 {t.socials.x && <AtSign size={11} />}

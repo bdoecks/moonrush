@@ -11,7 +11,7 @@ import { fmtAge, fmtCompact, fmtNum, fmtUsd, toneClass } from '../../utils/forma
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
 import { TrackerSettingsModal } from './TrackerSettingsModal'
-import { useFriendRows, type TrackerRow } from './friendRows'
+import { openRow, useFriendRows, type TrackerRow } from './friendRows'
 import { GroupMenu, NewGroupButton } from './groups'
 
 const ACTION: Record<WalletActionKind, { label: string; short: string; cls: string }> = {
@@ -130,7 +130,7 @@ export function TrackerFeed({ compact = false, onManage }: { compact?: boolean; 
                   <tr key={`${w.id}-${tr.id}`} className={clsx('slide-in border-b border-line/40 hover:bg-panel2', hot && tr.side === 'buy' && 'bg-accent/[0.04]')}>
                     <td className={clsx(td, 'num text-dim')}>{fmtAge((tick - tr.tick) * SIM_SEC_PER_TICK)}</td>
                     <td className={td}>
-                      <button onClick={() => (friend ? setView('leaderboard') : openWallet(w.id))} className="flex items-center gap-1.5 hover:text-accent" title={friend ? 'A player in your room: open the leaderboard' : undefined}>
+                      <button onClick={() => openRow({ w, friend }, { leaderboard: () => setView('leaderboard'), wallet: openWallet })} className="flex items-center gap-1.5 hover:text-accent" title={friend ? 'A player in your room: open the leaderboard' : undefined}>
                         <span>{w.avatar}</span>
                         <span className="font-semibold">{lb?.label || w.name}</span>
                         {friend && <span className="rounded bg-[#b36bff]/15 px-1 text-[9px] font-bold text-[#b36bff]">FRIEND</span>}

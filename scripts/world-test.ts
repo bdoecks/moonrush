@@ -58,7 +58,7 @@ back.join(sock(back2), { t: 'hello', name: 'Player', avatar: '🐸', level: 1, p
 const wal = back2.find((m) => m.t === 'wallet') as Extract<ServerMsg, { t: 'wallet' }>
 ok(wal?.state.cash === cashAfter && wal.state.startBalance === WORLD_START_BALANCE, 'rejoining gets the same wallet and start balance')
 
-// Leaderboards: everyone with a wallet is ranked (bots too), by net worth and by this week's profit.
+// Leaderboards: every real player with a wallet is ranked, by net worth and by this week's profit. Bots never are.
 type Board = Extract<ServerMsg, { t: 'board' }>
 const askBoard = (list?: string): Board => {
   back2.length = 0
@@ -67,9 +67,14 @@ const askBoard = (list?: string): Board => {
   return back2.find((m) => m.t === 'board') as Board
 }
 const b1 = askBoard()
-ok(!!b1 && b1.list === 'worth' && b1.total === BOT_ROSTER.length + 1 && b1.rows.length === Math.min(b1.total, 100) && b1.rows.every((r, i) => i === 0 || b1.rows[i - 1].equity >= r.equity), `board ranks all ${b1?.total} wallets by net worth`)
+// (A second real player, so there is somebody to be ranked against.)
+const other: ServerMsg[] = []
+back.join(sock(other), { t: 'hello', name: 'Second', avatar: '🐶', level: 1, playerId: 'u-ccc', verified: true })
+ok(!!b1 && b1.list === 'worth' && b1.total === 1 && b1.rows.length === 1, `with ${BOT_ROSTER.length} bots in the World and one real player, the board ranks 1`)
+const b1b = askBoard()
+ok(b1b.total === 2 && b1b.rows.length === 2 && b1b.rows.every((r, i) => i === 0 || b1b.rows[i - 1].equity >= r.equity), `a second real player joins: the board ranks ${b1b.total}, by net worth`)
 ok(!!b1.me && b1.me.row.id === 'u-aaa' && b1.me.rank >= 1 && b1.me.restartAt === null, `you're on it: #${b1.me?.rank} net worth`)
-ok(b1.rows.filter((r) => r.bot).length === b1.rows.filter((r) => r.id.startsWith('bot-')).length && b1.rows.some((r) => r.bot), 'bots are on the board, flagged as bots (the board sends the top 100)')
+ok(['worth', 'day', 'week', 'season', 'sol', 'bsc', 'hood', 'dev'].every((list) => { const x = askBoard(list); return x.rows.every((r) => !r.id.startsWith('bot-') && !r.bot) && x.total <= 2 }), 'no bot is on any of the eight boards')
 // The other lists: today / season / each chain are ranked by their own number; the season is the calendar month.
 for (const list of ['day', 'week', 'season', 'sol', 'bsc', 'hood'] as const) {
   const bl = askBoard(list)
@@ -84,14 +89,18 @@ ok(Math.abs(b2.me!.row.equity - b1.me!.row.equity - 5000) < 60 && Math.abs(b2.me
 // A month ends: the season closes, its winners get trophies and go into the Hall of Fame.
 {
   const r = back as unknown as { seasonKey: string | null; hall: { n: number; winners: { list: string; name: string }[] }[]; members: Map<string, { trophies?: string[]; seasonBase?: { key: string; pnl: number }; info: { bot?: boolean } }> }
-  // Pretend last month: everyone's season counters belong to it, and some bots made money in it.
+  // Pretend last month: everyone's season counters belong to it. The bots made far more than the players did.
   const lastMonth = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 15)).toISOString().slice(0, 7)
   r.seasonKey = lastMonth
-  for (const m of r.members.values()) if (m.seasonBase) m.seasonBase = { key: lastMonth, pnl: m.seasonBase.pnl - (m.info.bot ? Math.random() * 500 : 0) }
+  for (const m of r.members.values()) m.seasonBase = { key: lastMonth, pnl: (m.seasonBase?.pnl ?? 0) - (m.info.bot ? 50_000 + Math.random() * 500 : 300) }
+  // (A season closed by an older version, when bots were still ranked, is already in the Hall.)
+  r.hall = [{ n: 0, name: 'An older season', winners: [{ list: 'season', name: 'somebot', bot: true }, { list: 'season', name: 'Player' }] }] as never
   const bh = askBoard('season')
   const champs = bh.hall[0]?.winners ?? []
-  ok(bh.hall.length === 1 && champs.some((w) => w.list === 'season'), `season closed into the Hall of Fame: ${champs.map((w) => `${w.list}: ${w.name}`).join(', ')}`)
-  ok([...r.members.values()].some((m) => m.trophies?.some((t) => t.startsWith('🏆'))), 'the season champion got a 🏆 trophy')
+  const people = new Set(['Player', 'Second'])
+  ok(bh.hall.length === 2 && champs.some((w) => w.list === 'season') && champs.every((w) => people.has(w.name)), `season closed into the Hall of Fame, real players only: ${champs.map((w) => `${w.list}: ${w.name}`).join(', ')}`)
+  ok([...r.members.values()].some((m) => !m.info.bot && m.trophies?.some((t) => t.startsWith('🏆'))) && [...r.members.values()].every((m) => !m.info.bot || !m.trophies?.length), 'the season champion got a 🏆 trophy, and no bot got any')
+  ok(bh.hall[1].winners.length === 1 && bh.hall[1].winners[0].name === 'Player', 'a bot that won an older season is not shown in the Hall (the real winners of that season still are)')
   ok(r.seasonKey !== lastMonth, 'the new season started')
 }
 // Bankruptcy restart: refused while you still have money…
@@ -137,6 +146,27 @@ ok(b.market.tokens.length < 400, `after 3000 more ticks: ${b.market.tokens.lengt
   const full = cookAllowance(true, ten, 1700, 1)
   ok(!!full.blocked && full.used === 10 && /next one in \d+ min/.test(full.blocked), `World: 10 in the last hour blocks the 11th ("${full.blocked}")`)
   ok(cookAllowance(true, ten, 1000 + 3600, 1).blocked === null, 'World: the oldest launch ages out after an hour')
+}
+// A World saved while bot names carried a robot: it comes back with plain names everywhere a player can see one.
+{
+  const mark = ` ${String.fromCodePoint(0x1f916)}`
+  const old = JSON.parse(JSON.stringify(world.snapshot())) as { members: { info: { id: string; name: string; bot?: boolean } }[]; wallets: { id: string; name: string; bot?: boolean }[]; market: { tokens: { id: string; creatorName?: string; creatorId?: string; tape: { wallet: string }[] }[] }; posts: { author?: { name: string } }[]; events: { text: string }[] }
+  const bot = BOT_ROSTER[0]
+  for (const m of old.members) if (m.info.bot) m.info.name += mark
+  for (const x of old.wallets) if (x.bot) x.name += mark
+  const t = old.market.tokens.find((x) => x.tape.length > 1)!
+  Object.assign(t, { creatorName: bot.name + mark, creatorId: bot.id })
+  t.tape[0].wallet = bot.name + mark
+  old.posts.unshift({ author: { name: bot.name + mark } } as never)
+  old.events.unshift({ id: 1, tick: 1, time: 1, kind: 'cook', text: `${String.fromCodePoint(0x1f916)} Somebody cooked $ABC and ${bot.name}${mark} cooked $XYZ`, icon: 'x', tone: 'info' } as never)
+  const again = Room.restore(old as never, null)
+  const a = again as unknown as { members: Map<string, { info: { name: string; bot?: boolean } }>; wallets: { id: string; name: string; bot?: boolean }[]; market: typeof old.market; posts: typeof old.posts; events: typeof old.events }
+  const names = [...a.members.values()].filter((m) => m.info.bot).map((m) => m.info.name)
+  ok(names.length === BOT_ROSTER.length && names.every((n) => !n.includes(mark.trim())) && a.members.get(bot.id)!.info.name === bot.name && a.wallets.filter((x) => x.bot).every((x) => !x.name.includes(mark.trim())), 'an older save comes back with plain bot names: players and their public wallets')
+  const t2 = a.market.tokens.find((x) => x.id === t.id)!
+  ok(t2.creatorName === bot.name && t2.tape[0].wallet === bot.name && a.posts[0].author!.name === bot.name, '…and on the coins they launched, the trades list and their old posts')
+  ok(a.events[0].text === `${String.fromCodePoint(0x1f916)} Somebody cooked $ABC and ${bot.name} cooked $XYZ`, "…and in old events (a real player's robot avatar is left alone)")
+  again.dispose()
 }
 world.dispose()
 back.dispose()

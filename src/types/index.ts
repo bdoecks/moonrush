@@ -641,6 +641,7 @@ export interface Player {
   isYou?: boolean
   seasonPoints?: number // real players (multiplayer): their actual season points; simulated rivals don't have any
   real?: boolean // a real player in your room (not a simulated rival)
+  bot?: boolean // a World bot: in the room like anyone, never ranked
   holdings?: { tokenId: string; qty: number; cost: number; openedAt: number }[] // real players: what their public main wallet holds
 }
 

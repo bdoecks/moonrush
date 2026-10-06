@@ -17,7 +17,7 @@ type M = { info: { name: string; online: boolean; bot?: boolean; equity: number 
 type R = { tick(): void; members: Map<string, M>; wallets: { id: string; bot?: boolean }[]; market: { tick: number; time: number; tokens: { id: string; price: number; mcap: number; liquidity: number; status: string; creatorId?: string }[] }; snapshot(): unknown; dispose(): void }
 
 ok(!!BRAIN, `the market brain is loaded (${BRAIN ? `${Object.keys(BRAIN.groups).length} groups, learned ${BRAIN.learnedAt.slice(0, 10)}` : 'missing'})`)
-ok(ALL_BOTS.length === 100 && new Set(ALL_BOTS.map((b) => b.id)).size === 100 && ALL_BOTS.every((b) => b.name.endsWith('🤖')), '100 bots, unique ids, all labelled 🤖')
+ok(ALL_BOTS.length === 100 && new Set(ALL_BOTS.map((b) => b.id)).size === 100 && new Set(ALL_BOTS.map((b) => b.name)).size === 100 && ALL_BOTS.every((b) => /^[A-Za-z0-9_]+$/.test(b.name)), '100 bots, unique ids and names, and a name is just a name (no label on it)')
 ok(BOT_ROSTER.filter((b) => b.style !== 'chef').every((b) => !!groupFor(b.style, b.tier)), 'every trading bot has a brain group for its style')
 
 // An old save with the original 20 bots in it: they must leave, wallets and all.

@@ -304,6 +304,7 @@ export class Room {
       r.members.set(m.info.id, { ...m, wallet, ws: null, ack: 0, info: { ...m.info, online: m.info.bot ? m.info.online : false } })
     }
     r.ensureBots()
+    r.unlabelBots()
     r.emptySince = Date.now()
     // Charts: re-draw every coin to end at its price, then put back the real longer timeframes we saved.
     setClock(secPerTickOf(r.market))
@@ -1248,10 +1249,31 @@ export class Room {
         })
       }
       const m = this.members.get(spec.id)!
+      if (m.info.name !== spec.name) {
+        m.info = { ...m.info, name: spec.name }
+        this.playersDirty = true
+      }
       m.brain ??= freshBrain(spec, this.market.tick, rng)
       if (spec.always && !m.info.online) m.info = { ...m.info, online: true } // the always-on bots are back as soon as the World is
       if (!this.wallets.some((w) => w.id === spec.id)) this.wallets = [...this.wallets, mirrorWallet(spec, m.wallet?.startBalance ?? WORLD_START_BALANCE)]
+      else if (this.wallets.some((w) => w.id === spec.id && w.name !== spec.name)) this.wallets = this.wallets.map((w) => (w.id === spec.id ? { ...w, name: spec.name } : w))
     }
+  }
+
+  /**
+   * A World saved while bot names carried a robot still has that name on the coins they launched, on the tape and in
+   * old posts and events. Put today's names there (found by the bot's id where there is one, else by the old name).
+   */
+  private unlabelBots() {
+    if (!this.world) return
+    const mark = ` ${String.fromCodePoint(0x1f916)}` // the label as the names carried it: a space, then the robot
+    const plain = (text: string) => (text.includes(mark) ? text.split(mark).join('') : text)
+    const tokens = this.market.tokens as NetToken[]
+    if (tokens.some((t) => t.creatorName?.includes(mark) || t.tape.some((e) => e.wallet.includes(mark)))) {
+      this.market = { ...this.market, tokens: tokens.map((t) => (t.creatorName?.includes(mark) || t.tape.some((e) => e.wallet.includes(mark)) ? ({ ...t, ...(t.creatorName ? { creatorName: plain(t.creatorName) } : {}), tape: t.tape.map((e) => (e.wallet.includes(mark) ? { ...e, wallet: plain(e.wallet) } : e)) } as NetToken) : t)) }
+    }
+    this.posts = this.posts.map((p) => (p.author?.name.includes(mark) ? { ...p, author: { ...p.author, name: plain(p.author.name) } } : p))
+    this.events = this.events.map((e) => (e.text.includes(mark) ? { ...e, text: plain(e.text) } : e))
   }
 
   /** How a bot shows on the tape: its name, id and address, linked to its public wallet (track / copy it). */
@@ -1738,7 +1760,11 @@ export class Room {
     d.season[k] += n
   }
 
-  /** Everyone with a wallet here, valued now (kept for a few seconds: it's asked for often). */
+  /**
+   * Every real player with a wallet here, valued now (kept for a few seconds: it's asked for often). The bots are
+   * not on the boards: they launch coins all day and a leaderboard topped by them is nobody's to climb. They are
+   * still in the room (who's online, the tape, their wallets), just never ranked.
+   */
   private boardRows(force = false, seasonOf?: string): BoardRow[] {
     if (!force && !seasonOf && this.boardCache && Date.now() - this.boardCache.at < 8000) return this.boardCache.rows
     const byId = new Map(this.market.tokens.map((t) => [t.id, t]))
@@ -1753,7 +1779,7 @@ export class Room {
     }
     const rows: BoardRow[] = []
     for (const m of this.members.values()) {
-      if (m.info.spectator || !m.wallet) continue
+      if (m.info.spectator || m.info.bot || !m.wallet) continue
       const equity = valuePortfolio(m.wallet, byId, this.market).equity
       // Deposits, gifts and transfers move startBalance, so this is trading profit; losses from before a restart carry over.
       const pnl = equity - m.wallet.startBalance + (m.pnlCarry ?? 0)
@@ -1766,7 +1792,7 @@ export class Room {
       const cb = m.chainBase
       const dev = m.dev && (m.dev as DevStats & { key?: string }).key !== season ? { ...m.dev, season: { cooked: 0, migrated: 0, fees: 0 } } : m.dev
       rows.push({
-        id: m.info.id, name: m.info.name, avatar: m.info.avatar, level: m.info.level, online: m.info.online, verified: m.info.verified, bot: m.info.bot,
+        id: m.info.id, name: m.info.name, avatar: m.info.avatar, level: m.info.level, online: m.info.online, verified: m.info.verified,
         equity, pnl, week: pnl - m.weekBase.pnl, day: pnl - m.dayBase.pnl, season: pnl - m.seasonBase.pnl,
         chains: { sol: cp.sol - cb.sol, bsc: cp.bsc - cb.bsc, hood: cp.hood - cb.hood },
         ...(dev ? { dev: { cooked: dev.cooked, migrated: dev.migrated, fees: dev.fees, bestAth: dev.bestAth, bestTicker: dev.bestTicker, season: dev.season } } : {}),
@@ -1811,7 +1837,7 @@ export class Room {
     for (const [list, icon] of lists) {
       const sorted = rows.filter((r) => Room.boardValue(list, r) > 0).sort((a, b) => Room.boardValue(list, b) - Room.boardValue(list, a))
       sorted.slice(0, list === 'season' ? 3 : 1).forEach((r, i) => {
-        winners.push({ list, name: r.name, avatar: r.avatar, value: Room.boardValue(list, r), ...(r.bot ? { bot: true } : {}) })
+        winners.push({ list, name: r.name, avatar: r.avatar, value: Room.boardValue(list, r) })
         const m = this.members.get(r.id)
         if (m) m.trophies = [...(m.trophies ?? []), `${list === 'season' ? ['🏆', '🥈', '🥉'][i] : icon} S${ending.n}`]
       })
@@ -1832,7 +1858,9 @@ export class Room {
     const next = (me.lastRestart ?? 0) + WORLD_RESTART_EVERY_MS
     const s = worldSeason()
     const msg: BoardMsg = {
-      t: 'board', list: pick, week: seasonNumber(), season: { n: s.n, name: s.name, endsAt: s.endsAt }, total: ranked.length, rows: round(ranked.slice(0, 100)) as BoardRow[], hall: this.hall,
+      t: 'board', list: pick, week: seasonNumber(), season: { n: s.n, name: s.name, endsAt: s.endsAt }, total: ranked.length, rows: round(ranked.slice(0, 100)) as BoardRow[],
+      // (Seasons closed while bots were still ranked have bot winners saved in them: not shown.)
+      hall: this.hall.map((h) => (h.winners.some((x) => x.bot) ? { ...h, winners: h.winners.filter((x) => !x.bot) } : h)),
       ...(mine ? { me: { row: round(mine) as BoardRow, rank: ranked.indexOf(mine) + 1, restartAt: next > Date.now() ? next : null } } : {}),
     }
     this.sendTo(me.info.id, msg)

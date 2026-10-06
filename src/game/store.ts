@@ -98,7 +98,7 @@ export const selectSpeed = (s: Pick<GameState, 'online' | 'market' | 'settings'>
 export function roomRivals(o: OnlineState): Player[] {
   return o.players
     .filter((p) => p.id !== o.you && p.startEquity > 0)
-    .map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, level: p.level, startEquity: p.startEquity, equity: p.equity, trades: p.trades, wins: p.wins, skill: 0, seasonPoints: p.seasonPoints ?? 0, real: true, holdings: p.holdings ?? [] }))
+    .map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, level: p.level, startEquity: p.startEquity, equity: p.equity, trades: p.trades, wins: p.wins, skill: 0, seasonPoints: p.seasonPoints ?? 0, real: true, ...(p.bot ? { bot: true } : {}), holdings: p.holdings ?? [] }))
 }
 
 /** Your side of an online round (the market lives on the server), so a reload can rejoin where you were. */

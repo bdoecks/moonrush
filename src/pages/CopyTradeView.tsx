@@ -213,6 +213,7 @@ function WalletDrawer({ walletId, period, onClose, onCopy }: { walletId: string;
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <p className="px-3 pt-3 text-[11px] text-muted">{meta.blurb}</p>
+          {w.bot && <p className="mx-3 mt-2 rounded-md border border-line2 bg-panel2 px-2 py-1.5 text-[11px] text-muted"><span className="font-semibold text-ink">Simulated trader.</span> A computer player in the World: its own wallet, the same rules and fees as yours. It is not on the leaderboards.</p>}
           <div className="grid grid-cols-3 gap-2 p-3">
             <Box label={`${period} PnL`}><span className={toneClass(st.pnl)}>{st.pnl >= 0 ? '+' : '-'}{fmtCompact(Math.abs(st.pnl))}</span></Box>
             <Box label={`${period} PnL %`}><span className={toneClass(st.pnl)}>{fmtPct(st.pnlPct)}</span></Box>

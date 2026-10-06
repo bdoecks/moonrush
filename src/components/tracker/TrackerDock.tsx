@@ -12,7 +12,7 @@ import { fmtAge, fmtCompact, fmtUsd } from '../../utils/format'
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
 import { Composer, Engagement, postAccount } from '../SocialTracker'
-import { useFriendRows, type TrackerRow } from './friendRows'
+import { openRow, useFriendRows, type TrackerRow } from './friendRows'
 import { GroupMenu, NewGroupButton } from './groups'
 
 export const DOCK_DEFAULTS: TrackerDockPrefs = { open: true, side: 'left', width: 320, split: 0.5, wallet: true, social: true }
@@ -203,7 +203,7 @@ function WalletRow({ w, tr, friend, groupable }: { w: SimWallet; tr: WalletTrade
   return (
     <div className="border-b border-line/40 px-2 py-1.5 hover:bg-panel2/70">
       <div className="flex items-center gap-1.5 text-[11px]">
-        <button onClick={() => (friend ? setView('leaderboard') : openWallet(w.id))} className="flex min-w-0 items-center gap-1 font-semibold hover:text-accent" title={friend ? 'A player in your room: open the leaderboard' : 'Open wallet profile'}>
+        <button onClick={() => openRow({ w, friend }, { leaderboard: () => setView('leaderboard'), wallet: openWallet })} className="flex min-w-0 items-center gap-1 font-semibold hover:text-accent" title={friend ? 'A player in your room: open the leaderboard' : 'Open wallet profile'}>
           <span>{w.avatar}</span><span className="truncate">{w.name}</span>
           {friend && <span className="rounded bg-[#b36bff]/15 px-1 text-[9px] font-bold text-[#b36bff]">FRIEND</span>}
         </button>

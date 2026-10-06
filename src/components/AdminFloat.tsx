@@ -244,6 +244,7 @@ function RoomTab({ room }: { room?: string }) {
             <div className="flex items-center gap-1">
               <span>{p.avatar}</span><span className="font-semibold">{p.name}</span>
               {p.verified && <span className="text-[10px] font-bold text-up">✓</span>}
+              {p.bot && <span className="rounded bg-raise px-1 text-[9px] text-muted" title="A World bot (players see no label on its name)">BOT</span>}
               <span className={clsx('text-[9px]', p.online ? 'text-up' : 'text-dim')}>{p.online ? '●' : '○'}</span>
               <span className="num ml-auto text-muted">{fmtUsd(p.equity, 0)}</span>
               <span className={clsx('num w-14 text-right', ret >= 0 ? 'text-up' : 'text-down')}>{(ret * 100).toFixed(1)}%</span>

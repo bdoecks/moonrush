@@ -157,6 +157,7 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
                       <td className="py-1.5">
                         <span className="mr-1">{p.avatar}</span><span className="font-semibold">{p.name}</span>
                         {p.verified && <span className="ml-1 text-[10px] font-bold text-up" title="Signed in">✓</span>}
+                        {p.bot && <span className="ml-1 rounded bg-raise px-1 text-[9px] text-muted" title="A World bot (players see no label on its name)">BOT</span>}
                         {p.id === r.hostId && <span className="ml-1 rounded bg-raise px-1 text-[9px] text-muted">HOST</span>}
                         <div className="num text-[9px] text-dim">{p.id}</div>
                       </td>

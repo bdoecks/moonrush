@@ -398,7 +398,8 @@ function WorldPanel() {
   const setModal = useGame((s) => s.setModal)
   const [confirmLeave, setConfirmLeave] = useState(false)
   const on = online.players.filter((p) => p.online)
-  const ranked = [...on].sort((a, b) => b.equity - a.equity)
+  // People first, richest on top; then the simulated traders who are around (never above a real player).
+  const ranked = [...on].sort((a, b) => Number(!!a.bot) - Number(!!b.bot) || b.equity - a.equity)
   return (
     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_280px]">
       <div className="space-y-3">

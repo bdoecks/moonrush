@@ -93,7 +93,7 @@ export function WorldBoard() {
         <span>{info.hint}</span>
         <span className="ml-auto">
           {tab === 'day' ? <>Resets in {fmtCountdown(dayEndsAt() - now)}</> : tab === 'week' ? <>Week {board.week} · resets in {fmtCountdown(seasonEnds().getTime() - now)}</> : null}
-          {tab !== 'hall' && <> · {board.total} ranked · bots are labeled</>}
+          {tab !== 'hall' && <> · {board.total} ranked · real players only</>}
         </span>
       </div>
 
@@ -145,7 +145,6 @@ function Who({ r, you }: { r: BoardRow; you: boolean }) {
         <span className="flex items-center gap-1 font-semibold">
           <span className="truncate">{r.name}</span>
           {r.verified && <span className="text-[10px] font-bold text-up" title="Signed in">✓</span>}
-          {r.bot && <span className="rounded bg-raise px-1 text-[9px] font-bold text-muted" title="A bot player: trades by the same rules as you">BOT</span>}
           {r.trophies?.slice(-3).map((t, i) => <span key={i} className="rounded bg-warn/10 px-1 text-[9px] font-bold text-warn" title="Season trophy">{t}</span>)}
           {you && <span className="text-[10px] text-accent">(you)</span>}
         </span>
@@ -198,7 +197,7 @@ function Hall({ hall }: { hall: HallEntry[] }) {
               <div key={i} className="flex items-center gap-2 text-[12px]">
                 <span className="w-28 shrink-0 text-[10px] uppercase tracking-wider text-dim">{w.list === 'season' ? `${MEDAL[h.winners.filter((x) => x.list === 'season').indexOf(w)] ?? ''} Season` : HALL_LABEL[w.list]}</span>
                 <span className="text-[14px]">{w.avatar}</span>
-                <span className="min-w-0 flex-1 truncate font-semibold">{w.name}{w.bot && <span className="ml-1 rounded bg-raise px-1 text-[9px] text-muted">BOT</span>}</span>
+                <span className="min-w-0 flex-1 truncate font-semibold">{w.name}</span>
                 <span className={clsx('num', w.list === 'worth' ? 'text-ink' : 'text-up')}>{w.list === 'worth' || w.list === 'dev' ? fmtUsd(w.value, 0) : signed(w.value)}</span>
               </div>
             ))}

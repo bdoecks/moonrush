@@ -67,9 +67,10 @@ export function LeaderboardView() {
       id: 'you', name: 'You', avatar: '🫵', equity: v.equity, pnl: v.equity - v.portfolio.startBalance, ret: v.equity / v.portfolio.startBalance - 1,
       winRate: v.stats.winRate, trades: v.stats.tradeCount, level: levelFromXp(xp).level, tier: myTier, isYou: true,
     }
+    // The World's bots are in the room but in no ranking: a board topped by them is nobody's to climb.
     const all: Omit<Row, 'rank'>[] = [
       you,
-      ...players.map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, equity: p.equity, pnl: p.equity - p.startEquity, ret: retOf(p), winRate: p.trades ? p.wins / p.trades : 0, trades: p.trades, level: p.level, tier: tierFor(p.seasonPoints ?? rivalPoints(p)), real: p.real })), // real players carry their actual points; simulated rivals get a made-up tier
+      ...players.filter((p) => !p.bot).map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, equity: p.equity, pnl: p.equity - p.startEquity, ret: retOf(p), winRate: p.trades ? p.wins / p.trades : 0, trades: p.trades, level: p.level, tier: tierFor(p.seasonPoints ?? rivalPoints(p)), real: p.real })), // real players carry their actual points; simulated rivals get a made-up tier
     ]
     return [...all].sort((a, b) => b.ret - a.ret).map((r, i) => ({ ...r, rank: i + 1 }))
   }, [players, v, xp, myTier])

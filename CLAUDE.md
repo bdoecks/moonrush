@@ -91,6 +91,13 @@ reacts to coins bonding and devs dumping, to a real player's launch or big buy (
 to buy that coin for a while), and answers itself now and then. A chef sells out of a coin whose buyers have gone
 (`fading`), and a bot dev's real bag shows as its coin's dev share (set in `tick()`; a player's understated one too).
 Any dev selling their own coin, player or bot, costs it some of the crowd (`devSold`, the same rule the solo game has).
+**A bot's name carries no label** (the owner's call: a robot on every chat line and trade made the World read as a
+test). What it is stays true where it matters, so keep all of these when touching bots: `bot: true` on its player
+card (`RoomPlayer`, `Player`) and public wallet (`SimWallet`); the "Simulated trader" note on its wallet page, on
+its coin's dev panel and in the "cooked by" tooltip; the World paragraph in Help. **Bots are never ranked**: not on
+the World boards or the Hall (`boardRows` skips them, old saved bot winners are filtered when sent), not in a
+season's trophies, not in the "Online now" ranking; the World panel lists real players first. A World saved while
+names carried the robot is cleaned on load (`unlabelBots`). The admin screens still mark them BOT.
 
 **Trend coins**: the learner also writes `trends` (theme words found in real launch names, ranked by SOL traded). Only words on
 the allow-list in `server/trendThemes.ts` count, so real people, brands, politics and crude words never reach the game;
