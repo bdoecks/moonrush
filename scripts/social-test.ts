@@ -9,7 +9,7 @@ import type { SocialProfile } from '../src/types'
 const ok = (cond: boolean, what: string) => console.log(`${cond ? 'PASS' : 'FAIL'} ${what}`)
 const sock = (box: ServerMsg[]) => ({ readyState: 1, send: (d: string | Buffer) => box.push(JSON.parse(String(d))), close() {} }) as never
 type Coin = { id: string; ticker: string; status: string; liquidity: number; chain?: string }
-type M = { social?: SocialProfile; meter?: unknown; wallet?: { accounts: { id: string }[] } }
+type M = { social?: SocialProfile; socialMissed?: unknown[]; meter?: unknown; wallet?: { accounts: { id: string }[] } }
 type R = { tick(): void; handle(pid: string, m: unknown): void; members: Map<string, M>; market: { tick: number; shillQueue?: { tokenId: string }[]; tokens: Coin[] } }
 type SocialMsg = Extract<ServerMsg, { t: 'social' }>
 const socials = (box: ServerMsg[]) => box.filter((m): m is SocialMsg => m.t === 'social')
@@ -20,10 +20,11 @@ const world = new Room(WORLD_CODE, true)
 const w = world as unknown as R
 const box: ServerMsg[] = []
 const hello = { t: 'hello' as const, name: 'Caller', avatar: '🐸', level: 1, playerId: 'u-aaa', verified: true }
-world.join(sock(box), hello)
+const sockA = sock(box)
+world.join(sockA, hello)
 const me = () => w.members.get('u-aaa')!
 const first = socials(box)[0]?.social
-ok(socials(box).length === 1 && first?.followers === 50 && first.rep === 30, `joining the World: the server tells the game its own count, a fresh start (${first?.followers} followers, rep ${first?.rep})`)
+ok(socials(box).length === 1 && socials(box)[0].joined === true && first?.followers === 50 && first.rep === 30, `joining the World: the server tells the game its own count, a fresh start (${first?.followers} followers, rep ${first?.rep})`)
 
 // A post that claims five million followers and a perfect reputation.
 const [coin, coin2] = w.market.tokens.filter(live)
@@ -52,9 +53,21 @@ const snap = JSON.parse(JSON.stringify(world.snapshot()))
 const back = Room.restore(snap, null) as unknown as R & { dispose(): void }
 ok(back.members.get('u-aaa')?.social?.posts === 1 && back.members.get('u-aaa')?.social?.followers === me().social!.followers, 'followers and calls are saved with the World')
 back.dispose()
+// A call judged while the player is away is kept for them, and told when they are back (once).
+me().meter = undefined
+w.handle('u-aaa', { t: 'post', text: `$${coin2.ticker} as well`, tokenId: coin2.id, followers: 1, rep: 1, repeats: 0 })
+world.leave('u-aaa', sockA)
+const sentBefore = socials(box).length
+for (let i = 0; i <= CALL_SETTLE_TICKS; i++) w.tick()
+ok(me().socialMissed?.length === 1 && socials(box).length === sentBefore, 'a call judged while the player is away is kept for them, not sent into nothing')
 const box2: ServerMsg[] = []
 world.join(sock(box2), hello)
-ok(socials(box2)[0]?.social.followers === me().social!.followers && socials(box2)[0].social.rep === me().social!.rep, 'on rejoining, the game is told the server\'s count again')
+const back1 = socials(box2)[0]
+ok(back1?.joined === true && back1.results?.length === 1 && back1.results[0].tokenId === coin2.id && back1.social.followers === me().social!.followers && back1.social.rep === me().social!.rep && !me().socialMissed,
+  'on rejoining, the game is told the server\'s count again, with what was judged meanwhile')
+const box3: ServerMsg[] = []
+world.join(sock(box3), hello)
+ok(socials(box3)[0]?.joined === true && !socials(box3)[0].results, 'and only once')
 const gBox: ServerMsg[] = []
 world.join(sock(gBox), { t: 'hello', name: 'Guest', avatar: '👀', level: 1, playerId: 'g-bbb', verified: false })
 ok(socials(gBox).length === 0 && !w.members.get('g-bbb')?.social, 'a World guest (watching only) has no count')

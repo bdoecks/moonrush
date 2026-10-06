@@ -9,12 +9,21 @@ const MAX_AGE_MS = 3 * 60 * 60_000 // rooms nobody saved for 3h aren't brought b
 
 const headers = () => ({ apikey: KEY, Authorization: `Bearer ${KEY}`, 'content-type': 'application/json' })
 
+/**
+ * The database keeps a room as jsonb, which refuses two things JSON itself allows: half an emoji (it arrives as a lone
+ * \udXXX escape) and the NUL character (\u0000). Text is cleaned where it comes in (server/index.ts), but one stray
+ * character anywhere in a multi-megabyte World must never block every save until the next restart: whatever is left is
+ * swapped for the "unknown character" mark. (An even number of backslashes before the "u" is a real backslash followed
+ * by ordinary letters, and is left alone.)
+ */
+export const saveSafe = (json: string) => json.replace(/\\+u(?:d[89a-f][0-9a-f]{2}|0000)/g, (m) => (m.indexOf('u') % 2 ? m.slice(0, -4) + 'fffd' : m))
+
 export async function saveRoom(code: string, state: unknown, charts?: unknown, sent?: (bytes: number) => void): Promise<boolean> {
   if (!persistOn) return false
   try {
     const body: Record<string, unknown> = { code, state, updated_at: new Date().toISOString() }
     if (charts !== undefined) body.charts = charts
-    const text = JSON.stringify(body)
+    const text = saveSafe(JSON.stringify(body))
     sent?.(text.length)
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rooms?on_conflict=code`, {
       method: 'POST',

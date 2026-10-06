@@ -135,7 +135,7 @@ export function CookingView() {
   const devBlocked = devShortUsd > 0 && (!autoSwap || cost > cash + 1e-9)
   const cooldown = Math.max(0, COOK_COOLDOWN_TICKS - (tick - lastCookTick))
   const allow = cookAllowance(world, launches.map((l) => l.launchedTick), tick, secPerTickOf({ engine }))
-  const error = validateCook(spec, tokens, online)
+  const error = validateCook(spec, tokens, online, world)
   const blocker = !running
     ? 'Start a round to cook'
     : error ?? (allow.blocked ? allow.blocked : cooldown > 0 ? `Kitchen cooling down (${cooldown}s)` : usdCosts > cash + 1e-9 ? `Need ${fmtUsd(usdCosts)} USD` : devBlocked ? `Not enough ${chainMeta.native}` : null)

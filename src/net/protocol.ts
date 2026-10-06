@@ -217,7 +217,8 @@ export type ServerMsg =
   | BoardMsg
   // Your followers and reputation as the server has them, sent when you join and whenever they change (a post, a
   // call being judged: `results`). The World keeps its own count from a fresh start; a friends room starts from yours.
-  | { t: 'social'; social: import('../types').SocialProfile; results?: import('../game/socialEngine').CallResult[] }
+  // `joined`: sent because you (re)joined, with the calls judged while you were away.
+  | { t: 'social'; social: import('../types').SocialProfile; results?: import('../game/socialEngine').CallResult[]; joined?: boolean }
   | { t: 'kicked'; reason: string }
   | { t: 'grant'; usd: number; asset?: 'usd' | 'sol' | 'bsc' | 'hood'; amount?: number }
   | { t: 'sendResult'; ref: number; ok: boolean; error?: string; toName?: string }

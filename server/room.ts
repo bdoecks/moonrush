@@ -17,7 +17,7 @@ import { AUTO_MUTE_MS, coinLook, embeddedImage, moderate, rateCheck, strike, typ
 import { NARRATIVES } from '../src/data/narratives'
 import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
 import { accountOf } from '../src/game/accounts'
-import { nativePrice } from '../src/game/tradingEngine'
+import { nativePrice, setTradeImages } from '../src/game/tradingEngine'
 import { cashbackUsd } from '../src/game/rewardsEngine'
 import { claimGifts } from './persist'
 import { CHAINS } from '../src/data/chains'
@@ -40,6 +40,21 @@ const SLOW_FIELDS = new Set(['win', 'change', 'momentum', 'momentumScore', 'volM
 /** A steady number per id, to give every coin and wallet its own turn. */
 const turnOf = (id: string) => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return h }
 const WORLD_PLAYERS_TICKS = 5 // World: the player list is broadcast at most this often (seconds)
+setTradeImages(false) // the server's trade records carry no copy of the coin's picture (see tradingEngine)
+
+/**
+ * The line everyone sees for something a player did to their own coin, written here from the numbers in the game's
+ * own line. The text used to be passed on as it came: a way to put any words (links, slurs, a fake "going parabolic"
+ * alert) in front of every player, muted or not. Null for anything the game doesn't send.
+ */
+function ownCoinEvent(kind: unknown, text: string, t: Token, name: string): { kind: 'devsell' | 'bundle' | 'airdrop'; slot: number; text: string; icon: string; tone: MarketEvent['tone'] } | null {
+  const pct = (s: string) => Math.min(100, Math.max(0, Math.round(Number(s))))
+  let m: RegExpExecArray | null
+  if (kind === 'devsell' && (m = /^Dev \(you\) sold (\d{1,3})% of their \$/.exec(text))) return { kind, slot: 98, text: `Dev (${name}) sold ${pct(m[1])}% of their $${t.ticker} bag`, icon: '🧑‍💻', tone: 'down' }
+  if (kind === 'bundle' && t.bundleFlagged && (m = /^Flagged bundle wallets are dumping \$\S+ \((\d{1,3})% of the bundle sold\)$/.exec(text))) return { kind, slot: 95, text: `Flagged bundle wallets are dumping $${t.ticker} (${pct(m[1])}% of the bundle sold)`, icon: '📦', tone: 'down' }
+  if (kind === 'airdrop' && (m = /^Dev airdropped (\d{1,3}(?:\.\d{1,2})?)% of supply of \$\S+ to (\d{1,3}) (fresh wallets|holders)$/.exec(text))) return { kind, slot: 93, text: `Dev airdropped ${Math.min(100, Number(m[1])).toFixed(2)}% of supply of $${t.ticker} to ${Math.min(999, Number(m[2]))} ${m[3]}`, icon: '🪂', tone: 'info' }
+  return null
+}
 const WORLD_TRADES_KEPT = 300 // World wallets live forever: keep their recent trade history only
 const BOT_TRADES_KEPT = 20 // bots: nobody reads their own wallet's history (their public wallet shows their trades), and 100 × 300 trades is most of the save
 const WORLD_DEAD_COIN_SEC = 3600 // World: dead player-cooked coins leave the market after an hour
@@ -83,6 +98,8 @@ interface Member {
   cookTicks?: number[] // the World: when their recent launches were (the hourly limit)
   copyBook?: CopyBook // KOLs: what their followers' copy bots hold, per coin
   social?: SocialProfile // their followers, reputation and open calls, kept here (see socialOf)
+  socialMissed?: CallResult[] // calls judged while they were away: shown when they are back
+  eventsAt?: { tick: number; n: number } // how many own-coin events they sent this tick (not saved)
   brain?: BotBrain // World bots only
   // World leaderboards: where this week's profit is measured from, and bankruptcy restarts.
   weekBase?: { week: number; pnl: number }
@@ -163,6 +180,7 @@ export class Room {
   private lastWalletTradeId = 0
   private sentTokens = new Map<string, Record<string, string>>() // coin → field → JSON last sent (for diffs)
   private sentWallets = new Map<string, string>() // wallet → JSON last sent (without trades)
+  private sentImages = new Map<string, string | undefined>() // coin → the picture already sent to everyone (it goes out once)
   private playersDirty = false
   private lastBotChat = -999 // tick of the last bot chat line (the crowd doesn't all talk at once)
   private botReply: { at: number; text: string } | null = null // a bot's answer to a real player, a few seconds later
@@ -216,7 +234,7 @@ export class Room {
       lastTapeId: this.lastTapeId, lastWalletTradeId: this.lastWalletTradeId, cooked: [...this.cooked.entries()], reports: this.reports.slice(0, 100), hall: this.hall, seasonKey: this.seasonKey,
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: m.info.bot ? m.info.online : false }, seat: m.seat, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
-        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, copyBook: m.copyBook, social: m.social, brain: m.brain,
+        cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, copyBook: m.copyBook, social: m.social, socialMissed: m.socialMissed, brain: m.brain,
         weekBase: m.weekBase, dayBase: m.dayBase, seasonBase: m.seasonBase, chainPnl: m.chainPnl, chainBase: m.chainBase, dev: m.dev, trophies: m.trophies, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
       })),
     }
@@ -269,7 +287,12 @@ export class Room {
     r.lastWalletTradeId = s.lastWalletTradeId ?? r.market.nextTradeId - 1
     r.members.clear() // the placeholder World's bots; the saved ones come back below
     r.wallets = s.wallets ?? []
-    for (const m of s.members ?? []) r.members.set(m.info.id, { ...m, ws: null, ack: 0, info: { ...m.info, online: m.info.bot ? m.info.online : false } })
+    for (const m of s.members ?? []) {
+      // Trades saved before the server stopped copying coin pictures into them (see tradingEngine) lose the copies.
+      const trades = m.wallet?.trades
+      const wallet = m.wallet && trades?.some((t) => t.image !== undefined) ? { ...m.wallet, trades: trades.map(({ image: _copy, ...t }) => t) } : m.wallet
+      r.members.set(m.info.id, { ...m, wallet, ws: null, ack: 0, info: { ...m.info, online: m.info.bot ? m.info.online : false } })
+    }
     r.ensureBots()
     r.emptySince = Date.now()
     // Charts: re-draw every coin to end at its price, then put back the real longer timeframes we saved.
@@ -285,6 +308,7 @@ export class Room {
       if (tfs['1m']?.length) shortTfsFrom1m(c, new Rng(hashCode(id)))
     }
     r.sentTokens.clear() // first tick after restore sends every coin in full
+    r.sentImages.clear()
     r.sentWallets.clear()
   }
 
@@ -312,7 +336,10 @@ export class Room {
     for (const tr of existing?.inbox ?? []) this.send(ws, tr) // transfers that came in while they were away
     const joined = this.members.get(msg.playerId)!
     if (this.walletOf(joined)) this.sendWallet(joined)
-    if (!spectator && (this.world || joined.social)) this.sendSocial(joined, this.socialOf(joined))
+    if (!spectator && (this.world || joined.social)) {
+      this.sendSocial(joined, this.socialOf(joined), joined.socialMissed, true)
+      joined.socialMissed = undefined
+    }
     this.broadcastPlayers()
     return true
   }
@@ -402,9 +429,17 @@ export class Room {
       case 'candles':
         return this.sendTo(playerId, { t: 'candles', tokenId: msg.tokenId, candles: candleStore.get(msg.tokenId) ?? null })
       case 'event': {
-        const t = this.market.tokens.find((x) => x.id === msg.event.tokenId)
-        if (!t || t.creatorId !== playerId) return
-        this.playerEvents.push({ ...msg.event, by: playerId, text: msg.event.text.replace('(you)', `(${me.info.name})`).slice(0, 200) })
+        // Something the player did to their own coin (a dev sell, a bundle dump, an airdrop). Only those three, at
+        // most a few a second, and the words are the server's own (see ownCoinEvent).
+        const ev = msg.event as Partial<MarketEvent> | null | undefined
+        const t = ev && typeof ev.tokenId === 'string' ? (this.market.tokens.find((x) => x.id === ev.tokenId) as NetToken | undefined) : undefined
+        if (!ev || !t || t.creatorId !== playerId) return
+        const line = ownCoinEvent(ev.kind, typeof ev.text === 'string' ? ev.text.slice(0, 200) : '', t, me.info.name)
+        if (!line) return
+        const n = me.eventsAt?.tick === this.market.tick ? me.eventsAt.n + 1 : 1
+        me.eventsAt = { tick: this.market.tick, n }
+        if (n > 4) return
+        this.playerEvents.push({ id: this.market.tick * 100 + line.slot, tick: this.market.tick, time: this.market.time, kind: line.kind, tokenId: t.id, ticker: t.ticker, text: line.text, icon: line.icon, tone: line.tone, by: playerId })
         return
       }
       case 'post':
@@ -441,7 +476,7 @@ export class Room {
   }
 
   /** A filtered message, or null if it was refused (the sender is told why; repeated offences mute them). */
-  private screen(me: Member, raw: string): string | null {
+  private screen(me: Member, raw: unknown): string | null {
     if (!this.canTalk(me)) return null
     const meter = (me.meter ??= { times: [], strikes: [] })
     const now = Date.now()
@@ -459,7 +494,7 @@ export class Room {
     return m.text
   }
 
-  private chat(me: Member, raw: string) {
+  private chat(me: Member, raw: unknown) {
     const text = this.screen(me, raw)
     if (!text) return
     const meter = me.meter!
@@ -761,7 +796,13 @@ export class Room {
     const w = this.walletOf(me)
     const money = msg.money
     if (!w || !money || !msg.token?.id) return fail('No round running')
-    if (this.market.tokens.some((x) => x.id === msg.token.id)) return fail('That coin already exists')
+    // The coin's id comes from the game too (the game already shows the coin under it). Only the shape the game
+    // makes, "TICKER-xxxx", and only as text: a LIST holding a live coin's id reads the same as that id once it is
+    // turned into text, and the new coin then took the old coin's place (its chart, its holders' bags); an id like
+    // "constructor" breaks every lookup by id.
+    const id: unknown = msg.token.id
+    if (typeof id !== 'string' || !/^[A-Za-z0-9]{1,16}-[A-Za-z0-9]{1,16}$/.test(id)) return fail('That coin can’t be launched')
+    if (this.market.tokens.some((x) => x.id === id)) return fail('That coin already exists')
     const limit = cookAllowance(this.world, this.world ? (me.cookTicks ?? []) : Array(me.cooks ?? 0).fill(0), this.market.tick, secPerTickOf(this.market))
     if (limit.blocked) return fail(limit.blocked)
     if (this.market.tick - (me.lastCookTick ?? -999) < COOK_COOLDOWN_TICKS) return fail('Kitchen cooling down')
@@ -792,7 +833,6 @@ export class Room {
     // The server builds the coin itself, the same way the game does, from the player's choices. Only the look comes
     // from the message: a coin sent whole could carry any price, liquidity or hidden "always pump, never rug" sim.
     const c0 = msg.token
-    const str = (s: unknown, n: number) => String(s ?? '').slice(0, n)
     const taxPct = (n: unknown) => (Number.isFinite(n) ? Math.min(0.1, Math.max(0, Number(n))) : 0)
     const spec: CookSpec = {
       chain, pad: c0.pad, tax: { buy: taxPct(c0.tax?.buy), sell: taxPct(c0.tax?.sell) }, image: look.image,
@@ -802,7 +842,7 @@ export class Room {
       bundle: b ?? { wallets: 0, perWallet: 0, stagger: false }, vampOf: c0.vampOf?.id,
     }
     const built = cookToken(this.market, new Rng((Math.random() * 2 ** 32) >>> 0), spec).token
-    const token: NetToken = { ...built, id: str(c0.id, 64), creator: 'you', creatorId: me.info.id, creatorName: me.info.name, devAddr: walletAddress(me.info.id, devWallet, 'sol'), status: 'bonding', creatorFees: 0 }
+    const token: NetToken = { ...built, id, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, devAddr: walletAddress(me.info.id, devWallet, 'sol'), status: 'bonding', creatorFees: 0 }
     this.market = { ...this.market, tokens: [token, ...this.market.tokens] }
     // cookToken drew the coin's first candle under its own id; move it to the id the game knows the coin by.
     const firstCandles = candleStore.get(built.id)
@@ -842,7 +882,7 @@ export class Room {
   /** A player's post on the timeline: the crowd reacts on the shared market; everyone sees it next tick. */
   private post(me: Member, msg: Extract<ClientMsg, { t: 'post' }>) {
     // Bots write their own lines; players' posts go through the chat filter (and mutes).
-    const text = me.info.bot ? String(msg.text ?? '').trim().slice(0, 200) : this.screen(me, String(msg.text ?? ''))
+    const text = me.info.bot ? String(msg.text ?? '').trim().slice(0, 200) : this.screen(me, msg.text)
     if (!text || this.market.tick - (me.lastPostTick ?? -999) < POST_COOLDOWN_TICKS) return
     me.lastPostTick = this.market.tick
     setClock(secPerTickOf(this.market))
@@ -881,14 +921,16 @@ export class Room {
    */
   private socialOf(me: Member, claim?: { followers?: unknown; rep?: unknown }): SocialProfile {
     if (!me.social) {
-      const f = Math.round(Number(claim?.followers)), r = Math.round(Number(claim?.rep))
-      me.social = this.world || !claim ? freshSocial() : { ...freshSocial(), followers: Number.isFinite(f) ? Math.max(10, Math.min(FOLLOWER_CEILING, f)) : freshSocial().followers, rep: Number.isFinite(r) ? Math.max(0, Math.min(100, r)) : freshSocial().rep }
+      const fresh = freshSocial()
+      const num = (v: unknown, lo: number, hi: number, or: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : or)
+      me.social = this.world || !claim || typeof claim !== 'object' ? fresh : { ...fresh, followers: num(claim.followers, 10, FOLLOWER_CEILING, fresh.followers), rep: num(claim.rep, 0, 100, fresh.rep) }
     }
     return me.social
   }
 
-  private sendSocial(m: Member, social: SocialProfile, results?: CallResult[]) {
-    this.sendTo(m.info.id, { t: 'social', social, ...(results?.length ? { results } : {}) })
+  /** `joined`: sent because they (re)joined, not because something just changed. */
+  private sendSocial(m: Member, social: SocialProfile, results?: CallResult[], joined?: boolean) {
+    this.sendTo(m.info.id, { t: 'social', social, ...(results?.length ? { results } : {}), ...(joined ? { joined: true } : {}) })
   }
 
   // ─── The clock ─────────────────────────────────────────────────────────────
@@ -999,7 +1041,9 @@ export class Room {
       coinOf ??= new Map(this.market.tokens.map((t) => [t.id, t]))
       const j = judgeCalls(m.social, this.market.tick, (id) => coinOf!.get(id))
       m.social = j.social
-      if (j.results.length) this.sendSocial(m, j.social, j.results)
+      if (!j.results.length) continue
+      if (m.ws) this.sendSocial(m, j.social, j.results)
+      else m.socialMissed = [...(m.socialMissed ?? []), ...j.results].slice(-10) // away: told when they are back
     }
 
     // Coins that appeared this tick: send their whole chart instead of points.
@@ -1066,6 +1110,12 @@ export class Room {
       const out: TokenDiff = { id: t.id }
       for (const [k, v] of Object.entries(t)) {
         if (k === 'id' || k === 'tape' || (k === 'sim' && prev)) continue
+        // A coin's picture never changes and can be tens of KB. It goes out with the coin's first send (and in the
+        // welcome of anyone who joins later), not again on every refresh turn, and it isn't re-read every tick.
+        if (k === 'image') {
+          if (this.sentImages.has(t.id) && this.sentImages.get(t.id) === v) continue
+          this.sentImages.set(t.id, v as string | undefined)
+        }
         if (prev && !slowTurn && SLOW_FIELDS.has(k)) continue
         const rv = round(v)
         const js = JSON.stringify(rv)
@@ -1080,7 +1130,11 @@ export class Room {
       if (tape.length) out.tape = round(tape) as TokenDiff['tape']
       return out
     })
-    for (const id of this.sentTokens.keys()) if (!this.market.tokens.some((t) => t.id === id)) this.sentTokens.delete(id)
+    for (const id of this.sentTokens.keys()) {
+      if (this.market.tokens.some((t) => t.id === id)) continue
+      this.sentTokens.delete(id)
+      this.sentImages.delete(id)
+    }
     this.lastTapeId = max
     const { tokens: _all, ...rest } = this.market
     void _all

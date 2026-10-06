@@ -123,6 +123,19 @@ export function addFollowers(s: SocialProfile, raw: number): SocialProfile {
   return { ...s, followers: s.followers + add, gainDay: day, gainedToday: gained + add }
 }
 
+/**
+ * Add a change in followers and reputation that was worked out somewhere else (a friends room's server keeps its own
+ * count: what you gain or lose there is added to your profile, the count itself is never copied). Gains still fit in
+ * what is left of today's limit; the gain rate was already applied where the change was worked out.
+ */
+export function creditSocial(s: SocialProfile, dFollowers: number, dRep: number): SocialProfile {
+  const day = today()
+  const gained = s.gainDay === day ? (s.gainedToday ?? 0) : 0
+  const d = Math.round(Number.isFinite(dFollowers) ? dFollowers : 0)
+  const add = d > 0 ? Math.min(Math.max(0, followerCapPerDay(s.followers) - gained), d) : d
+  return { ...s, followers: Math.max(10, s.followers + add), rep: Math.max(0, Math.min(100, s.rep + (Number.isFinite(dRep) ? dRep : 0))), gainDay: day, gainedToday: gained + Math.max(0, add) }
+}
+
 /** Followers you can still gain today. */
 export const followersLeftToday = (s: SocialProfile) => Math.max(0, followerCapPerDay(s.followers) - (s.gainDay === today() ? (s.gainedToday ?? 0) : 0))
 

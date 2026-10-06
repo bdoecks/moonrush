@@ -154,13 +154,22 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
    (optimistic) and tags it with a `ref`; the server runs the same shared function and its answer wins. Any new
    action that moves money must run in `server/room.ts`, through a function in `src/game/orders.ts` that both
    sides share. There is no "trust the client" path, and none may be added.
-   The same goes for anything that moves prices. **Followers and reputation** decide how many people a post reaches
-   and how many copy a buy, so the server keeps them (`socialOf` / `judgeCalls` in `server/room.ts`, sent to the game
-   as `social`; the game reads them through `socialNow`). The World starts everyone fresh and ignores what a message
-   claims; a friends room starts from the player's own profile once. **A new coin's look** (name, ticker, description,
-   picture) is checked by `coinLook` in `server/moderation.ts` before the launch is charged: the game form's rules,
-   the chat filter, and only uploaded pictures (a picture link would make every player's browser call a stranger's
-   computer).
+   Two more things the server keeps or checks itself, because they reach every other player:
+   - **Followers and reputation** decide how many people a post reaches and how many copy a buy, so the server keeps
+     them (`socialOf` / `judgeCalls` in `server/room.ts`, sent to the game as `social`; the game reads them through
+     `socialNow`). The World starts everyone fresh and ignores what a message claims. A friends room starts from the
+     player’s own profile once and keeps its own count; the game adds the *change* to the profile (`creditSocial`),
+     never the room’s count. Known gaps: a call on your own coin that you then pump still counts, and `patch` still
+     takes a coin’s hype from its dev’s browser (bounded).
+   - **What a launch brings from the browser**: the coin’s id (only the game’s `TICKER-xxxx` shape, as text), its name,
+     ticker, description and picture (`coinLook` in `server/moderation.ts`, before anything is charged: the form’s
+     rules, the chat filter, and only uploaded JPG / WebP / GIF pictures of a sane size, because a picture link would
+     make every player’s browser call a stranger’s computer). The rules the form can know are shared in
+     `src/game/textRules.ts`; a launch the server still refuses is taken back in the game (`onWallet`). The `event`
+     message is rewritten in the server’s own words (`ownCoinEvent`).
+   Text is cleaned where it enters (`server/index.ts`): half an emoji or a NUL anywhere in a room makes the database
+   refuse the save, so `saveSafe` in `server/persist.ts` is the last net. Cut player text with `cut()`, not `slice()`.
+   Trade records on the server carry no copy of the coin’s picture (`setTradeImages`), and a picture is sent once.
 2. **Wallet messages are numbered.** The game sends `seq`; the server answers `wallet { ack, state }`; the game
    applies the server's balances only when `ack === seq`. Both restart the count on every connection.
 3. Store changes the server also makes are wrapped in `quietly()`. In dev, an unreported money change logs

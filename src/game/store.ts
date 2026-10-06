@@ -23,6 +23,7 @@ import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
 import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
 import { ACCOUNTS, addFollowers, CALL_SETTLE_TICKS, callerKey, type CallResult, copyBuys, copySells, type CopyBook, freshSocial, judgeCalls, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, saneSocial, shill, tickSocial, type ShillResult } from './socialEngine'
+import { COIN_IMAGE_MAX, hasLink, visibleCount } from './textRules'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import { WORLD_START_BALANCE, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
 import { payNative, runBuy, runConvert, runGiveAway, runSell, runSwap } from './orders'
@@ -397,11 +398,14 @@ export function notifyCallResult(notify: GameState['notify'], r: CallResult) {
  * Returns an error message, or null if the launch spec is valid. `online`: in a room or the World the server checks
  * the same things again (`coinLook` in server/moderation.ts) and only takes a picture that was uploaded.
  */
-export function validateCook(spec: CookSpec, tokens: Token[], online = false): string | null {
+export function validateCook(spec: CookSpec, tokens: Token[], online = false, world = false): string | null {
   if (spec.name.trim().length < 2 || spec.name.trim().length > 24) return 'Name must be 2–24 characters'
+  if (visibleCount(spec.name) < 2) return 'Name needs two letters, digits or emoji'
   if (!/^[A-Z0-9]{2,8}$/.test(spec.ticker)) return 'Ticker must be 2–8 letters or digits'
-  if (online && spec.image && !/^data:image\//i.test(spec.image)) return 'Online, upload the picture (links are solo only)'
-  if (online && spec.image && spec.image.length > 200_000) return 'Picture too big for online play'
+  if (world && hasLink(spec.name)) return 'No links in a World coin’s name'
+  if (world && hasLink(spec.description)) return 'No links in a World coin’s description'
+  if (online && spec.image && /^https?:\/\//i.test(spec.image)) return 'Online, upload the picture (links are solo only)'
+  if (online && spec.image && spec.image.length > COIN_IMAGE_MAX) return 'Picture too big for online (GIF under 45 KB)'
   // Tickers are unique, except a vamp may reuse the exact ticker of the coin it's copying (that's the point of a vamp).
   if (tokens.some((t) => t.ticker === spec.ticker && t.status !== 'dead' && t.status !== 'rugged' && t.id !== spec.vampOf)) return `$${spec.ticker} already exists`
   if (!(spec.marketing >= 0) || !(spec.devBuy >= 0)) return 'Amounts must be positive'
@@ -1524,7 +1528,7 @@ export const useGame = create<GameState>()((set, get) => {
         return null
       }
       if (s.runStatus !== 'running') return fail('Start a round to launch tokens')
-      const err = validateCook(spec, s.market.tokens, !!s.online)
+      const err = validateCook(spec, s.market.tokens, !!s.online, !!s.online?.round.world)
       if (err) return fail(err)
       const limit = cookAllowance(!!s.online?.round.world, s.launches.map((l) => l.launchedTick), s.market.tick, secPerTickOf(s.market))
       if (limit.blocked) return fail(limit.blocked)
