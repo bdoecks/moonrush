@@ -859,8 +859,10 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
     }
 
     // Realistic engine: a coin on its curve trades by order flow, whoever launched it; dead ones leave the lists within
-    // a minute. (A curve coin with no flow yet was launched before that was true of every launch, or by an admin.)
-    if (realistic && !s.flow && t.status === 'bonding') s.flow = { q: clamp(0.1 + t.hype / 100, 0.1, 1.1), att: 0.3, ema: t.price, lastTrade: m.time }
+    // a minute. (A curve coin with no flow yet was launched before that was true of every launch, or by an admin. It
+    // joins in as a middling coin: a World saved before the change has dozens of these, and they must not all take
+    // off the moment it comes back.)
+    if (realistic && !s.flow && t.status === 'bonding') s.flow = { q: clamp(0.1 + t.hype / 250, 0.1, 0.5), att: 0.2, ema: t.price, lastTrade: m.time }
     if (realistic && s.flow) {
       if ((t.status === 'dead' || t.status === 'rugged') && t.diedAt && m.time - t.diedAt > FLOW.delistAfter && !opts.protectedIds.has(t.id) && t.creator !== 'you') {
         candleStore.delete(t.id)
