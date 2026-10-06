@@ -200,7 +200,9 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
    one thing that moves a dollar price without a trade is the chain coin itself (the reserves are SOL / BNB / ETH).
    `scripts/curve-test.ts` holds all of this; run it after touching the market.
    The regime model is written per classic 6-second tick and follows the clock (`DT`, `clockStep()`): on the
-   real-time World one tick is a sixth of a step, so a migrated coin moves about 3% in a typical minute, not 10%.
+   real-time World one tick is a sixth of a step, so a migrated coin moves about 3% in a typical minute, not 10%
+   (the engine on its own; in the World itself, with its bots, calls and tracked wallets, about 5% where it was
+   about 20%: measure there, with `market-report` or a saved World, before telling anyone a number).
    Two things besides trades touch a pool, and neither moves a price: other liquidity providers top up a coin that
    has outgrown its launch pool (`POOL_FLOOR`: never under 2% of market cap), and a pool can't be sold below the
    price it has with the whole supply in it (`sellRoom`: a dead migrated coin keeps a few $K of market cap).
