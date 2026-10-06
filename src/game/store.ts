@@ -22,7 +22,8 @@ import { emptyBalances, executeBuy, nativePrice, type Asset } from './tradingEng
 import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
 import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
-import { ACCOUNTS, addFollowers, CALL_SETTLE_TICKS, callerKey, copyBuys, copySells, type CopyBook, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, saneSocial, settleCall, shill, tickSocial, type ShillResult } from './socialEngine'
+import { ACCOUNTS, addFollowers, CALL_SETTLE_TICKS, callerKey, type CallResult, copyBuys, copySells, type CopyBook, freshSocial, judgeCalls, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, saneSocial, shill, tickSocial, type ShillResult } from './socialEngine'
+import { COIN_IMAGE_MAX, hasLink, visibleCount } from './textRules'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import { WORLD_START_BALANCE, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
 import { payNative, runBuy, runConvert, runGiveAway, runSell, runSwap } from './orders'
@@ -175,6 +176,7 @@ export interface OnlineState {
   conn: 'open' | 'reconnecting'
   chat: ChatLine[]
   spectator?: boolean // World guest: watching only (sign in to trade)
+  social?: SocialProfile // your followers and reputation as the room's server has them (see socialNow)
 }
 
 /** Set by the network client while online; the store calls it to tell the server about your cooks, bots and coins. */
@@ -378,10 +380,32 @@ let lastEventToast = -999
 // Cooking rules.
 export { COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND }
 
-/** Returns an error message, or null if the launch spec is valid. */
-export function validateCook(spec: CookSpec, tokens: Token[]): string | null {
+/**
+ * Your followers and reputation right now. In solo play they are your profile's. In a room or the World the server
+ * keeps them (followers move prices there, so the count can't come from the browser): the World has its own count
+ * that starts fresh, a friends room starts from your profile.
+ */
+export const socialNow = (s: Pick<GameState, 'online' | 'profile'>): SocialProfile | undefined => (s.online?.social ?? s.profile.social)
+
+/** The pop-ups for a judged call: the same in solo play and online (where the server does the judging). */
+export function notifyCallResult(notify: GameState['notify'], r: CallResult) {
+  const dF = r.dFollowers
+  notify({ title: r.x >= 1.5 ? 'CALL HIT 🎯' : r.x >= 1.1 ? 'CALL OK' : 'CALL MISSED', body: `$${r.ticker} ran ${r.x.toFixed(1)}x after your call · rep ${r.dRep >= 0 ? '+' : ''}${r.dRep} · ${dF >= 0 ? '+' : ''}${Math.abs(dF) < 1000 ? dF : fmtCompact(dF, '')} followers`, tone: r.x >= 1.1 ? 'up' : 'down', icon: r.x >= 1.5 ? '🎯' : '📉', tokenId: r.tokenId })
+  if (r.kol) notify({ title: 'YOU ARE A KOL NOW 👑', body: `${fmtCompact(r.followers, '')} followers. Your calls move real money now.`, tone: 'xp', icon: '👑' }, 'achievement')
+}
+
+/**
+ * Returns an error message, or null if the launch spec is valid. `online`: in a room or the World the server checks
+ * the same things again (`coinLook` in server/moderation.ts) and only takes a picture that was uploaded.
+ */
+export function validateCook(spec: CookSpec, tokens: Token[], online = false, world = false): string | null {
   if (spec.name.trim().length < 2 || spec.name.trim().length > 24) return 'Name must be 2–24 characters'
+  if (visibleCount(spec.name) < 2) return 'Name needs two letters, digits or emoji'
   if (!/^[A-Z0-9]{2,8}$/.test(spec.ticker)) return 'Ticker must be 2–8 letters or digits'
+  if (world && hasLink(spec.name)) return 'No links in a World coin’s name'
+  if (world && hasLink(spec.description)) return 'No links in a World coin’s description'
+  if (online && spec.image && /^https?:\/\//i.test(spec.image)) return 'Online, upload the picture (links are solo only)'
+  if (online && spec.image && spec.image.length > COIN_IMAGE_MAX) return 'Picture too big for online (GIF under 45 KB)'
   // Tickers are unique, except a vamp may reuse the exact ticker of the coin it's copying (that's the point of a vamp).
   if (tokens.some((t) => t.ticker === spec.ticker && t.status !== 'dead' && t.status !== 'rugged' && t.id !== spec.vampOf)) return `$${spec.ticker} already exists`
   if (!(spec.marketing >= 0) || !(spec.devBuy >= 0)) return 'Amounts must be positive'
@@ -585,7 +609,7 @@ export const useGame = create<GameState>()((set, get) => {
 
   /** Your follower count and reputation when you're a KOL (your followers copy your buys), else null. */
   const kolOf = (s: GameState) => {
-    const soc = s.profile.social
+    const soc = socialNow(s)
     return soc && soc.followers >= KOL_FOLLOWERS ? { followers: soc.followers, rep: soc.rep } : null
   }
 
@@ -1182,34 +1206,13 @@ export const useGame = create<GameState>()((set, get) => {
       }
 
       // Your calls on the timeline: track each coin's best price since the call and judge it after ~5 minutes.
+      // (In a room or the World the server does this and sends the result: see `social` in net/client.ts.)
       const soc0 = get().profile.social
-      if (soc0?.calls.some((c) => !c.settled)) {
-        const judged: { ticker: string; x: number; likes: number; tokenId: string }[] = []
-        let changed = false
-        const calls = soc0.calls.map((c) => {
-          if (c.settled) return c
-          const t = map.get(c.tokenId)
-          const peak = t ? Math.max(c.peak, t.mcap) : c.peak
-          if (market.tick - c.tick >= CALL_SETTLE_TICKS) {
-            const x = t && t.status !== 'rugged' && t.status !== 'dead' ? peak / c.mcapAtPost : Math.min(0.5, peak / c.mcapAtPost)
-            judged.push({ ticker: c.ticker, x, likes: c.likes, tokenId: c.tokenId })
-            changed = true
-            return { ...c, peak, settled: true, x }
-          }
-          if (peak !== c.peak) changed = true
-          return peak !== c.peak ? { ...c, peak } : c
-        })
-        if (changed) {
-          let soc: SocialProfile = { ...soc0, calls }
-          for (const j of judged) {
-            const before = soc
-            soc = settleCall(soc, j.x, j.likes)
-            const dRep = Math.round(soc.rep - before.rep)
-            const dF = soc.followers - before.followers
-            s.notify({ title: j.x >= 1.5 ? 'CALL HIT 🎯' : j.x >= 1.1 ? 'CALL OK' : 'CALL MISSED', body: `$${j.ticker} ran ${j.x.toFixed(1)}x after your call · rep ${dRep >= 0 ? '+' : ''}${dRep} · ${dF >= 0 ? '+' : ''}${Math.abs(dF) < 1000 ? dF : fmtCompact(dF, '')} followers`, tone: j.x >= 1.1 ? 'up' : 'down', icon: j.x >= 1.5 ? '🎯' : '📉', tokenId: j.tokenId })
-            if (before.followers < KOL_FOLLOWERS && soc.followers >= KOL_FOLLOWERS) s.notify({ title: 'YOU ARE A KOL NOW 👑', body: `${fmtCompact(soc.followers, '')} followers. Your calls move real money now.`, tone: 'xp', icon: '👑' }, 'achievement')
-          }
-          set({ profile: { ...get().profile, social: soc } })
+      if (soc0 && !get().online) {
+        const j = judgeCalls(soc0, market.tick, (id) => map.get(id))
+        if (j.social !== soc0) {
+          for (const r of j.results) notifyCallResult(s.notify, r)
+          set({ profile: { ...get().profile, social: j.social } })
         }
       }
 
@@ -1525,7 +1528,7 @@ export const useGame = create<GameState>()((set, get) => {
         return null
       }
       if (s.runStatus !== 'running') return fail('Start a round to launch tokens')
-      const err = validateCook(spec, s.market.tokens)
+      const err = validateCook(spec, s.market.tokens, !!s.online, !!s.online?.round.world)
       if (err) return fail(err)
       const limit = cookAllowance(!!s.online?.round.world, s.launches.map((l) => l.launchedTick), s.market.tick, secPerTickOf(s.market))
       if (limit.blocked) return fail(limit.blocked)
@@ -1897,7 +1900,7 @@ export const useGame = create<GameState>()((set, get) => {
       const s = get()
       const clean = text.trim().slice(0, 200)
       if (!clean) return false
-      const soc = { ...freshSocial(), ...(s.profile.social ?? {}) }
+      const soc = { ...freshSocial(), ...(socialNow(s) ?? {}) }
       const wait = POST_COOLDOWN_TICKS - (s.market.tick - soc.lastPostTick)
       if (wait > 0 && soc.lastPostTick <= s.market.tick) {
         s.notify({ title: 'SLOW DOWN', body: `You can post again in ${wait}s. Spamming the timeline kills your reach.`, tone: 'warn', icon: '⏳' })
@@ -1912,8 +1915,10 @@ export const useGame = create<GameState>()((set, get) => {
       if (s.online) {
         // The room's server runs the timeline's reaction on the shared market; the post comes back with the next tick.
         netHooks.send?.({ t: 'post', text: clean, tokenId: t?.id, followers: soc.followers, rep: soc.rep, repeats })
-        const next = { ...soc, posts: soc.posts + 1, lastPostTick: s.market.tick, calls: call ? [{ ...call, postId: 0, likes: 0 }, ...soc.calls].slice(0, 30) : soc.calls }
-        set({ profile: { ...s.profile, social: next } })
+        // The server counts the post, remembers the call and judges it; its answer (`social`) replaces this. Until
+        // it arrives only the "you just posted" clock moves, so a second click doesn't post twice.
+        const next = { ...soc, lastPostTick: s.market.tick }
+        set(s.online.social ? { online: { ...s.online, social: next } } : { profile: { ...s.profile, social: next } })
         persist()
         return true
       }

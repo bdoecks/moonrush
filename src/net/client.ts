@@ -5,7 +5,8 @@ import { newPortfolio, portfolioStats, valuePortfolio } from '../game/portfolioE
 import { levelFromXp } from '../game/progression'
 import { seasonNumber } from '../game/season'
 import { nativePrice } from '../game/tradingEngine'
-import { netHooks, quietly, roomRivals, useGame, type BotTickRun, type ChatLine, type MpSave, type OnlineState } from '../game/store'
+import { creditSocial, freshSocial } from '../game/socialEngine'
+import { netHooks, notifyCallResult, quietly, roomRivals, useGame, type BotTickRun, type ChatLine, type MpSave, type OnlineState } from '../game/store'
 import type { Chain, MarketEngine, MarketState, SimWallet, TapeTrade, Token } from '../types'
 import { walletAddress } from '../utils/address'
 import { fmtCompact, fmtUsd } from '../utils/format'
@@ -32,6 +33,7 @@ let unsubTrades: (() => void) | null = null
 let unsubWallet: (() => void) | null = null
 let seq = 0 // wallet messages sent on this connection
 let lastLayout = ''
+const cooking = new Map<number, string>() // launches sent to the server and not answered yet: order number → coin id
 let muted = false // while restoring / starting a round, don't echo the whole trade list to the server
 let pending: { resolve: () => void; reject: (e: Error) => void } | null = null
 
@@ -263,11 +265,35 @@ function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
   }
   if (msg.note) s.notify({ title: 'COPY TRADERS', body: msg.note, tone: 'info', icon: '👥' }) // e.g. your followers copying your buy
   let p = s.portfolio
+  // A launch the server refused (it has rules the form can't check, like blocked words): its answer lists every coin
+  // you cooked under `vaults`, and a refused one is not there. The server charged and counted nothing, so the launch
+  // is taken back here too (the coin, its row in My launches, the used launch and the cooldown), and the reason is
+  // always said.
+  const cookId = msg.ref !== undefined ? cooking.get(msg.ref) : undefined
+  if (msg.ref !== undefined) cooking.delete(msg.ref)
+  const refused = !!cookId && !(cookId in (msg.state.vaults ?? {}))
+  if (refused) {
+    const launches = s.launches.filter((r) => r.tokenId !== cookId)
+    quietly(() => s.patchState({
+      launches, lastCookTick: launches.reduce((a, r) => Math.max(a, r.launchedTick), -999),
+      runStats: { ...s.runStats, cooked: Math.max(0, (s.runStats.cooked ?? 0) - 1) },
+      market: { ...s.market, tokens: s.market.tokens.filter((t) => t.id !== cookId) },
+      events: s.events.filter((e) => e.tokenId !== cookId),
+      sideQueue: s.sideQueue.filter((q) => q.tokenId !== cookId),
+      watchlist: s.watchlist.filter((id) => id !== cookId),
+    }))
+    s.notify({ title: 'LAUNCH REFUSED', body: `${(msg.failures ?? []).join(' · ') || 'The server refused this coin.'} Nothing was charged.`, tone: 'warn', icon: '🍳' }, 'alert')
+  }
   if (msg.ref !== undefined) {
-    const mine = p.trades.filter((t) => t.ref === msg.ref)
+    const mine = refused ? [] : p.trades.filter((t) => t.ref === msg.ref)
     // The server lists fills in the order they ran; the trade list is newest first. Labels only the game knows (copy
-    // trade, sniper task…) carry over onto the matching server fill.
-    const fills = [...(msg.fills ?? [])].reverse().map((f, i) => (mine[i]?.via && !f.via ? { ...f, via: mine[i].via } : f))
+    // trade, sniper task…) carry over onto the matching server fill, and so does the coin's picture (the server's
+    // records carry no copy of it).
+    const picture = (id: string) => s.market.tokens.find((t) => t.id === id)?.image
+    const fills = [...(msg.fills ?? [])].reverse().map((f, i) => {
+      const image = f.image ?? mine[i]?.image ?? picture(f.tokenId)
+      return { ...f, ...(mine[i]?.via && !f.via ? { via: mine[i].via } : {}), ...(image ? { image } : {}) }
+    })
     p = { ...p, trades: [...fills, ...p.trades.filter((t) => t.ref !== msg.ref)] }
     if (mine.length && !(msg.fills ?? []).length) {
       s.notify({ title: 'ORDER FAILED ON THE SERVER', body: (msg.failures ?? []).join(' · ') || 'The server rejected it. Your wallet was put back.', tone: 'warn', icon: '⛔' }, 'alert')
@@ -338,6 +364,29 @@ function onMessage(msg: ServerMsg) {
       return onRecv(msg)
     case 'wallet':
       return onWallet(msg)
+    case 'social': {
+      // Your followers and reputation as the server has them, and any calls it has just judged.
+      if (!st.online) return
+      for (const r of msg.results ?? []) notifyCallResult(st.notify, r)
+      const online: OnlineState = { ...st.online, social: msg.social }
+      // The World's count is its own and leaves your solo profile alone. A friends room started from your profile
+      // and then keeps its own count too, but what you gain or lose there is yours to keep: the CHANGE since the
+      // last message is added to your profile. The room's count itself is never copied over it (coming back to an
+      // old room, or opening it on another device, must not undo what you earned since).
+      if (st.online.round.world) return st.patchState({ online })
+      const mine = { ...freshSocial(), ...(st.profile.social ?? {}) }
+      let dF = 0, dRep = 0
+      if (msg.joined) {
+        // (Re)joined: nothing changed just now, except the calls that were judged while you were away.
+        for (const r of msg.results ?? []) { dF += r.dFollowers; dRep += r.dRep }
+      } else {
+        // Before the room's first message it had just been started from your profile, so that is what it changed from.
+        const before = st.online.social ?? mine
+        dF = msg.social.followers - before.followers
+        dRep = msg.social.rep - before.rep
+      }
+      return st.patchState({ online, ...(dF || dRep ? { profile: { ...st.profile, social: creditSocial(mine, dF, dRep) } } : {}) })
+    }
     case 'board':
       return useWorldBoard.setState({ board: msg })
     case 'notice':
@@ -373,7 +422,7 @@ function onMessage(msg: ServerMsg) {
 function onWelcome(msg: Extract<ServerMsg, { t: 'welcome' }>) {
   const s = useGame.getState()
   const wasOnline = !!s.online
-  const online: OnlineState = { code: msg.code, you: msg.you, hostId: msg.hostId, players: msg.players, round: msg.round, conn: 'open', chat: s.online?.chat ?? [], spectator: msg.spectator }
+  const online: OnlineState = { code: msg.code, you: msg.you, hostId: msg.hostId, players: msg.players, round: msg.round, conn: 'open', chat: s.online?.chat ?? [], spectator: msg.spectator, social: s.online?.code === msg.code ? s.online.social : undefined } // (a reconnect keeps the count shown until the server sends it again)
   save('mpRoom', { code: msg.code })
   retries = 0
   netHooks.send = send
@@ -381,6 +430,7 @@ function onWelcome(msg: Extract<ServerMsg, { t: 'welcome' }>) {
   // connection, like the server) so we know which of its answers already include everything we sent.
   seq = 0
   lastLayout = ''
+  cooking.clear()
   netHooks.order = (order) => {
     const n = ++seq
     send({ t: 'order', seq: n, ref: n, order })
@@ -390,6 +440,7 @@ function onWelcome(msg: Extract<ServerMsg, { t: 'welcome' }>) {
   netHooks.wallet = (m) => {
     const n = ++seq
     send({ ...m, seq: n, ...(m.t === 'cook' ? { ref: n } : {}) } as ClientMsg)
+    if (m.t === 'cook') cooking.set(n, m.token.id)
     return n
   }
 
@@ -506,19 +557,13 @@ function onTick(msg: TickMsg) {
     }
   }
 
-  // Your own posts come back with the crowd's reaction: count the likes toward followers and fill in the call.
-  const mine = msg.posts.filter((p) => p.author?.pid === me)
-  if (mine.length && s.profile.social) {
-    let soc = s.profile.social
-    for (const p of mine) {
-      const i = soc.calls.findIndex((c) => !c.settled && c.likes === 0 && c.tokenId === p.tokenId)
-      const calls = i >= 0 ? soc.calls.map((c, k) => (k === i ? { ...c, postId: p.id, likes: p.likes ?? 0 } : c)) : soc.calls
-      soc = { ...soc, calls, followers: soc.followers + Math.round((p.likes ?? 0) * 0.1) }
-      s.notify(p.tokenId
-        ? { title: 'CALL POSTED', body: `$${p.ticker} · ${p.likes ?? 0} likes · ${p.buyers ? `${p.buyers} aped 🦍` : 'nobody bit yet'}`, tone: p.buyers ? 'up' : 'info', icon: '📣', tokenId: p.tokenId }
-        : { title: 'POSTED', body: `${p.likes ?? 0} likes`, tone: 'info', icon: '🐦' })
-    }
-    s.patchState({ profile: { ...s.profile, social: soc } })
+  // Your own posts come back with the crowd's reaction. (What they did to your followers comes from the server
+  // too, in its `social` message.)
+  for (const p of msg.posts) {
+    if (p.author?.pid !== me) continue
+    s.notify(p.tokenId
+      ? { title: 'CALL POSTED', body: `$${p.ticker} · ${p.likes ?? 0} likes · ${p.buyers ? `${p.buyers} aped 🦍` : 'nobody bit yet'}`, tone: p.buyers ? 'up' : 'info', icon: '📣', tokenId: p.tokenId }
+      : { title: 'POSTED', body: `${p.likes ?? 0} likes`, tone: 'info', icon: '🐦' })
   }
 
   s.tick({

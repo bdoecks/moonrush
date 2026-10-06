@@ -12,6 +12,13 @@ import { deleteRoom, loadRoom, loadWorld, persistOn, pingDb, saveRoom } from './
 import { health, noteDb, noteError, noteSave, noteTick, noteTickError, report, watchLoop } from './health'
 import { backupNow, checkBackups, isRestoring, listBackups, loadBackup, restoreWorldFrom, type WorldCopy } from './backup'
 import { nameBlocked } from './moderation'
+import { cut, tidyText, whole } from '../src/game/textRules'
+
+// What the database will not store inside a room (see the message handler below).
+const UNSAVEABLE = /[\u0000\uD800-\uDFFF]/
+const NUL = /\u0000/g
+/** A message field as text: anything that isn't text (a number, a list, an object) counts as empty. */
+const text = (v: unknown) => (typeof v === 'string' ? v : '')
 
 /**
  * Who's joining: signed in (token checks out) → their account id and name; otherwise a guest, who can't use an
@@ -20,15 +27,15 @@ import { nameBlocked } from './moderation'
 async function identify(msg: Extract<ClientMsg, { t: 'hello' }>): Promise<{ playerId: string; name: string; avatar: string; verified: boolean; banned?: boolean }> {
   const v = await verifyToken(msg.token)
   if (v && (await isBanned(v.id))) return { playerId: `u-${v.id}`, name: v.username, avatar: '', verified: true, banned: true }
-  if (v) return { playerId: `u-${v.id}`, name: v.username, avatar: String(msg.avatar || v.avatar).slice(0, 8), verified: true }
+  if (v) return { playerId: `u-${v.id}`, name: v.username, avatar: cut(text(msg.avatar) || v.avatar, 8), verified: true }
   // A guest can't sit in an account's seat (u-…) or a World bot's (bot-…): claiming a bot's id used to take the bot
   // over and knock it out of the World. Nor can a guest wear the 🤖 that marks the real bots.
-  const raw = String(msg.playerId)
+  const raw = text(msg.playerId)
   const pid = raw.startsWith('u-') ? `g-${raw.slice(2, 14)}` : raw.startsWith('bot-') ? `g-${raw.slice(4, 16)}` : raw.slice(0, 64)
-  let name = String(msg.name ?? '').replace(/🤖/gu, '').trim().slice(0, 16) || 'Anon'
+  let name = cut(tidyText(text(msg.name)).replace(/🤖/gu, '').trim(), 16).trim() || 'Anon'
   if (nameBlocked(name)) name = 'Anon'
   if (await nameTaken(name)) name = `${name.slice(0, 11)}_guest`
-  return { playerId: pid, name, avatar: String(msg.avatar ?? '🐸').slice(0, 8), verified: false }
+  return { playerId: pid, name, avatar: cut(text(msg.avatar) || '🐸', 8), verified: false }
 }
 
 const PORT = Number(process.env.PORT) || 8787
@@ -237,10 +244,13 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('message', (raw) => {
     let msg: ClientMsg
     try {
-      msg = JSON.parse(String(raw))
+      // Text is cleaned as it comes in: half an emoji or a NUL character anywhere in a message would end up in the
+      // room's save, and the database refuses to store either (see saveSafe in persist.ts).
+      msg = JSON.parse(String(raw), (_k, v) => (typeof v === 'string' && UNSAVEABLE.test(v) ? whole(v).replace(NUL, '') : v))
     } catch {
       return
     }
+    if (!msg || typeof msg !== 'object') return
     if (joining) {
       joining.push(msg)
       return
@@ -262,7 +272,7 @@ wss.on('connection', (ws: WebSocket) => {
     handle(msg)
   })
   const enter = (msg: Extract<ClientMsg, { t: 'hello' }> & { verified: boolean }) => {
-    const name = String(msg.name ?? '').trim().slice(0, 16) || 'Anon'
+    const name = cut(tidyText(text(msg.name)), 16).trim() || 'Anon'
     if (msg.create) {
       const code = newCode()
       room = new Room(code)

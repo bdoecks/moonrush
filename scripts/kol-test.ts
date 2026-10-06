@@ -21,6 +21,16 @@ let seq = 2
 r.handle('p1', { t: 'order', seq: seq++, ref: 1, order: { side: 'buy', tokenId: coins[0].id, walletIds: [main().id], usdEach: 200, kol: { followers: 900, rep: 40 } } })
 ok(queued(coins[0].id).length === 0 && !lastWallet().note, 'under 10k followers: no copy traders')
 
+// The server keeps the count from that first message on: claiming 80k in a later one changes nothing.
+{
+  const other = coins[coins.length - 1]
+  r.handle('p1', { t: 'order', seq: seq++, ref: 8, order: { side: 'buy', tokenId: other.id, walletIds: [main().id], usdEach: 200, kol: { followers: 80_000, rep: 70 } } })
+  ok(queued(other.id).length === 0 && !lastWallet().note, 'claiming more followers in a later message is ignored')
+  // Followers earned on the server (set directly here: earning them takes days of good calls).
+  const m = r.members.get('p1') as unknown as { social: { followers: number; rep: number } }
+  m.social = { ...m.social, followers: 80_000, rep: 70 }
+}
+
 // A KOL: copiers pile in behind the buy, and the player is told.
 const big = coins[1]
 r.handle('p1', { t: 'order', seq: seq++, ref: 2, order: { side: 'buy', tokenId: big.id, walletIds: [main().id], usdEach: 300, kol: { followers: 80_000, rep: 70 } } })

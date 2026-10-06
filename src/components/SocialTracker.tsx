@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { tokenMapOf } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { ACCOUNTS, callAppeal, followerCapPerDay, followersLeftToday, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS } from '../game/socialEngine'
-import { playerAuthor, useGame } from '../game/store'
+import { playerAuthor, socialNow, useGame } from '../game/store'
 import type { SocialPost } from '../types'
 import { fmtAge, fmtCompact } from '../utils/format'
 import { EmptyState, Pct, TokenIcon } from './ui'
@@ -34,7 +34,8 @@ export function Engagement({ p }: { p: SocialPost }) {
 /** Write a post. Attach a coin (or type its $TICKER) and it becomes a call the bots may ape. */
 export function Composer({ compact }: { compact?: boolean }) {
   // Select stable store values and derive in render (a selector returning a new object would re-render forever).
-  const socialRaw = useGame((s) => s.profile.social)
+  const socialRaw = useGame(socialNow)
+  const inWorld = useGame((s) => !!s.online?.round.world)
   const social = { ...freshSocial(), ...(socialRaw ?? {}) }
   const tick = useGame((s) => s.market.tick)
   const tokens = useGame((s) => s.market.tokens)
@@ -68,7 +69,7 @@ export function Composer({ compact }: { compact?: boolean }) {
       <div className="flex items-center gap-1.5 text-[10px]">
         <span className="grid size-5 place-items-center rounded-full bg-raise text-[11px]">{me.avatar}</span>
         <span className="font-bold text-ink">{me.name}</span>
-        <span className="num text-dim" title="Followers: how many people see your posts">👥 {fmtCompact(social.followers, '')}</span>
+        <span className="num text-dim" title={inWorld ? 'Followers: how many people see your posts. In the World the server keeps count, and everyone starts fresh there.' : 'Followers: how many people see your posts'}>👥 {fmtCompact(social.followers, '')}</span>
         <span className={clsx('num', followersLeftToday(social) === 0 ? 'text-warn' : 'text-dim')} title={`You can gain up to ${fmtCompact(followerCapPerDay(social.followers), '')} followers a day. Resets at midnight (UTC).`}>+{fmtCompact(followersLeftToday(social), '')} left today</span>
         <span className="num text-dim" title="Caller reputation: whether readers trust your calls. Goes up when your calls run, down when they dump.">⭐ {Math.round(social.rep)}</span>
         {social.followers >= KOL_FOLLOWERS && <span className="flex items-center gap-0.5 rounded bg-warn/15 px-1 font-bold text-warn"><Crown size={9} /> KOL</span>}

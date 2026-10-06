@@ -123,6 +123,19 @@ export function addFollowers(s: SocialProfile, raw: number): SocialProfile {
   return { ...s, followers: s.followers + add, gainDay: day, gainedToday: gained + add }
 }
 
+/**
+ * Add a change in followers and reputation that was worked out somewhere else (a friends room's server keeps its own
+ * count: what you gain or lose there is added to your profile, the count itself is never copied). Gains still fit in
+ * what is left of today's limit; the gain rate was already applied where the change was worked out.
+ */
+export function creditSocial(s: SocialProfile, dFollowers: number, dRep: number): SocialProfile {
+  const day = today()
+  const gained = s.gainDay === day ? (s.gainedToday ?? 0) : 0
+  const d = Math.round(Number.isFinite(dFollowers) ? dFollowers : 0)
+  const add = d > 0 ? Math.min(Math.max(0, followerCapPerDay(s.followers) - gained), d) : d
+  return { ...s, followers: Math.max(10, s.followers + add), rep: Math.max(0, Math.min(100, s.rep + (Number.isFinite(dRep) ? dRep : 0))), gainDay: day, gainedToday: gained + Math.max(0, add) }
+}
+
 /** Followers you can still gain today. */
 export const followersLeftToday = (s: SocialProfile) => Math.max(0, followerCapPerDay(s.followers) - (s.gainDay === today() ? (s.gainedToday ?? 0) : 0))
 
@@ -131,6 +144,43 @@ export const FOLLOWER_CEILING = 1_000_000
 export function saneSocial<T extends { social?: SocialProfile }>(p: T): T {
   const soc = p.social
   return soc && !(soc.followers <= FOLLOWER_CEILING) ? { ...p, social: { ...soc, followers: 100_000 } } : p
+}
+
+/** How one of your calls turned out. `followers`: your count after it. `kol`: it took you past KOL_FOLLOWERS. */
+export interface CallResult { tokenId: string; ticker: string; x: number; dRep: number; dFollowers: number; followers: number; kol?: boolean }
+
+/**
+ * Your calls on the timeline: follow each coin's best price since the call and judge the ones that are
+ * CALL_SETTLE_TICKS old. Returns the same profile when nothing changed. The game runs this in solo play, the server in
+ * rooms and the World (there the server keeps your followers; the game only shows them).
+ */
+export function judgeCalls(s: SocialProfile, tick: number, tokenOf: (id: string) => Pick<Token, 'mcap' | 'status'> | undefined): { social: SocialProfile; results: CallResult[] } {
+  if (!s.calls.some((c) => !c.settled)) return { social: s, results: [] }
+  const due: { tokenId: string; ticker: string; x: number; likes: number }[] = []
+  let changed = false
+  const calls = s.calls.map((c) => {
+    if (c.settled) return c
+    const t = tokenOf(c.tokenId)
+    const peak = t ? Math.max(c.peak, t.mcap) : c.peak
+    if (tick - c.tick >= CALL_SETTLE_TICKS) {
+      // A coin that died or rugged since the call is a miss, however high it went first.
+      const x = t && t.status !== 'rugged' && t.status !== 'dead' ? peak / c.mcapAtPost : Math.min(0.5, peak / c.mcapAtPost)
+      due.push({ tokenId: c.tokenId, ticker: c.ticker, x, likes: c.likes })
+      changed = true
+      return { ...c, peak, settled: true, x }
+    }
+    if (peak !== c.peak) changed = true
+    return peak !== c.peak ? { ...c, peak } : c
+  })
+  if (!changed) return { social: s, results: [] }
+  let soc: SocialProfile = { ...s, calls }
+  const results: CallResult[] = []
+  for (const j of due) {
+    const before = soc
+    soc = settleCall(soc, j.x, j.likes)
+    results.push({ tokenId: j.tokenId, ticker: j.ticker, x: j.x, dRep: Math.round(soc.rep - before.rep), dFollowers: soc.followers - before.followers, followers: soc.followers, ...(before.followers < KOL_FOLLOWERS && soc.followers >= KOL_FOLLOWERS ? { kol: true } : {}) })
+  }
+  return { social: soc, results }
 }
 
 /**

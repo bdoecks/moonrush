@@ -42,7 +42,17 @@ const STYLES: { value: LaunchStyle; label: string; hint: string }[] = [
 const MARKETING = [0, 100, 250, 500, 1000, 2500]
 const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)]
 
-function randomIdentity(n: Narrative) {
+function randomIdentity(n: Narrative, tokens: Token[] = []) {
+  // A suggestion whose ticker is already live would open the page on a greyed-out button: draw again a few times.
+  const live = new Set(tokens.filter((t) => t.status !== 'dead' && t.status !== 'rugged').map((t) => t.ticker))
+  for (let tries = 0; tries < 20; tries++) {
+    const id = drawIdentity(n)
+    if (!live.has(id.ticker) || tries === 19) return id
+  }
+  return drawIdentity(n)
+}
+
+function drawIdentity(n: Narrative) {
   const noun = pick(NOUNS[n])
   const pre = pick(PREFIXES)
   const ticker = (Math.random() < 0.5 ? noun : pre.slice(0, 2) + noun).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)
@@ -60,6 +70,7 @@ export function CookingView() {
   const lastCookTick = useGame((s) => s.lastCookTick)
   const running = useGame((s) => s.runStatus === 'running')
   const world = useGame((s) => !!s.online?.round.world)
+  const online = useGame((s) => !!s.online)
   const engine = useGame((s) => s.market.engine)
   const speed = useGame(selectSpeed)
   const cook = useGame((s) => s.cook)
@@ -75,7 +86,7 @@ export function CookingView() {
   const [spec, setSpec] = useState<CookSpec>(() => {
     const n = meta ?? 'dogs'
     const chain: Chain = chainFilter === 'all' ? 'sol' : chainFilter
-    return { ...randomIdentity(n), chain, description: '', narrative: n, socials: { x: true, tg: false, web: false }, style: 'fair', marketing: 250, devBuy: CHAINS[chain].quick[1], pad: defaultPad(chain), tax: { buy: 0.03, sell: 0.03 }, bundle: { wallets: 0, perWallet: CHAINS[chain].quick[0], stagger: false } }
+    return { ...randomIdentity(n, tokens), chain, description: '', narrative: n, socials: { x: true, tg: false, web: false }, style: 'fair', marketing: 250, devBuy: CHAINS[chain].quick[1], pad: defaultPad(chain), tax: { buy: 0.03, sell: 0.03 }, bundle: { wallets: 0, perWallet: CHAINS[chain].quick[0], stagger: false } }
   })
   const up = (patch: Partial<CookSpec>) => setSpec((s) => ({ ...s, ...patch }))
   const chainMeta = CHAINS[spec.chain]
@@ -124,7 +135,7 @@ export function CookingView() {
   const devBlocked = devShortUsd > 0 && (!autoSwap || cost > cash + 1e-9)
   const cooldown = Math.max(0, COOK_COOLDOWN_TICKS - (tick - lastCookTick))
   const allow = cookAllowance(world, launches.map((l) => l.launchedTick), tick, secPerTickOf({ engine }))
-  const error = validateCook(spec, tokens)
+  const error = validateCook(spec, tokens, online, world)
   const blocker = !running
     ? 'Start a round to cook'
     : error ?? (allow.blocked ? allow.blocked : cooldown > 0 ? `Kitchen cooling down (${cooldown}s)` : usdCosts > cash + 1e-9 ? `Need ${fmtUsd(usdCosts)} USD` : devBlocked ? `Not enough ${chainMeta.native}` : null)
@@ -158,7 +169,7 @@ export function CookingView() {
     const id = cook(spec)
     if (id) {
       const n = spec.narrative
-      setSpec((s) => ({ ...s, ...randomIdentity(n), description: '', image: undefined, vampOf: undefined }))
+      setSpec((s) => ({ ...s, ...randomIdentity(n, tokens), description: '', image: undefined, vampOf: undefined }))
       setTab('launches') // see it go live
     }
   }
@@ -221,7 +232,7 @@ export function CookingView() {
           <div className="space-y-3">
             {/* ① Coin */}
             <Step n={1} title="Your coin" hint="Name, ticker, picture" right={
-              <button onClick={() => up(randomIdentity(spec.narrative))} className="flex items-center gap-1 rounded border border-line2 px-2 py-0.5 text-[11px] text-muted hover:border-accent/50 hover:text-accent">
+              <button onClick={() => up(randomIdentity(spec.narrative, tokens))} className="flex items-center gap-1 rounded border border-line2 px-2 py-0.5 text-[11px] text-muted hover:border-accent/50 hover:text-accent">
                 <Dices size={12} /> Randomize
               </button>
             }>

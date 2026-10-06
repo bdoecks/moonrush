@@ -4,6 +4,15 @@ import { SPEED_REF_USD } from '../data/tradeSettings'
 import type { Chain, MarketState, Portfolio, Position, Token, Trade, TradeSetting } from '../types'
 import { applyPlayerTrade, quoteBuy, quoteSell } from './marketEngine'
 
+// A trade record keeps a copy of the coin's picture so your history can still show it after the coin is gone. That
+// suits a browser. On the server every wallet's trades are kept in memory and saved, and a picture can be tens of KB:
+// 300 small trades in one coin made the World's save 60 MB. The server turns the copies off; the game puts the
+// picture back on the trades it shows (net/client.ts).
+let tradeImages = true
+export function setTradeImages(on: boolean) {
+  tradeImages = on
+}
+
 export const FEE_RATE = 0.01 // fallback fee when a token has no launchpad
 export const MIN_TRADE = 1
 
@@ -239,7 +248,7 @@ export function executeBuy(p: Portfolio, m: MarketState, tokenId: string, usd: n
     realized: prev?.realized ?? 0,
   }
   const trade: Trade = {
-    id: nextId, tick: m.tick, time: m.time, tokenId, ticker: t.ticker, emoji: t.emoji, hue: t.hue, image: t.image,
+    id: nextId, tick: m.tick, time: m.time, tokenId, ticker: t.ticker, emoji: t.emoji, hue: t.hue, ...(tradeImages ? { image: t.image } : {}),
     side: 'buy', price: q.avgPrice, qty: q.qty, value: usd, fee: q.fee, slippage: q.slippage, status: 'FILLED',
     chain, native: needed + gasNative,
     ...(f ? { gas: gasUsd, lag: f.lag, mev: f.sandwiched ? (usd * f.mev) / (1 + extra) : 0 } : {}),
@@ -289,7 +298,7 @@ export function executeSell(p: Portfolio, m: MarketState, tokenId: string, qty: 
   else positions[tokenId] = { ...pos, qty: remaining, costBasis: pos.costBasis - costPart, realized: pos.realized + q.pnl }
 
   const trade: Trade = {
-    id: nextId, tick: m.tick, time: m.time, tokenId, ticker: t.ticker, emoji: t.emoji, hue: t.hue, image: t.image,
+    id: nextId, tick: m.tick, time: m.time, tokenId, ticker: t.ticker, emoji: t.emoji, hue: t.hue, ...(tradeImages ? { image: t.image } : {}),
     side: 'sell', price: q.avgPrice, qty, value: q.gross, fee: q.fee, slippage: q.slippage,
     pnl: q.pnl, pnlPct: q.pnlPct, holdTicks: m.tick - pos.openedAt, status: t.status === 'rugged' ? 'RUGGED' : 'FILLED',
     chain, native: nativeOut,
