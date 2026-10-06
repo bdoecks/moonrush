@@ -27,7 +27,7 @@ import { airdropFeePerWallet, BOT_RATES, botTickCost, BUNDLE_WALLET_FEE, flagBun
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
-import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, type BoardList, type BoardMsg, type BoardRow, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
+import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, type BoardList, type BoardMsg, type BoardRow, type PlayerCard, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
@@ -58,6 +58,8 @@ function ownCoinEvent(kind: unknown, text: string, t: Token, name: string): { ki
 const WORLD_TRADES_KEPT = 300 // World wallets live forever: keep their recent trade history only
 const BOT_TRADES_KEPT = 20 // bots: nobody reads their own wallet's history (their public wallet shows their trades), and 100 × 300 trades is most of the save
 const WORLD_DEAD_COIN_SEC = 3600 // World: dead player-cooked coins leave the market after an hour
+const CARD_EVERY_MS = 150 // a player's card is built at most this often per asker…
+const CARD_ROWS = 40 // …and carries at most this many bags and trades
 const WORLD_FADE_AFTER_SEC = 1800 // World: a graduated coin can fade out once it's been on the DEX for 30 min…
 const WORLD_FADE_MCAP = 5_000 // …and has sunk below this market cap
 const WORLD_MAX_OLD_GRADS = 60 // at most this many older graduated coins stay alive (the biggest ones)
@@ -85,6 +87,7 @@ interface Member {
   protect: string[]
   lastPostTick?: number
   addrs?: string[] // their wallet addresses (private: only used to route transfers sent to an address)
+  cardAt?: number // real time they last asked for somebody's card (not saved)
   inbox?: TransferMsg[] // transfers that arrived while they were offline
   // Phase 2: the server's copy of this player's wallets in the round (the judge), and the wallet messages it has handled.
   wallet?: Portfolio
@@ -379,7 +382,7 @@ export class Room {
   handle(playerId: string, msg: ClientMsg) {
     const me = this.members.get(playerId)
     if (!me) return
-    if (me.info.spectator && msg.t !== 'candles' && msg.t !== 'board') return // watching only
+    if (me.info.spectator && msg.t !== 'candles' && msg.t !== 'board' && msg.t !== 'card') return // watching only
     switch (msg.t) {
       case 'start':
         if (this.world) return this.sendTo(playerId, { t: 'error', message: 'The World never stops: no new rounds here' })
@@ -441,6 +444,8 @@ export class Room {
       }
       case 'board':
         return this.sendBoard(me, msg.list)
+      case 'card':
+        return this.sendCard(me, msg.id)
       case 'candles':
         return this.sendTo(playerId, { t: 'candles', tokenId: msg.tokenId, candles: candleStore.get(msg.tokenId) ?? null })
       case 'event': {
@@ -1864,6 +1869,40 @@ export class Room {
       ...(mine ? { me: { row: round(mine) as BoardRow, rank: ranked.indexOf(mine) + 1, restartAt: next > Date.now() ? next : null } } : {}),
     }
     this.sendTo(me.info.id, msg)
+  }
+
+  /**
+   * One player's public card, for anyone in the World who asks (a watching guest too): how they stand, and what could
+   * be read off the chain, which is their MAIN wallet's bags and latest trades. Side wallets stay hidden, as on the
+   * tape. It is built from the wallet the server holds, not from what the player's game reports, so it works for a
+   * player who is off line and a modified game can't dress it up.
+   */
+  private sendCard(me: Member, id: unknown) {
+    if (!this.world || typeof id !== 'string' || id.length > 64) return
+    const now = Date.now()
+    if (now - (me.cardAt ?? 0) < CARD_EVERY_MS) return // a held-down key must not turn into work (the game asks again)
+    me.cardAt = now
+    const m = this.members.get(id)
+    if (!m || m.info.spectator || !m.wallet) return this.sendTo(me.info.id, { t: 'card', id, card: null })
+    const byId = new Map(this.market.tokens.map((t) => [t.id, t]))
+    const rows = this.boardRows()
+    const row = rows.find((r) => r.id === id) // (a bot has none: it is on no board)
+    const equity = row?.equity ?? valuePortfolio(m.wallet, byId, this.market).equity
+    const main = m.wallet.accounts?.[0]
+    const mainId = main?.id ?? 'w-main'
+    const worth = (h: { tokenId: string; qty: number }) => h.qty * (byId.get(h.tokenId)?.price ?? 0)
+    const holdings = Object.values(main?.positions ?? m.wallet.positions).map((p) => ({ tokenId: p.tokenId, qty: p.qty, cost: p.costBasis, openedAt: p.openedAt })).sort((a, b) => worth(b) - worth(a)).slice(0, CARD_ROWS)
+    const sells = m.wallet.trades.filter((t) => t.side === 'sell')
+    const card: PlayerCard = {
+      id, name: m.info.name, avatar: m.info.avatar, level: m.info.level, online: m.info.online, ...(m.info.verified ? { verified: true } : {}), ...(m.info.bot ? { bot: true } : {}),
+      equity, pnl: row?.pnl ?? equity - m.wallet.startBalance + (m.pnlCarry ?? 0), season: row?.season ?? 0, day: row?.day ?? 0,
+      ...(row ? { rank: [...rows].sort((a, b) => b.equity - a.equity).indexOf(row) + 1, ranked: rows.length } : {}),
+      trades: m.wallet.trades.length, sells: sells.length, wins: sells.filter((t) => (t.pnl ?? 0) > 0).length,
+      holdings,
+      recent: m.wallet.trades.filter((t) => (t.walletId ?? mainId) === mainId).slice(0, CARD_ROWS).map((t) => ({ id: t.id, time: t.time, tokenId: t.tokenId, ticker: t.ticker, emoji: t.emoji, hue: t.hue, side: t.side, usd: t.value, ...(t.pnl !== undefined ? { pnl: t.pnl } : {}) })),
+      ...(row?.trophies ? { trophies: row.trophies } : {}), ...(row?.dev ? { dev: row.dev } : {}), restarts: row?.restarts ?? m.restarts ?? m.brain?.busts ?? 0,
+    }
+    this.sendTo(me.info.id, { t: 'card', id, card: round(card) as PlayerCard })
   }
 
   /** Broke in the World: wipe the wallet and start over small. Only when nearly out, and once a day. */

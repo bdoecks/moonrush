@@ -8,6 +8,7 @@ import { useValuation } from '../hooks/useDerived'
 import { fmtCountdown, seasonEnds } from '../game/season'
 import { dayEndsAt } from '../game/worldSeason'
 import { useGame } from '../game/store'
+import { useOpenPlayer } from './PlayerCard'
 import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, type BoardList, type BoardRow, type HallEntry } from '../net/protocol'
 import { useWorldBoard } from '../net/worldBoard'
 import { fmtCompact, fmtUsd, toneClass } from '../utils/format'
@@ -155,11 +156,14 @@ function Who({ r, you }: { r: BoardRow; you: boolean }) {
 }
 
 function Line({ r, rank, you, list }: { r: BoardRow; rank: number; you: boolean; list: BoardList }) {
+  // A row opens that player's card (your own row: your Portfolio). Also for players who are off line.
+  const open = useOpenPlayer()
+  const row = { onClick: open ? () => open(r.id) : undefined, title: open ? (you ? 'Open your Portfolio' : `Open ${r.name}'s card`) : undefined }
   const rankCell = <td className="num px-3 py-2 font-bold">{MEDAL[rank - 1] ?? `#${rank}`}</td>
   if (list === 'dev') {
     const d = r.dev
     return (
-      <tr className={clsx('border-t border-line/60', you && 'bg-accent/5')}>
+      <tr {...row} className={clsx('border-t border-line/60', you && 'bg-accent/5', open && 'cursor-pointer hover:bg-panel2')}>
         {rankCell}
         <td className="px-2 py-2"><Who r={r} you={you} /></td>
         <td className="num px-2 py-2 text-right font-bold text-up">{fmtUsd(d?.season.fees ?? 0, 0)}</td>
@@ -172,7 +176,7 @@ function Line({ r, rank, you, list }: { r: BoardRow; rank: number; you: boolean;
   }
   const v = value(list, r)
   return (
-    <tr className={clsx('border-t border-line/60', you && 'bg-accent/5')}>
+    <tr {...row} className={clsx('border-t border-line/60', you && 'bg-accent/5', open && 'cursor-pointer hover:bg-panel2')}>
       {rankCell}
       <td className="px-2 py-2"><Who r={r} you={you} /></td>
       <td className={clsx('num px-2 py-2 text-right font-bold', list === 'worth' ? 'text-ink' : toneClass(v))}>{list === 'worth' ? fmtUsd(v, 0) : signed(v)}</td>

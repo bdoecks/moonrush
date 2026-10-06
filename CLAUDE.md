@@ -181,6 +181,12 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
      make every player’s browser call a stranger’s computer). The rules the form can know are shared in
      `src/game/textRules.ts`; a launch the server still refuses is taken back in the game (`onWallet`). The `event`
      message is rewritten in the server’s own words (`ownCoinEvent`).
+   - **A player's public card** (`{ t: 'card', id }` → `sendCard` in `server/room.ts`, shown by
+     `components/PlayerCard.tsx`; every player name in the World opens it through `useOpenPlayer`): net worth and
+     profit as on the boards, plus the MAIN wallet's bags and latest trades, the way anybody could read them off a
+     chain. Side wallets are never on it (they trade under a bare address). It is built from the wallet the server
+     holds, not from the `status` a game reports, so it is there for players who are off line and can't be dressed
+     up; a watching guest may ask too. Keep it that way: nothing private (no side wallets, no account details).
    Text is cleaned where it enters (`server/index.ts`): half an emoji or a NUL anywhere in a room makes the database
    refuse the save, so `saveSafe` in `server/persist.ts` is the last net. Cut player text with `cut()`, not `slice()`.
    Trade records on the server carry no copy of the coin’s picture (`setTradeImages`), and a picture is sent once.

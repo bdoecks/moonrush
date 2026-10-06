@@ -13,6 +13,7 @@ import { newTrades } from './daily'
 import { rollEvents } from './eventEngine'
 import { createRivals, tickRivals } from './leaderboardEngine'
 import { freshSeason, isRanked, placementPoints, seasonNumber, tierFor, type SeasonState } from './season'
+import { usePlayerCard } from '../net/playerCard'
 import { candleStore, COOK_FEE, cookAllowance, cookToken, COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, SUPPLY, tickMarket, walletName } from './marketEngine'
 import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
@@ -330,6 +331,8 @@ export interface GameState {
   convertAssets: (from: Asset, to: Asset, amount: number, fromWallet: string, toWallet: string) => boolean
   /** World: ask the server for the leaderboards. */
   requestBoard: (list?: import('../net/protocol').BoardList) => void
+  /** World: open a player's public card (their standing and main wallet), or close it with null. Asks the server each time, so it also refreshes. */
+  openCard: (playerId: string | null) => void
   /** World: you're broke; ask the server for a fresh start (it checks you really are, and the once-a-day limit). */
   bankruptRestart: () => void
   // Multi-wallet (GMGN-style)
@@ -1729,6 +1732,11 @@ export const useGame = create<GameState>()((set, get) => {
     },
     requestBoard: (list) => {
       if (get().online?.round.world) netHooks.send?.({ t: 'board', ...(list ? { list } : {}) })
+    },
+    openCard: (playerId) => {
+      if (!playerId || !get().online?.round.world) return usePlayerCard.setState({ id: null, card: undefined })
+      if (usePlayerCard.getState().id !== playerId) usePlayerCard.setState({ id: playerId, card: undefined })
+      netHooks.send?.({ t: 'card', id: playerId })
     },
     bankruptRestart: () => {
       const s = get()

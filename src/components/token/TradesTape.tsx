@@ -9,6 +9,7 @@ import { CHAINS, fmtNative } from '../../data/chains'
 import { LAUNCHPADS } from '../../data/launchpads'
 import { bookOf, devHistory, devPctOf, displayAddress, gasUsd, rowOf, top10Of, walletMeta, type Holder, type HolderRow, type HolderTag, type LedgerTrade } from '../../game/ledger'
 import { SUPPLY } from '../../game/marketEngine'
+import { useOpenPlayer } from '../PlayerCard'
 import { useGame } from '../../game/store'
 import { nativePrice } from '../../game/tradingEngine'
 import type { Portfolio, Token } from '../../types'
@@ -162,6 +163,7 @@ function WatchButton({ pid, addr, name }: { pid?: string; addr?: string; name: s
 
 function WalletCell({ h, chain, onFilter, walletCount, player }: { h: Pick<Holder, 'wallet' | 'tags' | 'walletId'>; chain: Token['chain']; onFilter?: (w: string) => void; walletCount?: number; player?: { pid?: string; addr?: string } }) {
   const openWallet = useGame((s) => s.openWallet)
+  const openPlayer = useOpenPlayer() // the World: a real player's name opens their card
   const tags = h.tags.filter((t) => TAG[t])
   const main = tags[0] ? TAG[tags[0]] : undefined
   const name = displayAddress(h.wallet, chain)
@@ -170,6 +172,8 @@ function WalletCell({ h, chain, onFilter, walletCount, player }: { h: Pick<Holde
       {tags.slice(0, 3).map((t) => <span key={t} title={TAG[t].label} className="text-[11px]">{TAG[t].icon}</span>)}
       {h.walletId ? (
         <button onClick={() => openWallet(h.walletId!)} className={clsx('num underline decoration-dotted underline-offset-2 hover:text-accent', main?.cls ?? 'text-ink')} title="Open wallet profile (copy trade)">{name}</button>
+      ) : openPlayer && player?.pid && h.wallet !== 'YOU' ? (
+        <button onClick={() => openPlayer(player.pid!)} className={clsx('num underline decoration-dotted underline-offset-2 hover:text-accent', main?.cls ?? 'text-ink')} title="Open this player's card">{name}</button>
       ) : (
         <span className={clsx('num', main?.cls ?? (h.wallet === 'YOU' ? 'text-accent font-semibold' : 'text-muted'))}>{name}</span>
       )}

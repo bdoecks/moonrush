@@ -147,6 +147,57 @@ ok(b.market.tokens.length < 400, `after 3000 more ticks: ${b.market.tokens.lengt
   ok(!!full.blocked && full.used === 10 && /next one in \d+ min/.test(full.blocked), `World: 10 in the last hour blocks the 11th ("${full.blocked}")`)
   ok(cookAllowance(true, ten, 1000 + 3600, 1).blocked === null, 'World: the oldest launch ages out after an hour')
 }
+// A player's public card: anybody in the World can ask for it, it shows the MAIN wallet only, and it is the server's
+// own count (so it is there for a player who is off line, and a modified game can't dress it up).
+{
+  type Card = NonNullable<Extract<ServerMsg, { t: 'card' }>['card']>
+  const rm = back as unknown as { members: Map<string, { cardAt?: number; ws: unknown; wallet: { accounts: { id: string; positions: Record<string, { tokenId: string; qty: number }> }[]; trades: { id: number; walletId?: string; side: string }[]; positions: Record<string, unknown> } }> }
+  const ask = (who: string, box: ServerMsg[], id: string): Card | null | undefined => {
+    box.length = 0
+    rm.members.get(who)!.cardAt = 0 // (the test asks faster than a person can click)
+    b.handle(who, { t: 'card', id })
+    const m = box.find((x) => x.t === 'card') as Extract<ServerMsg, { t: 'card' }> | undefined
+    return m ? m.card : undefined
+  }
+  // Second buys two coins with the main wallet, and has a side wallet with a bag and a trade of its own.
+  const live = (b.market.tokens as unknown as { id: string; status: string; chain: string }[]).filter((t) => t.status === 'graduated' && t.chain === 'sol').slice(0, 3) // (the test wallet only holds SOL)
+  b.handle('u-ccc', { t: 'op', seq: 1, op: { kind: 'swap', from: 'usd', to: 'sol', amount: 800, walletId: 'w-main' } })
+  b.handle('u-ccc', { t: 'order', seq: 2, ref: 2, order: { side: 'buy', tokenId: live[0].id, walletIds: ['w-main'], usdEach: 60 } })
+  b.handle('u-ccc', { t: 'order', seq: 3, ref: 3, order: { side: 'buy', tokenId: live[1].id, walletIds: ['w-main'], usdEach: 40 } })
+  const second = rm.members.get('u-ccc')!
+  const mainBags = Object.keys(second.wallet.accounts[0].positions).sort()
+  const mainTrades = second.wallet.trades.length // (all of them were made with the main wallet)
+  second.wallet = {
+    ...second.wallet,
+    accounts: [...second.wallet.accounts, { id: 'w-side', name: 'Side', balances: { sol: 0, bsc: 0, hood: 0 }, positions: { [live[2].id]: { tokenId: live[2].id, qty: 777, costBasis: 5, avgEntry: 0.01, openedAt: 1, realized: 0 } } }],
+    trades: [{ ...second.wallet.trades[0], id: 999_999, walletId: 'w-side', tokenId: live[2].id }, ...second.wallet.trades],
+  } as never
+  const c1 = ask('u-aaa', back2, 'u-ccc')
+  ok(!!c1 && c1.name === 'Second' && c1.online && !c1.bot && c1.equity > 0 && c1.rank !== undefined && c1.ranked === 2, `a player's card: ${c1?.name}, net worth $${c1?.equity.toFixed(0)}, #${c1?.rank} of ${c1?.ranked}`)
+  ok(!!c1 && mainBags.length >= 1 && JSON.stringify(c1.holdings.map((h) => h.tokenId).sort()) === JSON.stringify(mainBags) && c1.holdings.every((h) => h.qty !== 777) && c1.recent.length === mainTrades && c1.recent.every((t) => t.id !== 999_999),
+    `it shows the main wallet only: ${c1?.holdings.length} bags and ${c1?.recent.length} trades (the side wallet's bag and trade are not on it)`)
+  // What the player's own game reports about its bags doesn't reach the card.
+  b.handle('u-ccc', { t: 'status', equity: 9e9, startEquity: 1, trades: 5000, wins: 5000, level: 99, finished: false, protect: [], holdings: [{ tokenId: live[2].id, qty: 123456, cost: 1, openedAt: 0 }] })
+  const c2 = ask('u-aaa', back2, 'u-ccc')
+  ok(!!c2 && c2.equity < 1e6 && c2.holdings.every((h) => h.qty !== 123456) && c2.holdings.length === mainBags.length && c2.trades < 100, 'the card is the server\'s own count: a game that reports made-up bags and a made-up net worth changes nothing on it')
+  // Off line: the card is still there.
+  back.leave('u-ccc', second.ws as never)
+  const c3 = ask('u-aaa', back2, 'u-ccc')
+  ok(!!c3 && !c3.online && c3.holdings.length === mainBags.length && c3.recent.length === mainTrades, 'a player who is off line still has a card, with their bags and trades')
+  // A watching guest may look; a bot's card says what it is and has no rank; nobody gets a card for an id that isn't here.
+  const guest: ServerMsg[] = []
+  back.join(sock(guest), { t: 'hello', name: 'Looker', avatar: '👀', level: 1, playerId: 'g-look', verified: false })
+  const c4 = ask('g-look', guest, 'u-ccc')
+  const c5 = ask('u-aaa', back2, BOT_ROSTER[0].id)
+  ok(!!c4 && c4.name === 'Second' && !!c5 && c5.bot === true && c5.rank === undefined && c5.name === BOT_ROSTER[0].name, 'a watching guest can open a card; a bot\'s card says it is a simulated trader and has no rank')
+  ok(ask('u-aaa', back2, 'u-nobody') === null && ask('u-aaa', back2, 'g-look') === null, 'no card for somebody who is not here, or for a watching guest (no wallet)')
+  // Asked twice in a row: one answer (a held-down key must not turn into work).
+  back2.length = 0
+  rm.members.get('u-aaa')!.cardAt = 0
+  b.handle('u-aaa', { t: 'card', id: 'u-ccc' })
+  b.handle('u-aaa', { t: 'card', id: 'u-ccc' })
+  ok(back2.filter((x) => x.t === 'card').length === 1, 'asking again at once gets one answer, not two')
+}
 // A World saved while bot names carried a robot: it comes back with plain names everywhere a player can see one.
 {
   const mark = ` ${String.fromCodePoint(0x1f916)}`

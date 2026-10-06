@@ -3,6 +3,7 @@ import { Bell, BellOff, ChevronDown, ChevronUp, Crown, Send, Timer, X } from 'lu
 import { SendFundsModal } from '../components/SendFunds'
 import { GlobalBoard } from '../components/GlobalBoard'
 import { WorldBoard } from '../components/WorldBoard'
+import { useOpenPlayer } from '../components/PlayerCard'
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { EmptyState, TokenIcon } from '../components/ui'
 import { ChainBadge } from '../components/chain'
@@ -57,8 +58,10 @@ export function LeaderboardView() {
   const roomCode = useGame((s) => s.online?.code)
   const setView = useGame((s) => s.setView)
   useEffect(() => checkSeason(), [checkSeason])
-  // Click a trader to open their wallet profile; clicking yourself opens your Portfolio.
-  const open = (r: Row) => (r.isYou ? setView('portfolio') : setProfileId(r.id))
+  // Click a trader to open their wallet profile; clicking yourself opens your Portfolio. In the World a player's card
+  // comes from the server (the same one every other name opens).
+  const openPlayer = useOpenPlayer()
+  const open = (r: Row) => (r.isYou ? setView('portfolio') : openPlayer && r.real ? openPlayer(r.id) : setProfileId(r.id))
 
   const points = season?.id === seasonNumber() ? season.points : 0
   const myTier = tierFor(points)

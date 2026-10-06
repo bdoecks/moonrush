@@ -19,6 +19,7 @@ import { giveLocal } from '../game/gifts'
 import { diffWallet, layoutOf, mergeWalletState } from '../game/orders'
 import { cashbackOf } from '../game/rewardsEngine'
 import { useWorldBoard } from './worldBoard'
+import { usePlayerCard } from './playerCard'
 import { MP_PATH, WORLD_CODE, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TransferMsg } from './protocol'
 
 const STATUS_MS = 2000
@@ -401,6 +402,10 @@ function onMessage(msg: ServerMsg) {
     }
     case 'board':
       return useWorldBoard.setState({ board: msg })
+    case 'card':
+      // (Only the card that is open: an answer to a name clicked before this one is dropped.)
+      if (usePlayerCard.getState().id === msg.id) usePlayerCard.setState({ card: msg.card })
+      return
     case 'notice':
       return st.notify({ title: 'ANNOUNCEMENT', body: msg.text, tone: 'info', icon: '📢' }, 'alert')
     case 'kicked':

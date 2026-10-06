@@ -28,6 +28,7 @@ import { AdminView } from './pages/AdminView'
 import { NoticeBanner } from './components/NoticeBanner'
 import { WatchBanner } from './components/Multiplayer'
 import { BrokeBanner } from './components/WorldBoard'
+import { PlayerCardDrawer } from './components/PlayerCard'
 import { AdminFloat } from './components/AdminFloat'
 import { watchFlags } from './game/flags'
 import { DiscoverView } from './pages/DiscoverView'
@@ -149,6 +150,7 @@ export default function App() {
       <MobileTradeSheet />
       <Toasts />
       <Modals />
+      <PlayerCardDrawer />
       <SwapModal />
       <WalletManager />
       <PnlCard />

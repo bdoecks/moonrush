@@ -2,6 +2,7 @@ import clsx from 'clsx'
 import { Copy, Crown, EyeOff, Flag, Globe, LogOut, Send, Users, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { lengthTicks, MODES, ROUND_LENGTHS, type RoundLength } from '../game/progression'
+import { useOpenPlayer } from './PlayerCard'
 import { useGame } from '../game/store'
 import { joinRoom, joinWorld, leaveRoom, mpProfile, reportChat, sendChat, setMpProfile, startRound } from '../net/client'
 import { load, save } from '../utils/storage'
@@ -400,6 +401,7 @@ function WorldPanel() {
   const on = online.players.filter((p) => p.online)
   // People first, richest on top; then the simulated traders who are around (never above a real player).
   const ranked = [...on].sort((a, b) => Number(!!a.bot) - Number(!!b.bot) || b.equity - a.equity)
+  const open = useOpenPlayer()
   return (
     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_280px]">
       <div className="space-y-3">
@@ -419,7 +421,7 @@ function WorldPanel() {
           <div className="border-b border-line px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-muted">Online now · {on.length}</div>
           {ranked.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-dim">Nobody else is trading right now.</div>}
           {ranked.map((p) => (
-            <div key={p.id} className={clsx('flex items-center gap-2 border-b border-line/50 px-3 py-2 last:border-b-0', p.id === online.you && 'bg-accent/5')}>
+            <button key={p.id} type="button" onClick={() => open?.(p.id)} title={p.id === online.you ? 'Open your Portfolio' : `Open ${p.name}'s ${p.bot ? 'wallet page' : 'card'}`} className={clsx('flex w-full items-center gap-2 border-b border-line/50 px-3 py-2 text-left last:border-b-0 hover:bg-panel2', p.id === online.you && 'bg-accent/5')}>
               <span className="grid size-8 place-items-center rounded-md bg-raise text-[17px]">{p.avatar}</span>
               <span className="min-w-0">
                 <span className="flex items-center gap-1 text-[13px] font-semibold">
@@ -435,7 +437,7 @@ function WorldPanel() {
                   <span className={clsx('num block text-[10px]', toneClass(p.equity - p.startEquity))}>{fmtPct(p.equity / p.startEquity - 1, 1)}</span>
                 </span>
               )}
-            </div>
+            </button>
           ))}
         </div>
       </div>

@@ -94,6 +94,47 @@ export interface RoomPlayer {
   bot?: boolean // a World bot: trades by the same rules, with its own wallet. Its name carries no label: this flag is how the game knows (no rankings, the note on its wallet page)
 }
 
+/**
+ * One player's public card in the World: how they stand, and what anybody could read off the chain, which is their
+ * MAIN wallet's bags and latest trades (side wallets stay hidden, as everywhere else). The server builds it from the
+ * wallet it holds, so it is the same for a player who is off line and can't be dressed up by a modified game.
+ */
+export interface PlayerCard {
+  id: string
+  name: string
+  avatar: string
+  level: number
+  online: boolean
+  verified?: boolean
+  bot?: boolean // a World bot (a simulated trader): never ranked
+  equity: number // net worth now (all their wallets, as on the boards)
+  pnl: number // all-time profit
+  season: number // profit this season
+  day: number // profit today (UTC)
+  rank?: number // place on the net worth board…
+  ranked?: number // …out of this many real players
+  trades: number // trades on record (the server keeps a player's latest few hundred)
+  sells: number // …of which sells…
+  wins: number // …closed in profit
+  holdings: MainHolding[] // the main wallet's bags, biggest first
+  recent: CardTrade[] // the main wallet's latest trades, newest first
+  trophies?: string[]
+  dev?: DevStats
+  restarts: number
+}
+/** One trade on a player's card. */
+export interface CardTrade {
+  id: number
+  time: number
+  tokenId: string
+  ticker: string
+  emoji: string
+  hue: number
+  side: 'buy' | 'sell'
+  usd: number
+  pnl?: number // sells: what it made or lost
+}
+
 /** A coin in a player's main wallet, as everyone in the room can see it on-chain. */
 export interface MainHolding {
   tokenId: string
@@ -165,6 +206,7 @@ export type ClientMsg =
   | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[]; addrs?: string[]; cbVolume?: number; cbAuto?: 'off' | 'coin' | 'usdc' }
   | { t: 'candles'; tokenId: string }
   | { t: 'board'; list?: BoardList } // World: ask for one leaderboard
+  | { t: 'card'; id: string } // World: ask for one player's public card (works for players who are off line)
   // Report a chat message to the admins (`from` + `time` + `text` say which one).
   | { t: 'report'; from: string; time: number; text: string }
   // Wallets (rooms). `seq` numbers every wallet message so the game knows which server answers are up to date.
@@ -207,6 +249,7 @@ export type ServerMsg =
   | { t: 'round'; round: RoundInfo; market?: NetMarket; wallets?: SimWallet[] }
   | TickMsg
   | { t: 'candles'; tokenId: string; candles: Record<Timeframe, Candle[]> | null }
+  | { t: 'card'; id: string; card: PlayerCard | null } // null: nobody with a wallet here by that id
   | { t: 'chat'; from: string; name: string; avatar: string; text: string; time: number }
   | { t: 'error'; message: string }
   // Admin: a message for everyone, being removed from the room, or money added to your round.
