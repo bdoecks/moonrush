@@ -252,6 +252,24 @@ function moveFunds(asset: SendAsset, amount: number, walletId: string, usd: numb
  * Your wallets as the server has them. The server is the judge: its fills replace the ones shown instantly, and its
  * balances win, but only once it has handled every wallet message we sent (otherwise the next answer will).
  */
+/**
+ * Take back a launch the server did not accept: the coin, its row in My launches, the launch it used up, its events,
+ * queued side buys and watchlist entry. The kitchen cooldown stays, so a refused name cannot be tried over and over.
+ */
+function undoLaunch(cookId: string, why: string) {
+  const s = useGame.getState()
+  quietly(() => s.patchState({
+    launches: s.launches.filter((r) => r.tokenId !== cookId),
+    runStats: { ...s.runStats, cooked: Math.max(0, (s.runStats.cooked ?? 0) - 1) },
+    market: { ...s.market, tokens: s.market.tokens.filter((t) => t.id !== cookId) },
+    events: s.events.filter((e) => e.tokenId !== cookId),
+    sideQueue: s.sideQueue.filter((q) => q.tokenId !== cookId),
+    watchlist: s.watchlist.filter((id) => id !== cookId),
+    portfolio: { ...s.portfolio, trades: s.portfolio.trades.filter((t) => t.tokenId !== cookId) },
+  }))
+  s.notify({ title: 'LAUNCH REFUSED', body: why, tone: 'warn', icon: '🍳' }, 'alert')
+}
+
 function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
   if (import.meta.env.DEV) (window as unknown as { __srvWallet: unknown }).__srvWallet = msg // test copies only: inspect the server's answer
   const s = useGame.getState()
@@ -272,18 +290,7 @@ function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
   const cookId = msg.ref !== undefined ? cooking.get(msg.ref) : undefined
   if (msg.ref !== undefined) cooking.delete(msg.ref)
   const refused = !!cookId && !(cookId in (msg.state.vaults ?? {}))
-  if (refused) {
-    const launches = s.launches.filter((r) => r.tokenId !== cookId)
-    quietly(() => s.patchState({
-      launches, lastCookTick: launches.reduce((a, r) => Math.max(a, r.launchedTick), -999),
-      runStats: { ...s.runStats, cooked: Math.max(0, (s.runStats.cooked ?? 0) - 1) },
-      market: { ...s.market, tokens: s.market.tokens.filter((t) => t.id !== cookId) },
-      events: s.events.filter((e) => e.tokenId !== cookId),
-      sideQueue: s.sideQueue.filter((q) => q.tokenId !== cookId),
-      watchlist: s.watchlist.filter((id) => id !== cookId),
-    }))
-    s.notify({ title: 'LAUNCH REFUSED', body: `${(msg.failures ?? []).join(' · ') || 'The server refused this coin.'} Nothing was charged.`, tone: 'warn', icon: '🍳' }, 'alert')
-  }
+  if (refused && cookId) undoLaunch(cookId, `${(msg.failures ?? []).join(' · ') || 'The server refused this coin.'} Nothing was charged.`)
   if (msg.ref !== undefined) {
     const mine = refused ? [] : p.trades.filter((t) => t.ref === msg.ref)
     // The server lists fills in the order they ran; the trade list is newest first. Labels only the game knows (copy
@@ -291,8 +298,9 @@ function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
     // records carry no copy of it).
     const picture = (id: string) => s.market.tokens.find((t) => t.id === id)?.image
     const fills = [...(msg.fills ?? [])].reverse().map((f, i) => {
-      const image = f.image ?? mine[i]?.image ?? picture(f.tokenId)
-      return { ...f, ...(mine[i]?.via && !f.via ? { via: mine[i].via } : {}), ...(image ? { image } : {}) }
+      const row = mine[i]?.tokenId === f.tokenId ? mine[i] : undefined // (an old row of another coin must never lend its picture)
+      const image = f.image ?? picture(f.tokenId) ?? row?.image
+      return { ...f, ...(row?.via && !f.via ? { via: row.via } : {}), ...(image ? { image } : {}) }
     })
     p = { ...p, trades: [...fills, ...p.trades.filter((t) => t.ref !== msg.ref)] }
     if (mine.length && !(msg.fills ?? []).length) {
@@ -377,8 +385,12 @@ function onMessage(msg: ServerMsg) {
       const mine = { ...freshSocial(), ...(st.profile.social ?? {}) }
       let dF = 0, dRep = 0
       if (msg.joined) {
-        // (Re)joined: nothing changed just now, except the calls that were judged while you were away.
-        for (const r of msg.results ?? []) { dF += r.dFollowers; dRep += r.dRep }
+        // (Re)joined. If this page already had the count (a reconnect), the change since then is what the profile is
+        // still owed, whether or not the messages about it arrived (a line can die without anyone noticing). A fresh
+        // page has nothing to compare with: only the calls judged while you were away.
+        const seen = st.online.social
+        if (seen) { dF = msg.social.followers - seen.followers; dRep = msg.social.rep - seen.rep }
+        else for (const r of msg.results ?? []) { dF += r.dFollowers; dRep += r.dRep }
       } else {
         // Before the room's first message it had just been started from your profile, so that is what it changed from.
         const before = st.online.social ?? mine
@@ -430,6 +442,11 @@ function onWelcome(msg: Extract<ServerMsg, { t: 'welcome' }>) {
   // connection, like the server) so we know which of its answers already include everything we sent.
   seq = 0
   lastLayout = ''
+  // Order numbers start again on a new connection: the numbers on trades already settled are dropped, or a new
+  // order with the same number would replace an old row. A launch whose answer never arrived (the line dropped) is
+  // settled from the market the server just sent: there, or it never happened.
+  if (s.portfolio.trades.some((t) => t.ref !== undefined)) quietly(() => s.patchState({ portfolio: { ...s.portfolio, trades: s.portfolio.trades.map(({ ref: _old, ...t }) => t) } }))
+  for (const id of cooking.values()) if (!msg.market.tokens.some((t) => t.id === id)) undoLaunch(id, 'That launch did not reach the server (the connection dropped). Nothing was charged.')
   cooking.clear()
   netHooks.order = (order) => {
     const n = ++seq

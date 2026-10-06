@@ -2,8 +2,8 @@
 import { Room } from '../server/room'
 import { coinLook, embeddedImage } from '../server/moderation'
 import { saveSafe } from '../server/persist'
-import { whole } from '../src/game/textRules'
-import { cookToken, COOK_FEE } from '../src/game/marketEngine'
+import { hasLink, whole } from '../src/game/textRules'
+import { candleStore, cookToken, COOK_FEE } from '../src/game/marketEngine'
 import { Rng } from '../src/utils/rng'
 import { walletAddress } from '../src/utils/address'
 import type { ServerMsg } from '../src/net/protocol'
@@ -200,6 +200,43 @@ ok(typeof coinLook({ name: 'Trench Pup', ticker: 'TPUP', emoji: '🐶', descript
   ok(embeddedImage(url('jpeg', jpeg(160, 160))) && embeddedImage(url('webp', webpX(160, 160))) && embeddedImage(url('webp', webpLossy(160, 160))) && embeddedImage(GIF), 'pictures the size the game makes (160 × 160) are accepted: JPG, both kinds of WebP, GIF')
   ok(!embeddedImage(url('jpeg', jpeg(20000, 20000))) && !embeddedImage(url('webp', webpX(16000, 16000))) && !embeddedImage(url('webp', webpLossy(16000, 100))), 'the same files claiming to be enormous are refused')
   ok(!embeddedImage(url('jpeg', ascii('GIF89a').concat([1, 0, 1, 0, 0, 0, 0]))) && !embeddedImage(url('gif', ascii('not a picture at all'))) && !embeddedImage(url('webp', [])), 'a file that is not what it says it is, or no picture at all, is refused')
+}
+// Found by the second check of these fixes.
+{
+  // The no-links rule: a bare launchpad name is fine, a link that merely starts with one is a link.
+  const linky = ['https://pump.fun.evil.ai/claim', 'https://pump.fun@evil.ai/claim', 'www.bonk.fun.free-airdrop.site/go', 'claim at stonk.fun-airdrop.live', 'my-pump.fun', 'pump.fun/coin/abc']
+  ok(linky.every((x) => hasLink(x)) && !hasLink('Fair launch on pump.fun, then bonk.fun. Also long.xyz') && !hasLink('no links here'), 'a link that starts with or contains a launchpad name is still a link; the bare names are not')
+  // Names: ordinary words that contain a stem, glued tickers, other alphabets, flags.
+  const fine = [['Snigger', 'SNIG'], ['Fire Retardant', 'FIRE'], ['Mini GG', 'MINIGG'], ['Fagotto', 'BASSOON'], [chr(0x03c1, 0x03b1, 0x03ba, 0x03b9), 'RAKI'], [`${chr(0xd83c, 0xddfa, 0xd83c, 0xddf8)}${chr(0xd83c, 0xddef, 0xd83c, 0xddf5)}`, 'FLAGS']]
+  const refusedFine = fine.filter(([name, ticker]) => typeof coinLook({ name, ticker, emoji: '🐸' }) === 'string').map(([, t]) => t)
+  ok(refusedFine.length === 0, `ordinary names are let through (a laugh, a fire-proofing, a bassoon, a Greek drink, two flags): refused ${refusedFine.join(', ') || 'none'}`)
+  ok(typeof coinLook({ name: 'MyNigga Coin', ticker: 'MNC', emoji: '🐸' }) === 'string' && typeof coinLook({ name: 'Fine', ticker: 'ANIGGER', emoji: '🐸' }) === 'string' && typeof coinLook({ name: `sp${chr(0x0456)}c coin`, ticker: 'SPC', emoji: '🐸' }) === 'string', 'the slurs themselves are still refused, also with one look-alike letter')
+  // The save's safety net costs no more than the text is long (a long run of backslashes took minutes).
+  const t0 = Date.now()
+  saveSafe(JSON.stringify({ a: chr(92).repeat(400_000) }))
+  ok(Date.now() - t0 < 500, `800,000 backslashes in a save are stepped over in ${Date.now() - t0} ms`)
+  // A coin id that belongs to a coin of another room (charts are shared by id), or to a coin that has left the market.
+  for (let i = 0; i < 31; i++) r.tick()
+  const other = new Room('OTHER')
+  const otherId = other.market.tokens[0].id
+  const otherChart = candleStore.get(otherId)
+  const cashI = me().wallet.cash
+  ok(tryCook({ id: otherId, ticker: 'OTHR' }).why.includes('already exists') && candleStore.get(otherId) === otherChart && !!otherChart && me().wallet.cash === cashI, 'a launch under the id of another room’s coin is refused and that coin’s chart is untouched')
+  other.dispose()
+  ok(tryCook({ pad: ['pump'], ticker: 'PADL' }).why.includes('launchpad'), 'a launchpad sent as a list is refused')
+  // The volume bot: only the speeds the game offers.
+  const botsMap = (room as unknown as { bots: Map<string, { rate: number }> }).bots
+  r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, rate: 'x', budget: 1e9 } })
+  const afterBad = botsMap.has(cooked.token.id)
+  r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, budget: 1e9 } })
+  r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, rate: -5000, budget: 50, spent: 0, volume: 0, startedTick: 0 } })
+  const mcap0 = room.market.tokens.find((x) => x.id === cooked.token.id)!.mcap
+  for (let i = 0; i < 5; i++) r.tick()
+  const coinB = room.market.tokens.find((x) => x.id === cooked.token.id)!
+  ok(!afterBad && !botsMap.has(cooked.token.id) && Number.isFinite(coinB.mcap) && Number.isFinite(coinB.liquidity) && coinB.mcap < mcap0 * 3, 'a volume bot with a speed that is not one of the game’s is refused, and the coin’s market stays sane')
+  r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, rate: 2000, budget: 50, spent: 0, volume: 0, startedTick: 0 } })
+  ok(botsMap.get(cooked.token.id)?.rate === 2000, 'an ordinary bot still starts')
+  r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: null })
 }
 // A coin saved with a picture link (before this check) comes back without it, and saved trades lose picture copies.
 const snapL = JSON.parse(JSON.stringify(room.snapshot()))

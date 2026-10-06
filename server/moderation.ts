@@ -12,8 +12,10 @@ const LOOKALIKES: Record<string, string> = {
 }
 const SWAPPED = /[013457@$!\u0430\u0435\u043e\u0440\u0441\u0445\u0443\u0456\u0458\u0455\u04bb\u043a\u043c\u0442\u03b1\u03b5\u03bf\u03b9\u03ba\u03bd\u03c4\u03c5\u03c1]/g
 // Full-width and "fancy" letters become plain ones and accents / stacked marks are dropped first (NFKD), then the
-// swaps above, then long runs of one letter are shortened.
-const normalize = (s: string) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(SWAPPED, (c) => LOOKALIKES[c] ?? c).replace(/(.)\1{2,}/g, '$1$1')
+// swaps above, then long runs of one letter are shortened. The other-alphabet swaps are only made in a word that also
+// has a Latin letter: a word wholly in Greek or Cyrillic is a word, not a disguise (Greek "raki" must not read "paki").
+const SIGNS = /[013457@$!]/g
+const normalize = (s: string) => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[\p{L}\p{N}@$!]+/gu, (w) => w.replace(/[a-z]/.test(w) ? SWAPPED : SIGNS, (c) => LOOKALIKES[c] ?? c)).replace(/(.)\1{2,}/g, '$1$1')
 
 // Slurs and hate terms: masked as *** . Whole words only (with their usual endings), so "raccoon" or "spice" are fine.
 const MASK = [
@@ -24,8 +26,10 @@ const REFUSE = [
   /\bkill\s+(yo)?ur\s?self\b/, /\bkys\b/, /\bi('| a)?m\s+going\s+to\s+(kill|rape|shoot)\s+you\b/, /\brape\s+(you|her|him)\b/, /\bchild\s*porn\b/, /\bcp\s+link/,
 ]
 // Names and tickers are often one run of letters ("MyWordCoin", "AWORD"), where a whole-word test sees nothing. These
-// few stems are never part of an innocent word, so in a name they are looked for inside words too.
-const STEMS = /n+i+g{2,}|f+a+g{2,}|f+a+g+o+t|t+r+a+n{2,}(y|ie)|r+e+t+a+r+d/
+// few stems are looked for inside the words of a name too. Not at the very end of a word ("MiniGG", "SofaGG"), and
+// the real words that contain one are let through by name (to laugh, a fire-proofing, a bassoon, Italian for beech).
+const STEMS = /n+i+g{2,}(?!$)|f+a+g{2,}(?!$)|f+a+g+o+t|t+r+a+n{2,}(y|ie)|r+e+t+a+r+d(?!ant|ation)/
+const INNOCENT = /^(snigger(s|ed|ing)?|knigge|retarder(s)?|retardando|retardio|faggio|faggin|faggeto|faggiano|fagott(o|i)?)$/
 
 export interface Moderated {
   ok: boolean
@@ -78,7 +82,7 @@ export const nameBlocked = (name: unknown) => {
     }
   }
   if (spelled) words.push(spelled)
-  return words.some((w) => STEMS.test(w))
+  return words.some((w) => !INNOCENT.test(w) && STEMS.test(w))
 }
 
 // ─── Coin looks ──────────────────────────────────────────────────────────────

@@ -23,7 +23,7 @@ import { claimGifts } from './persist'
 import { CHAINS } from '../src/data/chains'
 import { LAUNCHPADS } from '../src/data/launchpads'
 import { walletAddress } from '../src/utils/address'
-import { airdropFeePerWallet, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
+import { airdropFeePerWallet, BOT_RATES, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
@@ -51,7 +51,7 @@ function ownCoinEvent(kind: unknown, text: string, t: Token, name: string): { ki
   const pct = (s: string) => Math.min(100, Math.max(0, Math.round(Number(s))))
   let m: RegExpExecArray | null
   if (kind === 'devsell' && (m = /^Dev \(you\) sold (\d{1,3})% of their \$/.exec(text))) return { kind, slot: 98, text: `Dev (${name}) sold ${pct(m[1])}% of their $${t.ticker} bag`, icon: '🧑‍💻', tone: 'down' }
-  if (kind === 'bundle' && t.bundleFlagged && (m = /^Flagged bundle wallets are dumping \$\S+ \((\d{1,3})% of the bundle sold\)$/.exec(text))) return { kind, slot: 95, text: `Flagged bundle wallets are dumping $${t.ticker} (${pct(m[1])}% of the bundle sold)`, icon: '📦', tone: 'down' }
+  if (kind === 'bundle' && (m = /^Flagged bundle wallets are dumping \$\S+ \((\d{1,3})% of the bundle sold\)$/.exec(text))) return { kind, slot: 95, text: `Flagged bundle wallets are dumping $${t.ticker} (${pct(m[1])}% of the bundle sold)`, icon: '📦', tone: 'down' }
   if (kind === 'airdrop' && (m = /^Dev airdropped (\d{1,3}(?:\.\d{1,2})?)% of supply of \$\S+ to (\d{1,3}) (fresh wallets|holders)$/.exec(text))) return { kind, slot: 93, text: `Dev airdropped ${Math.min(100, Number(m[1])).toFixed(2)}% of supply of $${t.ticker} to ${Math.min(999, Number(m[2]))} ${m[3]}`, icon: '🪂', tone: 'info' }
   return null
 }
@@ -189,7 +189,11 @@ export class Room {
   /** The public World: one round that never ends, never pauses, and keeps everyone's wallet. */
   readonly world: boolean
 
+  /** Every room on this server (charts are kept in one store for all of them, by coin id: see cook). */
+  private static all = new Set<Room>()
+
   constructor(code: string, world = false) {
+    Room.all.add(this)
     this.code = code
     this.world = world
     this.newMarket(world
@@ -221,6 +225,7 @@ export class Room {
   static onTick: ((room: Room, ms: number, error?: unknown) => void) | null = null
 
   dispose() {
+    Room.all.delete(this)
     clearInterval(this.timer)
     for (const t of this.market?.tokens ?? []) candleStore.delete(t.id)
   }
@@ -398,7 +403,11 @@ export class Room {
         if (!t || t.creatorId !== playerId) return
         // What it has spent is counted here (the bot is paid on the server), not taken from the game.
         const was = this.bots.get(msg.tokenId)
-        if (msg.bot?.on) this.bots.set(msg.tokenId, { ...msg.bot, spent: was?.spent ?? Math.max(0, Number(msg.bot.spent) || 0), volume: was?.volume ?? Math.max(0, Number(msg.bot.volume) || 0) })
+        // Only the fields a bot has are kept, each one checked, and the speed must be one the game offers. A speed that
+        // was not a number broke the coin for everyone (a $50M market cap in seconds, a NaN wallet for sellers).
+        const b = msg.bot as Partial<VolumeBot> | null | undefined
+        const amount = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(1e9, Math.max(0, n)) : 0)
+        if (b?.on && typeof b.rate === 'number' && BOT_RATES.includes(b.rate)) this.bots.set(msg.tokenId, { on: true, rate: b.rate, budget: amount(b.budget), spent: amount(was?.spent ?? b.spent), volume: amount(was?.volume ?? b.volume), startedTick: amount(b.startedTick) })
         else this.bots.delete(msg.tokenId)
         return
       }
@@ -414,10 +423,10 @@ export class Room {
           ...me.info, ...score, level: Math.min(999, Math.max(1, Math.round(num(msg.level)) || 1)), finished: !!msg.finished,
           ...(Number.isFinite(msg.seasonPoints) ? { seasonPoints: Math.max(0, Math.round(msg.seasonPoints!)) } : {}),
           ...(Array.isArray(msg.holdings)
-            ? { holdings: msg.holdings.slice(0, 30).filter((h) => h && typeof h.tokenId === 'string' && h.qty > 0).map((h) => ({ tokenId: h.tokenId, qty: +h.qty || 0, cost: +h.cost || 0, openedAt: +h.openedAt || 0 })) }
+            ? { holdings: msg.holdings.slice(0, 30).filter((h) => h && typeof h.tokenId === 'string' && h.tokenId.length <= 64 && h.qty > 0).map((h) => ({ tokenId: h.tokenId, qty: +h.qty || 0, cost: +h.cost || 0, openedAt: +h.openedAt || 0 })) }
             : {}),
         }
-        if (Array.isArray(msg.protect)) me.protect = msg.protect.filter((id) => typeof id === 'string').slice(0, 200)
+        if (Array.isArray(msg.protect)) me.protect = msg.protect.filter((id) => typeof id === 'string' && id.length <= 64).slice(0, 200)
         if (Array.isArray(msg.addrs)) me.addrs = msg.addrs.filter((a) => typeof a === 'string').slice(0, 12).map((a) => a.slice(0, 24))
         if (Number.isFinite(msg.cbVolume)) me.cbVolume = Math.max(0, Number(msg.cbVolume))
         if (msg.cbAuto === 'off' || msg.cbAuto === 'coin' || msg.cbAuto === 'usdc') me.cbAuto = msg.cbAuto
@@ -803,6 +812,12 @@ export class Room {
     const id: unknown = msg.token.id
     if (typeof id !== 'string' || !/^[A-Za-z0-9]{1,16}-[A-Za-z0-9]{1,16}$/.test(id)) return fail('That coin can’t be launched')
     if (this.market.tokens.some((x) => x.id === id)) return fail('That coin already exists')
+    // Charts are kept in one store for the whole server, by coin id: an id that already has a chart is a live coin of
+    // another room (the World, say), and this launch would replace that chart and later delete it. And a coin that
+    // has left the market still has bags in wallets, and maybe creator fees waiting, under its id: a new coin under
+    // that id would bring those bags back to life.
+    if ([...Room.all].some((r) => r !== this && r.market?.tokens.some((x) => x.id === id)) || this.cooked.has(id) || this.bots.has(id) || [...this.members.values()].some((m) => (m.wallet?.accounts ?? []).some((a) => a.positions[id]))) return fail('That coin already exists')
+    if (typeof msg.token.pad !== 'string' || typeof msg.token.chain !== 'string') return fail('Unknown chain or launchpad')
     const limit = cookAllowance(this.world, this.world ? (me.cookTicks ?? []) : Array(me.cooks ?? 0).fill(0), this.market.tick, secPerTickOf(this.market))
     if (limit.blocked) return fail(limit.blocked)
     if (this.market.tick - (me.lastCookTick ?? -999) < COOK_COOLDOWN_TICKS) return fail('Kitchen cooling down')
@@ -817,7 +832,7 @@ export class Room {
     // Tickers are unique among live coins, except a vamp may reuse the ticker of the coin it copies.
     if (this.market.tokens.some((x) => x.ticker === look.ticker && x.status !== 'dead' && x.status !== 'rugged' && x.id !== msg.token.vampOf?.id)) return fail(`$${look.ticker} already exists`)
     const px = nativePrice(this.market, chain)
-    const devWallet = accountOf(w, String(money.devWallet)) ? String(money.devWallet) : w.accounts?.[0]?.id ?? 'w-main'
+    const devWallet = typeof money.devWallet === 'string' && accountOf(w, money.devWallet) ? money.devWallet : w.accounts?.[0]?.id ?? 'w-main'
     const b = money.bundle && money.bundle.wallets > 0 ? { wallets: Math.min(50, Math.round(money.bundle.wallets)), perWallet: Math.max(0, Number(money.bundle.perWallet) || 0), stagger: !!money.bundle.stagger } : null
     const bundleUsd = b ? b.wallets * b.perWallet * px : 0
     const bundleFees = bundleUsd > 0 ? b!.wallets * BUNDLE_WALLET_FEE + (b!.stagger ? bundleUsd * STAGGER_FEE : 0) : 0
@@ -971,6 +986,8 @@ export class Room {
         stop('no dev wallet')
         continue
       }
+      // (The World is kept for ever: a bot stored before its fields were checked is switched off here.)
+      if (!BOT_RATES.includes(bot.rate) || !Number.isFinite(bot.budget) || !Number.isFinite(bot.spent)) { stop('Bot switched off'); continue }
       const px = nativePrice(market, t.chain)
       const have = (accountOf(w, c.walletId)?.balances[t.chain] ?? 0) * px
       if ((bot.spent ?? 0) >= bot.budget) {
