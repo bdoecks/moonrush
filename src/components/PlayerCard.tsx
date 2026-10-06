@@ -106,11 +106,15 @@ function Card({ id, onClose }: { id: string; onClose: () => void }) {
   const [sending, setSending] = useState(false)
   const map = useTokenMap()
 
-  const holdings = card.holdings.map((p) => {
+  // Bags in coins that are still on the market. (A long-time player also holds bags in coins that have left it:
+  // worth nothing, with no page to open, so they are counted in one line rather than listed.)
+  const holdings = card.holdings.flatMap((p) => {
     const t = map.get(p.tokenId)
-    const value = t ? p.qty * t.price : 0
-    return { p, t, value, pct: p.cost > 0 ? value / p.cost - 1 : 0 }
+    if (!t) return []
+    const value = p.qty * t.price
+    return [{ p, t, value, pct: p.cost > 0 ? value / p.cost - 1 : 0 }]
   })
+  const gone = card.holdings.length - holdings.length
   const holdValue = holdings.reduce((a, h) => a + h.value, 0)
   const goCoin = (tokenId: string) => {
     if (!map.get(tokenId)) return
@@ -180,12 +184,12 @@ function Card({ id, onClose }: { id: string; onClose: () => void }) {
         )}
 
         <Section title={`Coins they're in (${holdings.length})`}>
-          {holdings.length === 0 ? <EmptyState icon="💤" title="Main wallet holds nothing right now" /> : holdings.map((h) => (
-            <button key={h.p.tokenId} disabled={!h.t} onClick={() => goCoin(h.p.tokenId)} title={h.t ? `Open ${h.t.ticker}` : 'This coin has left the market'} className="flex w-full items-center gap-2 border-b border-line/50 px-3 py-1.5 text-left hover:bg-panel2 disabled:opacity-50">
-              {h.t && <TokenIcon token={h.t} size={24} />}
+          {holdings.length === 0 ? <EmptyState icon="💤" title={gone ? 'Nothing in a coin that is still trading' : 'Main wallet holds nothing right now'} /> : holdings.map((h) => (
+            <button key={h.p.tokenId} onClick={() => goCoin(h.p.tokenId)} title={`Open ${h.t.ticker}`} className="flex w-full items-center gap-2 border-b border-line/50 px-3 py-1.5 text-left hover:bg-panel2">
+              <TokenIcon token={h.t} size={24} />
               <span className="min-w-0">
-                <span className="flex items-center gap-1 text-[12px] font-bold">{h.t?.ticker ?? '?'}{h.t && <ChainBadge chain={h.t.chain} />}{h.t?.status === 'rugged' && <span className="text-[9px] font-bold text-down">RUGGED</span>}</span>
-                <span className="num block text-[10px] text-dim">{h.t ? `${fmtCompact(h.t.mcap)} MC · ` : ''}held {fmtAge(Math.max(0, tick - h.p.openedAt) * secPerTick)}</span>
+                <span className="flex items-center gap-1 text-[12px] font-bold">{h.t.ticker}<ChainBadge chain={h.t.chain} />{(h.t.status === 'rugged' || h.t.status === 'dead') && <span className="text-[9px] font-bold text-down">{h.t.status === 'rugged' ? 'RUGGED' : 'DEAD'}</span>}</span>
+                <span className="num block text-[10px] text-dim">{fmtCompact(h.t.mcap)} MC · held {fmtAge(Math.max(0, tick - h.p.openedAt) * secPerTick)}</span>
               </span>
               <span className="ml-auto text-right">
                 <span className="num block text-[12px] font-semibold">{fmtUsd(h.value, h.value < 10 ? 2 : 0)}</span>
@@ -194,6 +198,7 @@ function Card({ id, onClose }: { id: string; onClose: () => void }) {
               <span className={clsx('num w-16 text-right text-[11px] font-semibold', toneClass(h.pct))}>{fmtPct(h.pct)}</span>
             </button>
           ))}
+          {gone > 0 && <p className="px-3 py-2 text-[10px] text-dim">Plus {gone} old bag{gone === 1 ? '' : 's'} in coins that have left the market (worth nothing now).</p>}
         </Section>
 
         <Section title={`Recent trades${card.recent.length ? ` · ${card.recent.length}` : ''}`}>
