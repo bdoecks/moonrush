@@ -1,4 +1,5 @@
 import clsx from 'clsx'
+import { DataSources } from './DataSources'
 import { Lock, RotateCcw, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import { lengthTicks, levelFromXp, modeTagline, MODES, ROUND_LENGTHS } from '../game/progression'
@@ -121,7 +122,7 @@ function ModeModal() {
         })}
       </div>
       <div className="mt-4 grid gap-2 rounded-md border border-line bg-bg p-3 text-[11px] text-muted sm:grid-cols-3">
-        <div><span className="text-ink font-semibold">Read the tape.</span> Momentum, volume and buy/sell pressure drive prices. Moves persist, then revert.</div>
+        <div><span className="text-ink font-semibold">Read the tape.</span> Volume and buy/sell pressure move prices. A run can end without warning: holders who are up sell into it.</div>
         <div><span className="text-ink font-semibold">Mind the risk.</span> Thin liquidity means slippage. Warning events often come before a rug.</div>
         <div><span className="text-ink font-semibold">Go fast.</span> <Kbd>/</Kbd> search, <Kbd>B</Kbd> buy, <Kbd>S</Kbd> sell, <Kbd>↵</Kbd> confirm, <Kbd>?</Kbd> help.</div>
       </div>
@@ -160,7 +161,7 @@ export function EnginePicker({ value, onChange }: { value?: MarketEngine; onChan
       </div>
       <p className="mt-1 text-[10px] text-dim">
         {engine === 'realistic'
-          ? 'Real-time clock. pump.fun coins launch ~24/min and trade by real order flow: $10–$50 trades, most coins dead in a minute, ~3% graduate. Other launchpads stay classic.'
+          ? 'Real-time clock. pump.fun coins launch ~24/min and trade by real order flow: $10–$50 trades, most coins dead in a minute, about 1% graduate. Other launchpads stay classic.'
           : 'Fast-forward clock (1 second = 6 in-game seconds) with simulated price moods. More action per minute.'}
       </p>
     </div>
@@ -306,11 +307,16 @@ function HelpModal() {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2 text-[12px] text-muted">
           <p><span className="font-semibold text-ink">MOONRUSH is a game.</span> Every token, price, trade, wallet and rival is simulated. No wallets, no blockchain, no real money.</p>
-          <p><span className="font-semibold text-ink">The market has memory.</span> Tokens move through regimes (accumulation, pumps, distribution, dumps, recoveries), so moves tend to persist. Stretched prices tend to revert.</p>
+          <p><span className="font-semibold text-ink">The market has moods.</span> Tokens move through regimes (accumulation, pumps, distribution, dumps, recoveries), but a pump can be dumped into and a dip bought at any moment: the chart shows what happened, not what comes next.</p>
           <p><span className="font-semibold text-ink">Liquidity is everything.</span> Fills use a constant-product pool: size up in a thin pool and slippage will eat you. There's a 1% arena fee on every trade.</p>
           <p><span className="font-semibold text-ink">Rugs happen.</span> High-risk tokens (concentrated holders, big dev bags, thin liquidity) can collapse. ⚠️ insider warnings and 🧑‍💻 dev sells often come first.</p>
           <p><span className="font-semibold text-ink">Graduation.</span> New tokens start on a bonding curve and graduate once their launchpad's curve sells out (around $50–120K market cap depending on the pad), then trade in a DEX pool.</p>
           <p><span className="font-semibold text-ink">The World.</span> One market shared by everyone who is on. Real players trade, launch coins and chat there next to simulated traders: computer players with their own wallets and the same rules as you. A simulated trader's wallet page says what it is, and the World's leaderboards and seasons count real players only.</p>
+          <p><span className="font-semibold text-ink">Running coins.</span> A coin that is running is not free money. Holders who are up sell into a run, in one go and without warning, about as often as the run is worth, so what a chart has been doing says nothing about what it does next. What you can read is the risk: how much of the coin its dev still holds, whether it looks like a rug, and who got in before you.</p>
+          <p><span className="font-semibold text-ink">Tracked traders.</span> Every wallet you track has its own colour. On a coin's chart its trades are ringed in that colour and a dashed line marks its average entry while it still holds; the Tracked tab under the chart lists each one's position, share of the supply, profit and trades there. Click a trader to see only that wallet on the chart. It shows you who is in and at what price; copying their buys loses money on average.</p>
+          <DataSources />
+          <p><span className="font-semibold text-ink">Trader types.</span> Besides its style, a wallet has a way of reacting to what a coin's feed says: narrative traders buy a story that is heating up and leave when it turns, FOMO buyers chase what already ran and give up fast, contrarians buy the fear and sell into hype, panic sellers dump on any bad news, swing traders buy dips in deep pools. A wallet's profile says which it is, and its trades say what they acted on. They read the same feed you do, a moment after you could.</p>
+          <p><span className="font-semibold text-ink">Stories.</span> A coin's Story tab (and the pins on its chart) show what happened on it and what the price did in the minute after. Each line says where it comes from: <span className="text-info">MARKET</span> lines are facts read off the trades; <span className="text-[#8fd14f]">STORY</span> lines are generated, and every account, outlet and brand in them is invented; <span className="text-warn">OUTSIDE DATA</span> is a theme from real launches the game recorded, with its date. A post reaches you a few seconds after it was made, when the fastest wallets have already reacted, so it is not a signal to buy on. Most posts go nowhere, and a story can turn sour without notice.</p>
           <p><span className="font-semibold text-ink">Progress.</span> Earn XP from profitable trades, early discoveries, missions and milestones. Levels unlock themes and Hardcore mode.</p>
         </div>
         <div>

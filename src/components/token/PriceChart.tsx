@@ -32,7 +32,10 @@ import { bookOf } from '../../game/ledger'
 import { load } from '../../utils/storage'
 import { useFriends } from '../../net/friends'
 import { MARKER_KINDS, type MarkerKind, type MarkerKinds } from './markers'
+import { BEAT_ICON, beatTitle, beatWeight, movePct, SRC_META, TONE_COLOR } from './beatMeta'
 import { fmtCompact, fmtPrice } from '../../utils/format'
+import { traderColor, tradersOn } from '../../game/traderView'
+import { focusFor, useTraderFocus } from './traderFocus'
 
 const UP = '#19d989'
 const DOWN = '#ff4d6a'
@@ -87,10 +90,12 @@ export function PriceChart(o: ChartOptions) {
   const accent = useGame((s) => s.settings.accent)
   const ath = useGame((s) => tokenMapOf(s.market.tokens).get(tokenId)?.ath ?? 0)
   const devTrades = useGame((s) => tokenMapOf(s.market.tokens).get(tokenId)?.devTrades)
+  const beats = useGame((s) => tokenMapOf(s.market.tokens).get(tokenId)?.beats)
   const creatorIsYou = useGame((s) => tokenMapOf(s.market.tokens).get(tokenId)?.creator === 'you')
   const wallets = useGame((s) => s.wallets)
   const tracked = useGame((s) => s.trackedWallets)
   const markerStyle = useGame((s) => s.settings.markerStyle ?? 'avatars')
+  const focus = useTraderFocus((s) => focusFor(s.focus, tokenId)) // one trader picked out on the Tracked tab
   // Your face on the chart: your account avatar, else your room avatar.
   const accountFace = useAccount((s) => s.profile?.avatar)
   const myFace = accountFace ?? load<string>('mpAvatar') ?? '🫵'
@@ -327,6 +332,23 @@ export function PriceChart(o: ChartOptions) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [top10On, top10Tick, tokenId, tf, style, unit, accent])
 
+  // Tracked traders' average entries: a line each, in the trader's own colour, while that wallet still holds the
+  // coin (the biggest six; with one trader picked out on the Tracked tab, that one alone, tracked or not).
+  const entriesOn = showMarkers && markerKinds.entries !== false
+  const entryTick = useGame((s) => Math.floor(s.market.tick / 3))
+  const traderLines = useRef<IPriceLine[]>([])
+  useEffect(() => {
+    const s = main.current
+    for (const l of traderLines.current) s?.removePriceLine(l)
+    traderLines.current = []
+    const st = useGame.getState()
+    const t = st.market.tokens.find((x) => x.id === tokenId)
+    if (!s || !t || (!entriesOn && !focus)) return
+    const rows = tradersOn(t, st.wallets, st.trackedWallets).filter((r) => r.qty > 0 && (focus ? r.id === focus : r.tracked)).slice(0, 6)
+    for (const r of rows) traderLines.current.push(s.createPriceLine({ price: r.avgEntry * k, color: r.color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: `${r.avatar} ${r.name} avg` }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entriesOn, entryTick, focus, tracked, tokenId, tf, style, unit, accent])
+
   // Your average entry (cost basis per token, fees included) while you hold a position. Green while you're above
   // it, red while you're under. Shown with the "My trades" markers.
   const showEntry = showMarkers && markerKinds.me && !!avgEntry
@@ -432,9 +454,9 @@ export function PriceChart(o: ChartOptions) {
     const bucket = (time: number) => Math.floor(time / tfs) * tfs
     const closeAt = new Map((data ?? []).map((c) => [c.time, c.close]))
     const barAt = new Map((data ?? []).map((c) => [c.time, c]))
-    const groups = new Map<string, { time: number; side: 'buy' | 'sell'; kind: MarkerKind; label: string; n: number; px: number; who: string; usd: number }>()
+    const groups = new Map<string, { time: number; side: 'buy' | 'sell'; kind: MarkerKind; label: string; n: number; px: number; who: string; usd: number; tint?: string }>()
     // price: the fill price per token, or undefined to pin the bubble at the candle's close (dev trades carry no price).
-    const add = (time: number, side: 'buy' | 'sell', kind: MarkerKind, label: string, price: number | undefined, who: string, usd: number) => {
+    const add = (time: number, side: 'buy' | 'sell', kind: MarkerKind, label: string, price: number | undefined, who: string, usd: number, tint?: string) => {
       if (time < first) return
       const t = bucket(time)
       const px = price ?? closeAt.get(t)
@@ -445,7 +467,7 @@ export function PriceChart(o: ChartOptions) {
         g.px = (g.px * g.n + px) / (g.n + 1)
         g.n++
         g.usd += usd
-      } else groups.set(key, { time: t, side, kind, label, n: 1, px, who, usd })
+      } else groups.set(key, { time: t, side, kind, label, n: 1, px, who, usd, tint })
     }
     const mine = creatorIsYou
     // On a coin you cooked, only the deployer wallet trades as the dev.
@@ -456,14 +478,15 @@ export function PriceChart(o: ChartOptions) {
       if (isDev ? markerKinds.dev || markerKinds.me : markerKinds.me) add(t.time, t.side, isDev ? 'dev' : 'me', isDev ? 'D' : '', t.price, isDev ? 'You (dev)' : 'You', t.value)
     }
     if (markerKinds.dev && !mine) for (const d of devTrades ?? []) add(d.time, d.side, 'dev', 'D', undefined, 'Dev', d.usd)
-    if (markerKinds.tracked) {
+    // (With one trader picked out on the Tracked tab, only that wallet's trades are drawn, tracked or not.)
+    if (markerKinds.tracked || focus) {
       for (const w of wallets) {
-        if (!tracked.includes(w.id)) continue
-        for (const tr of w.trades) if (tr.tokenId === tokenId) add(tr.time, tr.side, 'tracked', w.avatar, tr.price, w.name, tr.usd)
+        if (focus ? w.id !== focus : !tracked.includes(w.id)) continue
+        for (const tr of w.trades) if (tr.tokenId === tokenId) add(tr.time, tr.side, 'tracked', w.avatar, tr.price, w.name, tr.usd, traderColor(tracked, w.id))
       }
     }
     // KOLs and smart money trading this coin (Axiom shows them with their avatars).
-    if (markerKinds.kol !== false) {
+    if (markerKinds.kol !== false && !focus) {
       for (const w of wallets) {
         if (tracked.includes(w.id) || (w.style !== 'kol' && w.style !== 'smart')) continue
         for (const tr of w.trades) if (tr.tokenId === tokenId) add(tr.time, tr.side, 'kol', w.avatar, tr.price, w.name, tr.usd)
@@ -485,14 +508,44 @@ export function PriceChart(o: ChartOptions) {
         const bar = barAt.get(g.time)
         const base = { who: g.who, usd: g.usd, mc: g.px * SUPPLY, time: g.time, price: g.px * k, low: (bar ? Math.min(bar.low, g.px) : g.px) * k, high: (bar ? Math.max(bar.high, g.px) : g.px) * k, side: g.side, kind: g.kind, n: g.n }
         if (g.kind === 'kol') return { ...base, text: g.label, color: '#2a1f08', ink: '#fff', ring: sideColor, face: g.label, bg: '#3a2a0c' }
-        if (g.kind === 'tracked') return { ...base, text: g.label, color: '#161a22', ink: '#fff', ring: sideColor, face: g.label, bg: '#10263a' }
+        if (g.kind === 'tracked') return { ...base, text: g.label, color: '#161a22', ink: '#fff', ring: sideColor, face: g.label, bg: '#10263a', tint: g.tint }
         if (g.kind === 'friends') return { ...base, text: g.label, color: '#2a1840', ink: '#fff', ring: sideColor, face: g.label, bg: '#2a1840' }
         if (g.kind === 'dev') return { ...base, text: `D${buy ? 'B' : 'S'}`, color: MARKER_KINDS.find((m) => m.id === 'dev')!.color, ink: '#1a1204', ring: sideColor, face: '🧑‍💻', bg: '#3a2a08' }
         return { ...base, text: buy ? 'B' : 'S', color: sideColor, ink: buy ? '#06140d' : '#fff', face: myFace, bg: '#16301f' }
       })
       .sort((a, b) => a.time - b.time)
+    // Story and market beats: a pin over the candle each happened in (hover: what happened, and what the price did
+    // next). Trades the chart already marks (a tracked wallet's, the dev's) stay with their own markers.
+    const barOn = (time: number) => {
+      // (The last candle at or before the moment: a second nobody traded in has no candle of its own.)
+      if (!data?.length || data[0].time > time) return undefined
+      let lo = 0
+      let hi = data.length - 1
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1
+        if (data[mid].time <= time) lo = mid
+        else hi = mid - 1
+      }
+      return data[lo]
+    }
+    const pins = new Map<string, { bar: Candle; kind: MarkerKind; beats: NonNullable<typeof beats> }>()
+    for (const n of beats ?? []) {
+      const kind: MarkerKind = n.src === 'market' ? 'event' : 'story'
+      if (markerKinds[kind] === false || n.kind === 'enter' || n.kind === 'exit' || n.kind === 'dev') continue
+      const bar = barOn(bucket(n.time))
+      if (!bar) continue
+      const g = pins.get(`${bar.time}|${kind}`)
+      if (g) g.beats.push(n)
+      else pins.set(`${bar.time}|${kind}`, { bar, kind, beats: [n] })
+    }
+    for (const g of pins.values()) {
+      const notes = [...g.beats].sort((x, y) => beatWeight(y) - beatWeight(x))
+      const top = notes[0]
+      b.push({ time: g.bar.time, price: g.bar.close * k, low: g.bar.low * k, high: g.bar.high * k, side: 'sell', kind: g.kind, text: top.src !== 'market' && top.by && top.kind !== 'drama' ? top.by.avatar : BEAT_ICON[top.kind], n: notes.length, color: '#10141b', ink: '#fff', ring: TONE_COLOR[top.tone], notes })
+    }
+    b.sort((x, y) => x.time - y.time)
     markers.current.set(b, markerStyle)
-  }, [trades, devTrades, wallets, tracked, friendTrades, friendWatch, online, creatorIsYou, launch, firstWallet, markerKinds, tokenId, tf, style, unit, k, accent, showMarkers, markerStyle, myFace])
+  }, [beats, trades, devTrades, wallets, tracked, focus, friendTrades, friendWatch, online, creatorIsYou, launch, firstWallet, markerKinds, tokenId, tf, style, unit, k, accent, showMarkers, markerStyle, myFace])
 
   const chg = legend && legend.o ? legend.c / legend.o - 1 : 0
   const tone = chg >= 0 ? 'text-up' : 'text-down'
@@ -521,6 +574,7 @@ export function PriceChart(o: ChartOptions) {
 
 /** Hover card for a trade marker: who, bought / sold how much, at what market cap (Axiom / GMGN style). */
 function MarkerTip({ b, x, y, width }: { b: Bubble; x: number; y: number; width: number }) {
+  if (b.notes) return <NoteTip b={b} x={x} y={y} width={width} />
   const flip = width > 380 && x > width - 190 // near the right edge (the newest candles): open to the left
   const buy = b.side === 'buy'
   const face = b.face ?? (b.kind === 'dev' ? '🧑‍💻' : b.text)
@@ -532,6 +586,35 @@ function MarkerTip({ b, x, y, width }: { b: Bubble; x: number; y: number; width:
         {b.n > 1 && <span className="text-dim"> · {b.n} trades</span>}
       </div>
       {b.mc ? <div className="num text-dim">at {fmtCompact(b.mc)} MC{b.n > 1 ? ' (avg)' : ''}</div> : null}
+    </div>
+  )
+}
+
+/**
+ * Hover card for a story / event pin: what happened here, where that comes from (a market fact, generated story,
+ * outside data), and what the price did in the minute after it.
+ */
+function NoteTip({ b, x, y, width }: { b: Bubble; x: number; y: number; width: number }) {
+  const flip = width > 420 && x > width - 300 // near the right edge (the newest candles): open to the left
+  const notes = b.notes ?? []
+  return (
+    <div className="pointer-events-none absolute z-20 w-[272px] rounded-md border border-line2 bg-panel/95 px-2.5 py-2 text-[11px] shadow-xl shadow-black/50 backdrop-blur" style={{ ...(flip ? { right: width - x + 14 } : { left: Math.min(x + 14, Math.max(4, width - 276)) }), top: Math.max(4, y - 16) }}>
+      {notes.slice(0, 3).map((n, i) => (
+        <div key={n.id} className={clsx(i > 0 && 'mt-2 border-t border-line/50 pt-2')}>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[13px] leading-none">{n.src !== 'market' && n.by ? n.by.avatar : BEAT_ICON[n.kind]}</span>
+            <span className="truncate font-semibold text-ink">{beatTitle(n)}</span>
+            <span className={clsx('ml-auto shrink-0 rounded px-1 text-[9px] font-bold tracking-wide', SRC_META[n.src].cls)}>{SRC_META[n.src].label}</span>
+          </div>
+          <div className={clsx('mt-1 leading-snug', n.tone === 'down' ? 'text-down' : 'text-muted')}>{n.text}</div>
+          <div className="num mt-1 text-dim">at {fmtCompact(n.mcap)} MC{n.why ? ` · ${n.why}` : ''}</div>
+          <div className="num mt-0.5">
+            <span className="text-dim">Then: </span>
+            {n.move === undefined ? <span className="text-dim">the minute after it is still running</span> : <span className={n.move >= 0 ? 'text-up' : 'text-down'}>{movePct(n.move)} in the next minute</span>}
+          </div>
+        </div>
+      ))}
+      {notes.length > 3 && <div className="mt-1.5 text-dim">+{notes.length - 3} more in this candle (all of them are on the Story tab)</div>}
     </div>
   )
 }

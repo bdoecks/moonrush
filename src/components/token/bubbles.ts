@@ -4,7 +4,9 @@
 //    (pointer down), so the candles stay visible. Dev = amber DB/DS; tracked wallets and friends = their avatar.
 //  - 'avatars' (Axiom): each trade is the trader's round avatar on the price, ringed green (buy) or red (sell).
 //  - 'bubbles': a round badge sitting on the candle at the exact fill price.
+// Story and market beats are not trades: in every look they are small pins over the candle they happened in.
 import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesPrimitive, SeriesAttachedParameter, Time } from 'lightweight-charts'
+import type { Beat } from '../../types'
 import type { MarkerKind } from './markers'
 
 export type MarkerStyle = 'avatars' | 'tags' | 'bubbles'
@@ -21,12 +23,14 @@ export interface Bubble {
   color: string // fill
   ink: string // text colour
   ring?: string // outline for avatar markers (their side colour)
+  tint?: string // a tracked trader's own colour: a second, outer ring, the same on every coin
   face?: string // avatar style: the trader's avatar (emoji) or initials
   bg?: string // avatar style: circle colour behind the face
   // For the hover card (Axiom / GMGN show who traded, how much, and at what market cap).
   who?: string
   usd?: number // total of the merged trades
   mc?: number // average market cap at the fills (USD)
+  notes?: Beat[] // a story / event pin: the beats in this candle, the one it shows first
 }
 
 type Box = { x: number; y: number; w: number; h: number }
@@ -93,6 +97,14 @@ export class TradeBubbles implements ISeriesPrimitive<Time> {
       for (const b of this.bubbles) {
         const x = ts.timeToCoordinate(b.time as Time)
         if (x === null) continue
+        if (b.notes) {
+          // A pin sits over the candle (over any sell tags there), one lane per pin.
+          const top = p.series.priceToCoordinate(b.high)
+          const lane = stack.get(`${b.time}|pin`) ?? 0
+          stack.set(`${b.time}|pin`, lane + 1)
+          if (top !== null) this.hits.push({ ...drawPin(ctx, b, x, top - (this.style === 'tags' ? (stack.get(`${b.time}|sell`) ?? 0) * (TAG_H + 3) : 0), lane), b })
+          continue
+        }
         const key = `${b.time}|${b.side}`
         const i = stack.get(key) ?? 0
         stack.set(key, i + 1)
@@ -144,6 +156,13 @@ function drawTag(ctx: Ctx, b: Bubble, x: number, edge: number, i: number): Box {
   ctx.lineWidth = avatar ? 1.5 : 1
   ctx.strokeStyle = avatar ? side : 'rgba(7,8,10,0.7)'
   ctx.stroke()
+  if (b.tint) {
+    ctx.beginPath()
+    ctx.roundRect(x - w / 2 - 2.5, top - 2.5, w + 5, TAG_H + 5, TAG_H / 2 + 2.5)
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = b.tint
+    ctx.stroke()
+  }
   ctx.fillStyle = avatar ? '#fff' : b.ink
   ctx.fillText(b.text, x, top + TAG_H / 2 + 0.5)
 
@@ -183,6 +202,14 @@ function drawAvatar(ctx: Ctx, b: Bubble, x: number, y: number): Box {
   ctx.beginPath()
   ctx.arc(x, y, r, 0, Math.PI * 2)
   ctx.stroke()
+  if (b.tint) {
+    // Whose trade it is: the trader's own colour around the buy / sell ring.
+    ctx.lineWidth = 2
+    ctx.strokeStyle = b.tint
+    ctx.beginPath()
+    ctx.arc(x, y, r + 2.5, 0, Math.PI * 2)
+    ctx.stroke()
+  }
   const face = b.face ?? b.text
   const emoji = /\p{Extended_Pictographic}/u.test(face)
   ctx.font = emoji ? '12px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif' : '800 8px "JetBrains Mono", monospace'
@@ -217,10 +244,54 @@ function drawBubble(ctx: Ctx, b: Bubble, x: number, y: number): Box {
   ctx.lineWidth = b.ring ? 1.5 : 1
   ctx.strokeStyle = b.ring ?? 'rgba(7,8,10,0.85)'
   ctx.stroke()
+  if (b.tint) {
+    ctx.beginPath()
+    ctx.roundRect(x - w / 2 - 2.5, y - R - 2.5, w + 5, R * 2 + 5, R + 2.5)
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = b.tint
+    ctx.stroke()
+  }
   ctx.fillStyle = b.ink
   ctx.fillText(b.text, x, y + 0.5)
   if (b.n > 1) countBadge(ctx, b.n, x + w / 2 - 1, y - R + 1, b.ring ?? b.color)
   return { x: x - w / 2, y: y - R, w, h: R * 2 }
+}
+
+/** A story / event pin: a small badge over the candle on a thin stem, ringed with its tone. */
+function drawPin(ctx: Ctx, b: Bubble, x: number, top: number, lane: number): Box {
+  const S = 16
+  const y = Math.max(2, top - 9 - S - lane * (S + 3))
+  const ring = b.ring ?? '#8b93a1'
+  if (lane === 0 && top - 2 > y + S) {
+    ctx.save()
+    ctx.globalAlpha = 0.55
+    ctx.beginPath()
+    ctx.moveTo(x, top - 2)
+    ctx.lineTo(x, y + S)
+    ctx.lineWidth = 1
+    ctx.strokeStyle = ring
+    ctx.stroke()
+    ctx.restore()
+  }
+  ctx.save()
+  ctx.shadowColor = 'rgba(0,0,0,0.55)'
+  ctx.shadowBlur = 4
+  ctx.beginPath()
+  ctx.roundRect(x - S / 2, y, S, S, 5)
+  ctx.fillStyle = b.color
+  ctx.fill()
+  ctx.restore()
+  ctx.beginPath()
+  ctx.roundRect(x - S / 2, y, S, S, 5)
+  ctx.lineWidth = 1.5
+  ctx.strokeStyle = ring
+  ctx.stroke()
+  ctx.font = '10px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif'
+  ctx.fillStyle = '#fff'
+  ctx.fillText(b.text, x, y + S / 2 + 1)
+  if (b.n > 1) countBadge(ctx, b.n, x + S / 2 - 1, y + 1, ring)
+  ctx.font = FONT
+  return { x: x - S / 2, y, w: S, h: S }
 }
 
 /** Merged trades: a small count on the marker's corner. */

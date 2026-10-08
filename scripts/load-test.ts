@@ -239,7 +239,8 @@ ok(players.every((p) => p.joined), `every fake player got into the World (${play
 ok(players.filter((p) => p.joined).every((p) => p.compressed && !p.spectator), 'they were compressed for like real browsers, and played as real players (not spectators)')
 ok(!!first && first.late === 0 && first.gapP95 < 1150, `with ${first?.n} player the ticks arrive on time (95% within ${first?.gapP95.toFixed(0)} ms)`)
 ok(rows.some((r) => r.orders > 0) && last.rttP50 > 0, `orders were answered (${rows.reduce((a, r) => a + r.orders, 0)} in all)`)
-ok(first.coins >= 150, `the World was a realistic size (${first.coins} coins; the live one has 200-300)`)
+// (With the fair market fewer coins bond: a World settles at 130 to 160 coins, where it used to hold 200 to 300.)
+ok(first.coins >= 100, `the World was a realistic size (${first.coins} coins; a World runs at 130-160 coins)`)
 
 // Server cost = a base (the World itself) + so much per player. Least squares over the steps.
 const xs = rows.map((r) => r.n), ys = rows.map((r) => r.cpu)

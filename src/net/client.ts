@@ -1,6 +1,6 @@
 ﻿// Browser side of multiplayer: connects to a room, turns the server's market updates into ticks for the local
 // store, and sends your orders / status. The server runs your wallets (it's the judge); this shows results instantly.
-import { applyCandlePoints, candleStore, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock } from '../game/marketEngine'
+import { applyCandlePoints, candleStore, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SUPPLY, type CandlePoint } from '../game/marketEngine'
 import { newPortfolio, portfolioStats, valuePortfolio } from '../game/portfolioEngine'
 import { levelFromXp } from '../game/progression'
 import { seasonNumber } from '../game/season'
@@ -20,7 +20,8 @@ import { diffWallet, layoutOf, mergeWalletState } from '../game/orders'
 import { cashbackOf } from '../game/rewardsEngine'
 import { useWorldBoard } from './worldBoard'
 import { usePlayerCard } from './playerCard'
-import { MP_PATH, WORLD_CODE, type ClientMsg, type MainHolding, type NetMarket, type NetToken, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TransferMsg } from './protocol'
+import { mergeBeats } from '../game/storyEngine'
+import { MP_PATH, WORLD_CODE, type ClientMsg, type MainHolding, type NetMarket, type RoundInfo, type SendAsset, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg } from './protocol'
 
 const STATUS_MS = 2000
 const TAPE_LEN = 40
@@ -356,6 +357,18 @@ function onMessage(msg: ServerMsg) {
       return onTick(msg)
     case 'candles':
       if (msg.candles) candleStore.set(msg.tokenId, msg.candles)
+      // (World: the coin's tape comes with its chart. While this coin was not the open one, only real players'
+      // trades on it were sent.)
+      if (msg.tape && st.online) {
+        const mine = ownAddrs()
+        const me = st.online.you
+        const tape = msg.tape.map((e) => (e.pid === me || (e.addr && mine.has(e.addr)) ? { ...e, wallet: 'YOU', tag: 'you' as const } : e))
+        st.patchState({ market: { ...st.market, tokens: st.market.tokens.map((t) => (t.id === msg.tokenId ? { ...t, tape: mergeTape(tape, t.tape) } : t)) } })
+      }
+      return
+    case 'focus':
+      // (World: the open coin's chart points and trades, for the tick that follows. See onTick.)
+      focusNext.set(msg.tokenId, { points: msg.points, tape: msg.tape })
       return
     case 'chat': {
       if (!st.online) return
@@ -527,6 +540,14 @@ function onRound(round: RoundInfo, net?: NetMarket, wallets?: SimWallet[]) {
   if (round.state === 'ended') useGame.getState().endRoundOnline()
 }
 
+/** World: what arrived for the open coin just ahead of the next tick. */
+const focusNext = new Map<string, { points?: CandlePoint[]; tape?: TapeTrade[] }>()
+/** Two lists of trades as one, newest first, each trade once. */
+const mergeTape = (a: TapeTrade[], b: TapeTrade[]) => {
+  const seen = new Set<number>()
+  return [...a, ...b].filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true))).sort((x, y) => y.id - x.id).slice(0, TAPE_LEN)
+}
+
 function onTick(msg: TickMsg) {
   const s = useGame.getState()
   if (!s.online) return
@@ -537,15 +558,18 @@ function onTick(msg: TickMsg) {
   // a stray partial one for an unknown coin waits for the next keyframe.
   const tokens: Token[] = []
   const others: { t: Token; e: TapeTrade }[] = []
-  for (const d of msg.market.tokens) {
-    const prev = prevTokens.get(d.id)
-    if (!prev && !d.sim) continue
+  for (const d0 of msg.market.tokens) {
+    const prev = prevTokens.get(d0.id)
+    if (!prev && !d0.sim) continue
+    // (World: the open coin's trades came just ahead of this tick; with them its tape is whole again.)
+    const extra = focusNext.get(d0.id)?.tape
+    const d = extra ? { ...d0, tape: mergeTape(extra, d0.tape ?? []) } : d0
     const t = localToken(d, prev, me, myAddrs)
     tokens.push(t)
     const seen = new Set(prev?.tape.map((e) => e.id))
     for (const e of d.tape ?? []) if (!seen.has(e.id) && e.tag !== 'you' && (e.pid || e.addr) && e.pid !== me && !(e.addr && myAddrs.has(e.addr))) others.push({ t, e })
   }
-  const market: MarketState = { ...msg.market, tokens }
+  const market: MarketState = { ...msg.market, tokens, trends: msg.market.trends ?? s.market.trends } // (the trend list comes once, in the welcome)
   // Other players' trades: logged for their leaderboard profile; ones you follow alert you.
   for (const { trade, watch } of recordPlayerTrades(others).slice(0, 3)) {
     s.notify({ title: watch.label, body: `${trade.side === 'buy' ? 'Bought' : 'Sold'} ${fmtUsd(trade.usd, trade.usd < 10 ? 2 : 0)} of $${trade.ticker} @ ${fmtCompact(trade.mcap)} MC`, tone: trade.side === 'buy' ? 'up' : 'down', icon: '👁', tokenId: trade.tokenId })
@@ -554,6 +578,8 @@ function onTick(msg: TickMsg) {
   // Charts: whole histories for new coins, recorded points for the rest.
   for (const [id, c] of Object.entries(msg.newCandles)) candleStore.set(id, c)
   for (const [id, pts] of Object.entries(msg.points)) if (!msg.newCandles[id]) applyCandlePoints(id, pts)
+  for (const [id, f] of focusNext) if (f.points && !msg.newCandles[id]) applyCandlePoints(id, f.points)
+  focusNext.clear()
   const ids = new Set(market.tokens.map((t) => t.id))
   for (const id of candleStore.keys()) if (!ids.has(id)) candleStore.delete(id)
 
@@ -604,11 +630,16 @@ function onTick(msg: TickMsg) {
  * A coin from the server (full, or a diff merged onto what we had). Your own coins keep `creator: 'you'`; your trades
  * on the tape show as YOU.
  */
-function localToken(d: Partial<NetToken> & { id: string }, prev: Token | undefined, me: string, mine: Set<string>): Token {
+function localToken(d: TokenDiff, prev: Token | undefined, me: string, mine: Set<string>): Token {
   const fresh = (d.tape ?? []).map((e) => (e.pid === me || (e.addr && mine.has(e.addr)) ? { ...e, wallet: 'YOU', tag: 'you' as const } : e))
   // New trades go on top of what we had, dropping local-only copies of our own trades (the server echo replaces them).
   const tape = prev ? [...fresh, ...prev.tape.filter((e) => !(e.tag === 'you' && !e.pid && !e.addr))].slice(0, TAPE_LEN) : fresh
-  const t = { ...(prev ?? {}), ...d, tape } as Token
+  // Story beats arrive like trades: new ones whole and changed ones as patches, laid over what we had.
+  const { beats: sent, ...rest } = d
+  const beats = mergeBeats(prev?.beats, sent)
+  const t = { ...(prev ?? {}), ...rest, tape, ...(beats ? { beats } : {}) } as Token
+  // (World: a market cap is not sent with a price change: it is the price times the supply.)
+  if (rest.price !== undefined && rest.mcap === undefined) t.mcap = rest.price * SUPPLY
   return { ...t, creator: t.creatorId === me ? 'you' : undefined }
 }
 

@@ -1,0 +1,9 @@
+{
+  "asOf": "2026-10-08",
+  "themes": [
+    { "word": "horse", "weight": 1 },
+    { "word": "agent", "weight": 0.8 },
+    { "word": "penguin", "weight": 0.5 },
+    { "word": "ramen", "weight": 0.3 }
+  ]
+}

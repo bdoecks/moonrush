@@ -1,7 +1,7 @@
 import { EVENT_TEMPLATES, type EventTemplate } from '../data/events'
 import type { MarketEvent, MarketState, Token } from '../types'
 import { clamp, type Rng } from '../utils/rng'
-import { clockStep, joltByTrades, setRegime, SUPPLY } from './marketEngine'
+import { CLASSIC_SEC_PER_TICK, clockStep, joltByTrades, setRegime, SUPPLY } from './marketEngine'
 
 const EVENT_CHANCE = 0.18
 const lastMoveAlert = new Map<string, number>()
@@ -31,6 +31,11 @@ export function rollEvents(m: MarketState, rng: Rng): MarketEvent[] {
   const out: MarketEvent[] = []
   const emit = (e: Omit<MarketEvent, 'id' | 'tick' | 'time'>) => out.push({ ...e, id: m.tick * 100 + 50 + out.length, tick: m.tick, time: m.time })
 
+  // Announcements whose time has come (the coin has to be still there to be news).
+  if (m.lateEvents?.length) {
+    for (const x of m.lateEvents) if (x.at <= m.time && m.tokens.some((t) => t.id === x.e.tokenId && (t.status === 'bonding' || t.status === 'graduated'))) emit(x.e)
+    m.lateEvents = m.lateEvents.filter((x) => x.at > m.time)
+  }
   if (rng.chance(EVENT_CHANCE)) {
     const idx = rng.weighted<string>(Object.fromEntries(EVENT_TEMPLATES.map((e, i) => [String(i), e.weight])))
     const tpl: EventTemplate = EVENT_TEMPLATES[Number(idx)]
@@ -43,6 +48,12 @@ export function rollEvents(m: MarketState, rng: Rng): MarketEvent[] {
         const j = rng.range(tpl.jump[0], tpl.jump[1])
         const tokensBefore = t.liquidity / 2 / t.price
         const usd = joltByTrades(m, t, j, rng, tpl.kind === 'whale' ? 'whale' : tpl.kind === 'devsell' ? 'dev' : undefined, tpl.kind === 'kol' ? rng.int(2, 4) : 1)
+        // (The crowd answers it like any order from outside it: see stepFlow for a real-time curve, step 4b of
+        // tickMarket for every other coin. A dev's own sale is the dev's.)
+        if (usd > 0 && tpl.kind !== 'devsell') {
+          if (t.sim.flow && t.status === 'bonding') t.sim.flow = { ...t.sim.flow, jolt: (t.sim.flow.jolt ?? 0) + (j > 0 ? usd : -usd) }
+          else s.jolt = (s.jolt ?? 0) + (j > 0 ? usd : -usd)
+        }
         if (tpl.kind === 'devsell' && usd > 0) {
           // The dev's bag shrinks by the tokens that went into the pool.
           t.devPct = Math.max(0, t.devPct - (Math.max(0, t.liquidity / 2 / t.price - tokensBefore) / SUPPLY) * 100)
@@ -60,7 +71,12 @@ export function rollEvents(m: MarketState, rng: Rng): MarketEvent[] {
       if ((tpl.kind === 'liquidity' || tpl.kind === 'devsell') && t.rugProb > 0.0002 && s.rugAt === null && rng.chance(0.35)) {
         s.rugAt = m.tick + Math.round(rng.int(15, 40) / clockStep())
       }
-      emit({ kind: tpl.kind, tokenId: t.id, ticker: t.ticker, text: rng.pick(tpl.texts).replace('{T}', `$${t.ticker}`), icon: tpl.icon, tone: tpl.tone })
+      const e = { kind: tpl.kind, tokenId: t.id, ticker: t.ticker, text: rng.pick(tpl.texts).replace('{T}', `$${t.ticker}`), icon: tpl.icon, tone: tpl.tone }
+      // An event that says a coin is being pushed up is announced when the push has mostly played out: by the time it
+      // is news, it is over (said at once it was a tip: buy the announcement, sell the push). A warning is said now.
+      const pushed = tpl.regime === 'pump' || tpl.regime === 'accumulation' || (tpl.pressure ?? 0) > 0
+      if (!pushed) emit(e)
+      else m.lateEvents = [...(m.lateEvents ?? []), { at: m.time + (tpl.regime ? t.sim.regimeTicks * CLASSIC_SEC_PER_TICK * rng.range(0.7, 1) : rng.range(45, 80)), e }]
     }
   }
 

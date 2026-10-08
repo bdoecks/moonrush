@@ -14,6 +14,7 @@ import { rollEvents } from './eventEngine'
 import { createRivals, tickRivals } from './leaderboardEngine'
 import { freshSeason, isRanked, placementPoints, seasonNumber, tierFor, type SeasonState } from './season'
 import { usePlayerCard } from '../net/playerCard'
+import { tickStories } from './storyEngine'
 import { candleStore, COOK_FEE, cookAllowance, cookToken, COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, SUPPLY, tickMarket, walletName } from './marketEngine'
 import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
@@ -942,6 +943,8 @@ export const useGame = create<GameState>()((set, get) => {
     const e2 = rollEvents(market, rng)
     const wr = tickWallets(s.wallets, market, rng)
     const newPosts = tickSocial(market, rng, wr.actions, [...e1, ...e2])
+    // The coins' stories: what the market just did, in words, and what the timeline makes of each coin.
+    tickStories(market, { before: s.market, events: [...e1, ...e2], actions: wr.actions, posts: newPosts, wallets: wr.wallets })
     const running = s.runStatus === 'running'
 
     // Dev tools on your launches: volume bots burn your chain coin for fake volume; sleuths hunt bundles.

@@ -49,6 +49,69 @@ export type TokenStatus = 'bonding' | 'graduated' | 'rugged' | 'dead'
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'EXTREME'
 export type Archetype = 'bluechip' | 'runner' | 'grinder' | 'bleeder' | 'chaotic' | 'rugger' | 'sleeper'
 
+// ─── Stories: what happened on a coin, and why ──────────────────
+/** A kind of thing that happens on a coin that somebody watching it would call news. */
+export type BeatKind =
+  | 'post' | 'call' | 'trend' | 'rumor' | 'partner' | 'news' | 'drama' | 'fade' // the story: what people say (invented)
+  | 'theme' // outside data: the coin's theme is one that real launches were riding
+  | 'bigbuy' | 'bigsell' | 'enter' | 'exit' | 'volume' | 'milestone' | 'dev' | 'warn' // the market: what the trades show
+/**
+ * Where a beat's content comes from. The three are kept apart everywhere they are shown:
+ * `market` = the simulated market's own facts (a trade, a volume spike, a milestone); `story` = generated narrative
+ * (an invented account's post, a rumour, made-up news); `trend` = a theme taken from outside data (real launches
+ * the owner recorded), named with its date so nobody takes it for a live feed.
+ */
+export type BeatSource = 'market' | 'story' | 'trend'
+
+/** One line of a coin's story feed, and one marker on its chart. */
+export interface Beat {
+  id: number
+  seq: number // bumped whenever the beat changes (rooms send a coin's beats by this, like trades by id)
+  time: number // market time it happened (a post reaches the feed a few seconds after it was made)
+  kind: BeatKind
+  tone: 'up' | 'down' | 'warn' | 'info'
+  src: BeatSource
+  text: string // what happened, in one line
+  why?: string // what it followed, when something did ("after @x's post")
+  by?: { name: string; avatar: string; followers?: number } // who posted or traded (invented accounts, simulated wallets)
+  arc?: StoryArc // a development of the coin's own story (not a market fact, not a one-off post)
+  heat?: number // 0..100: how much attention it got
+  usd?: number // a trade's size
+  mcap: number // the coin's market cap when it happened
+  move?: number // filled in a minute later: how far the price went after it (fraction)
+}
+
+/** A beat before it is numbered and timed. */
+export type BeatDraft = Omit<Beat, 'id' | 'seq' | 'time' | 'mcap' | 'move'>
+/** A beat that changed, as rooms send it: only what changed (what the price did next). */
+export type BeatPatch = Pick<Beat, 'id' | 'seq' | 'move'>
+
+/** The hidden side of a coin's story: where it stands and when the next development is due. */
+export interface StoryState {
+  arc: StoryArc
+  step: number // developments so far
+  heat: number // 0..100: attention on the story itself (bigger accounts join as it grows)
+  nextAt: number // market time of the next development
+  cat?: Narrative
+  from?: number // the coin's price when the story began ("up 3x since i first posted it")
+  last?: { time: number; price: number; label: string } // the latest development: what market moves get traced back to
+  over?: boolean // it has run its course (a coin gets one story at a time, and a rest after it)
+  themed?: boolean // its theme beat has been shown (once per coin)
+  said?: number[] // the lines it has used (hashed), so a story never repeats itself
+}
+export type StoryArc = 'meme' | 'caller' | 'community' | 'builder' | 'whale'
+
+/** Themes that are hot outside the game, and where that knowledge comes from (never presented as a live feed unless it is one). */
+export interface TrendFeed {
+  // recorded = real launches the owner recorded (scripts/market-recorder); sample = a list shipped with the game;
+  // provider = somebody plugged a data provider in (server/trendSource.ts). All of them pass through `cleanFeed`.
+  source: 'recorded' | 'sample' | 'provider'
+  provider?: string // the provider's name, as whoever runs the server gave it
+  fetchedAt?: string // ISO time this server last got it from the provider
+  asOf: string // ISO date the data is from
+  themes: { word: string; narrative: Narrative; weight: number }[] // weight 0..1, the hottest first
+}
+
 export interface TapeTrade {
   id: number
   time: number
@@ -88,6 +151,7 @@ export interface WalletTrade {
   pnlPct?: number
   mcap?: number // token market cap right after the fill
   action?: WalletActionKind
+  why?: string // V2: what the wallet's mind acted on (see traderMinds), in words a player can check on the coin's feed
 }
 
 export type WalletActionKind = 'first' | 'more' | 'partial' | 'all'
@@ -273,6 +337,7 @@ export interface WalletAction {
   fraction: number // for sells: share of the wallet's position sold
   kind: WalletActionKind
   mcap: number
+  why?: string // V2: the wallet's reason, when its mind made the trade
 }
 
 /** GMGN-style sniper task: auto-buys brand-new launches that match its rules, then manages TP / SL. */
@@ -324,6 +389,11 @@ export interface FlowState {
   ema: number // slow price average (holders take profit when price runs above it)
   lastTrade: number // market time of the last trade
   koth?: boolean // reached "king of the hill"
+  botDev?: boolean // cooked by a World bot, not by a player: part of the simulated market, so its rules apply (see TOPS)
+  tops?: number // tops so far
+  sniped?: boolean // its launch snipers have landed
+  seen?: number // the last trade by a wallet from outside the crowd that the crowd has answered
+  jolt?: number // dollars an event's jump put in (or took out) since then: answered the same way
 }
 
 export interface TokenSim {
@@ -338,7 +408,13 @@ export interface TokenSim {
   pressure: number // decaying extra buy(+)/sell(-) pressure from events and flow
   volBoost: number // decaying extra volatility multiplier
   rugAt: number | null // tick at which a scheduled rug executes
+  moonTell?: number // a parabolic run is announced when this much of it is left (not when it starts)
+  gradSeen?: number // a freshly bonded coin, or a classic round's curve coin: the last trade by a wallet from outside the crowd that the crowd has answered
+  jolt?: number // dollars an event's jump put into (or took out of) a coin the regime model moves, since the last tick: answered the same way
   pend?: number // the market's pull on the price (log return) that no trade has carried yet: prices only move on trades
+  story?: StoryState // the coin's story, if it has one (see storyEngine)
+  beatMark?: number // the highest market-cap milestone already announced
+  beatAt?: Partial<Record<BeatKind, number>> // market time of the last beat of each kind (so the feed isn't flooded)
   held?: number // coins in real wallets (players and bots), as of the last tick: the simulated crowd can't sell those
   baseTurnover: number
   flow?: FlowState // realistic engine only
@@ -350,6 +426,7 @@ export interface Token {
   pad: PadId // launchpad it launched on
   tax?: Tax // buy/sell tax (tax pads only)
   devTrades?: DevTrade[] // dev wallet buys/sells, newest first
+  beats?: Beat[] // the coin's story feed and chart markers, newest first (see storyEngine)
   win?: WinStats // rolling 1m / 5m / 24h volume and txns
   name: string
   ticker: string
@@ -514,7 +591,14 @@ export interface MarketState {
   engine?: MarketEngine
   /** Buys from people who read a player's call, landing over the next few seconds; also airdrop recipients
    *  dumping what a dev gave them (`side: 'sell'`, `qty` tokens). */
-  shillQueue?: { tokenId: string; atTick: number; usd: number; wallet: string; side?: 'sell'; qty?: number }[]
+  shillQueue?: { tokenId: string; atTick: number; usd: number; wallet: string; side?: 'sell'; qty?: number; sellAfter?: number }[] // (`sellAfter`: a buyer in it for the flip sells what the buy got, that many ticks later)
+  nextBeatId?: number // beats are numbered like trades
+  /** Story beats on their way to the feed: decided, their first readers already trading, shown at `at` (market time). */
+  beatQueue?: { tokenId: string; at: number; label: string; beat: BeatDraft; time: number; mcap: number; price: number }[] // (`time`, `mcap`, `price`: when it was made)
+  beatTape?: number // the last trade already read for beats
+  trends?: TrendFeed // themes hot outside the game right now, with where they come from
+  /** Events whose push on a coin is under way: they are announced at `at` (market time), when it has mostly played out. */
+  lateEvents?: { at: number; e: Omit<MarketEvent, 'id' | 'tick' | 'time'> }[]
 }
 
 export type MarketEngine = 'classic' | 'realistic'

@@ -17,6 +17,8 @@ import { fmtAge, fmtCompact, fmtNum, fmtTime, fmtUsd, toneClass } from '../../ut
 import { EmptyState } from '../ui'
 import { walletAddress } from '../../utils/address'
 import { playerId } from '../../net/client'
+import { StoryTab } from './StoryFeed'
+import { TrackedTab, useTrackedCount } from './TrackedTab'
 
 const TAG: Record<HolderTag, { icon: string; label: string; cls: string }> = {
   dev: { icon: '🧑‍💻', label: 'Dev', cls: 'text-down' },
@@ -30,7 +32,7 @@ const TAG: Record<HolderTag, { icon: string; label: string; cls: string }> = {
   agent: { icon: '🌀', label: 'Mayhem AI', cls: 'text-down' },
 }
 
-type Tab = 'trades' | 'positions' | 'holders' | 'traders' | 'dev'
+type Tab = 'trades' | 'story' | 'tracked' | 'positions' | 'holders' | 'traders' | 'dev'
 const th = 'h-7 px-2.5 text-[11px] font-medium text-dim whitespace-nowrap'
 const td = 'px-2.5 py-1 whitespace-nowrap'
 const row = 'h-9 border-b border-line/30 hover:bg-panel2/70'
@@ -47,6 +49,7 @@ export function TradesTape({ token }: { token: Token }) {
   const tradesOpen = useTradePick((s) => s.open)
   const toggleTrades = useTradePick((s) => s.toggle)
   const [tab, setTab] = useState<Tab>('trades')
+  const trackedCount = useTrackedCount(token)
   const [walletFilter, setWalletFilter] = useState<string | null>(null)
   const book = bookOf(token, now)
   let holding = 0
@@ -59,6 +62,8 @@ export function TradesTape({ token }: { token: Token }) {
   }
   const tabs: { id: Tab; label: ReactNode }[] = [
     { id: 'trades', label: 'Trades' },
+    { id: 'story', label: <>Story{(token.beats?.length ?? 0) > 0 && <Count n={token.beats!.length} />}</> },
+    { id: 'tracked', label: <>Tracked{trackedCount > 0 && <Count n={trackedCount} />}</> },
     { id: 'positions', label: <>Positions{mineCount > 0 && <Count n={mineCount} />}</> },
     { id: 'holders', label: <>Holders<Count n={holderCount} /></> },
     { id: 'traders', label: 'Top Traders' },
@@ -101,6 +106,8 @@ export function TradesTape({ token }: { token: Token }) {
       </div>
       <div ref={setScroller} className="min-h-0 flex-1 overflow-auto">
         {tab === 'trades' && <TradesTab token={token} walletFilter={walletFilter} setWalletFilter={setWalletFilter} scroller={scroller} />}
+        {tab === 'story' && <StoryTab token={token} />}
+        {tab === 'tracked' && <TrackedTab token={token} />}
         {tab === 'positions' && <PositionsTab token={token} />}
         {tab === 'holders' && <HoldersTab token={token} onFilter={filterWallet} />}
         {tab === 'traders' && <TopTradersTab token={token} onFilter={filterWallet} />}

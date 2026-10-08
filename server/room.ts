@@ -3,8 +3,10 @@
 // cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
 import { createHash } from 'node:crypto'
-import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, secPerTickOf, setCandleLog, setClock, SUPPLY, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
+import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, launchBlock, secPerTickOf, setCandleLog, setClock, SUPPLY, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
 import { BOT_BUST_USD, BOT_BY_ID, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, inVoice, mirrorWallet, pickCoin, STYLE, type BotBrain, type BotSpec } from './bots'
+import { tickStories } from '../src/game/storyEngine'
+import { trendSource } from './trendSource'
 import { BUY_PACE, buysPerMinute, DEV_DUMP_CHANCE, devDumpAfter, draw, eye, safety, TREND_SHARE, trendCoin, groupFor, PILE_ON_LIMIT, planExit, SIZE_SCALE, situation, type BrainGroup } from './brainBots'
 import { generatedLaunch } from '../src/data/tokens'
 import { valuePortfolio } from '../src/game/portfolioEngine'
@@ -26,7 +28,7 @@ import { walletAddress } from '../src/utils/address'
 import { airdropFeePerWallet, BOT_RATES, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
-import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, Timeframe, Trade, VolumeBot } from '../src/types'
+import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, TapeTrade, Timeframe, Trade, VolumeBot } from '../src/types'
 import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, type BoardList, type BoardMsg, type BoardRow, type PlayerCard, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
@@ -36,9 +38,12 @@ const KEYFRAME_TICKS = 120 // each coin and public wallet is re-sent in full eve
 // instead of every second. They were most of what a browser received; price, market cap, liquidity, curve progress
 // and everything a trade quote reads still go out the moment they change.
 const SLOW_FIELD_TICKS = 5
-const SLOW_FIELDS = new Set(['win', 'change', 'momentum', 'momentumScore', 'volMark', 'volume', 'buys', 'sells', 'creatorFees', 'feesPaid', 'holders', 'devTrades'])
+const SLOW_FIELDS = new Set(['win', 'change', 'hype', 'momentum', 'momentumScore', 'volMark', 'volume', 'buys', 'sells', 'creatorFees', 'feesPaid', 'holders', 'devTrades'])
 /** A steady number per id, to give every coin and wallet its own turn. */
 const turnOf = (id: string) => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return h }
+// World: what a browser is told of a coin's hidden state: nothing true. (A joining browser sketches placeholder charts
+// until a coin's real one is fetched, and the sketch wants a kind of coin: every coin is given the same one.)
+const WIRE_SIM = { archetype: 'chaotic' } as Token['sim']
 const WORLD_PLAYERS_TICKS = 5 // World: the player list is broadcast at most this often (seconds)
 setTradeImages(false) // the server's trade records carry no copy of the coin's picture (see tradingEngine)
 
@@ -82,6 +87,7 @@ function round(v: unknown): unknown {
 
 interface Member {
   info: RoomPlayer
+  focus?: string // World: the coin this player has open (the last one they asked the chart of): they get its live chart points and its whole tape
   seat?: string // guests: a hash of the private key they first joined with; only that key gets back in
   ws: WebSocket | null
   protect: string[]
@@ -186,6 +192,10 @@ export class Room {
   private sentImages = new Map<string, string | undefined>() // coin → the picture already sent to everyone (it goes out once)
   private playersDirty = false
   private lastBotChat = -999 // tick of the last bot chat line (the crowd doesn't all talk at once)
+  private botActions: WalletAction[] = [] // the bots' trades of the last tick (for the story engine)
+  private lastBeatSeq = 0 // beats already sent to browsers (see tickMarketDiff)
+  private freshTape = new Map<string, TapeTrade[]>() // World: this tick's new trades per coin, for the players who have that coin open
+  private sentTrends: unknown = null // the trend list browsers have (it goes out again only when the source hands over a new one)
   private botReply: { at: number; text: string } | null = null // a bot's answer to a real player, a few seconds later
   private botLines: string[] = [] // what the crowd said lately (nobody says the line somebody just said)
   // Lines the crowd owes the room, a few seconds from now: a reaction to something that just happened (a coin bonded,
@@ -447,7 +457,10 @@ export class Room {
       case 'card':
         return this.sendCard(me, msg.id)
       case 'candles':
-        return this.sendTo(playerId, { t: 'candles', tokenId: msg.tokenId, candles: candleStore.get(msg.tokenId) ?? null })
+        // (World: that coin is now the one this player follows closely. Its tape goes with the chart: the ticks they
+        // were sent while looking elsewhere carried only real players' trades.)
+        if (this.world && typeof msg.tokenId === 'string') me.focus = msg.tokenId
+        return this.sendTo(playerId, { t: 'candles', tokenId: msg.tokenId, candles: candleStore.get(msg.tokenId) ?? null, ...(this.world ? { tape: round(this.market.tokens.find((t) => t.id === msg.tokenId)?.tape ?? []) as TapeTrade[] } : {}) })
       case 'event': {
         // Something the player did to their own coin (a dev sell, a bundle dump, an airdrop). Only those three, at
         // most a few a second, and the words are the server's own (see ownCoinEvent).
@@ -1009,6 +1022,11 @@ export class Room {
     const wr = tickWallets(this.wallets.filter((w) => !w.bot), market, rng)
     const posts = [...tickSocial(market, rng, wr.actions, [...e1, ...e2]), ...this.playerPosts]
     this.playerPosts = []
+    // The coins' stories: what the market just did, in words, and what the timeline makes of each coin. (The bots'
+    // trades are the ones from the tick before: they trade after the market has moved.)
+    // Outside data: whatever the server's source says now (a provider, the owner's recording), else what it had.
+    if (this.world) market.trends = trendSource.current() ?? market.trends
+    tickStories(market, { before: this.market, events: [...e1, ...e2, ...this.playerEvents], actions: [...wr.actions, ...this.botActions], posts, wallets: this.wallets })
 
     // Players' dev tools: volume bots on their coins, and sleuths hunting bundles.
     const bots: Record<string, BotRun> = {}
@@ -1100,7 +1118,9 @@ export class Room {
     }
     this.market = market
     this.wallets = [...wr.wallets, ...this.wallets.filter((w) => w.bot)]
+    const fromSim = wr.actions.length
     this.botTick(rng, wr.actions)
+    this.botActions = wr.actions.slice(fromSim) // what the bots just did: the next tick's stories read it
     if (this.world && this.market.tick % 60 === 0) this.closeSeasonIfDue() // a new month closes the season even if nobody has the leaderboard open
     for (const m of billed) this.sendWallet(m)
     // Players' calls on the timeline: the server follows each called coin's best price and judges the call when it is
@@ -1137,9 +1157,24 @@ export class Room {
 
     const points: TickMsg['points'] = {}
     for (const [id, pts] of this.pending) points[id] = pts.map(([time, price, prev, vol]) => [time, r6(price), r6(prev), r3(vol)])
+    this.freshTape.clear()
     const msg: TickMsg = {
       t: 'tick', market: this.tickMarketDiff(), wallets: this.walletDiff(), events, posts, actions: wr.actions,
-      points, newCandles, bots,
+      points: this.world ? {} : points, newCandles, bots,
+    }
+    // World: a browser draws one chart and one tape at a time, and those were a third of everything it received.
+    // So the tick carries neither; each player is sent the chart points and trades of the coin they have open, just
+    // before the tick (built once per coin, however many are looking at it).
+    if (this.world) {
+      const looking = new Map<string, Member[]>()
+      for (const m of this.members.values()) if (m.focus && m.ws && m.ws.readyState === 1) looking.set(m.focus, [...(looking.get(m.focus) ?? []), m])
+      for (const [id, who] of looking) {
+        const pts = points[id]
+        const tape = this.freshTape.get(id)
+        if (!pts && !tape) continue
+        const data = Buffer.from(JSON.stringify({ t: 'focus', tokenId: id, ...(pts ? { points: pts } : {}), ...(tape ? { tape: round(tape) as TapeTrade[] } : {}) } satisfies ServerMsg))
+        for (const m of who) m.ws!.send(data, { binary: false })
+      }
     }
     this.pending = new Map()
     setCandleLog(null)
@@ -1160,7 +1195,12 @@ export class Room {
   private netMarket(): NetMarket {
     let max = this.lastTapeId
     for (const t of this.market.tokens) for (const e of t.tape) if (e.id > max) max = e.id
-    return round({ ...this.market, tokens: this.market.tokens }) as NetMarket
+    // (Not the engine's queues: orders and story beats that have not happened yet are nobody's to read.)
+    const { shillQueue: _q, beatQueue: _b, beatTape: _t, lateEvents: _l, ...all } = this.market
+    void _q, void _b, void _t, void _l
+    // (World: nor a coin's hidden state, nor the dice.)
+    const open = this.world ? { ...all, seed: 0, tokens: all.tokens.map((t) => ({ ...t, sim: WIRE_SIM })) } : all
+    return round(open) as NetMarket
   }
 
   /**
@@ -1169,6 +1209,7 @@ export class Room {
    */
   private tickMarketDiff(): TickMsg['market'] {
     const since = this.lastTapeId
+    const sinceBeat = this.lastBeatSeq
     let max = since
     const tick = this.market.tick
     const tokens: TokenDiff[] = this.market.tokens.map((t) => {
@@ -1179,7 +1220,9 @@ export class Room {
       const snap: Record<string, string> = prev ?? {}
       const out: TokenDiff = { id: t.id }
       for (const [k, v] of Object.entries(t)) {
-        if (k === 'id' || k === 'tape' || (k === 'sim' && prev)) continue
+        if (k === 'id' || k === 'tape' || k === 'beats' || (k === 'sim' && prev)) continue
+        // World: a market cap is its price times the supply, so it rides on the price (the browser works it out).
+        if (this.world && prev && k === 'mcap') continue
         // A coin's picture never changes and can be tens of KB. It goes out with the coin's first send (and in the
         // welcome of anyone who joins later), not again on every refresh turn, and it isn't re-read every tick.
         if (k === 'image') {
@@ -1187,17 +1230,28 @@ export class Room {
           this.sentImages.set(t.id, v as string | undefined)
         }
         if (prev && !slowTurn && SLOW_FIELDS.has(k)) continue
-        const rv = round(v)
+        // World: a coin's hidden state (its quality, its regime, where its story stands) is the server's alone.
+        const rv = this.world && k === 'sim' ? WIRE_SIM : round(v)
         const js = JSON.stringify(rv)
         if (!prev || prev[k] !== js) {
           ;(out as Record<string, unknown>)[k] = rv
           snap[k] = js
         }
       }
+      const known = this.sentTokens.has(t.id)
       this.sentTokens.set(t.id, snap)
       const tape = t.tape.filter((e) => e.id > since)
       for (const e of tape) if (e.id > max) max = e.id
-      if (tape.length) out.tape = round(tape) as TokenDiff['tape']
+      // World: a tick carries only real players' trades (friends are followed by them); a coin's whole tape goes to
+      // the players who have it open (see `focus` in tick()).
+      if (this.world) {
+        if (tape.length) this.freshTape.set(t.id, tape)
+        const named = tape.filter((e) => e.pid || e.addr)
+        if (named.length) out.tape = round(named) as TokenDiff['tape']
+      } else if (tape.length) out.tape = round(tape) as TokenDiff['tape']
+      // Its story beats travel the same way: new ones whole, changed ones as what changed (a coin's first send has them all).
+      const beats = known ? t.beats?.filter((b) => b.seq > sinceBeat).map((b) => (b.id > sinceBeat ? b : { id: b.id, seq: b.seq, move: b.move })) : t.beats
+      if (beats?.length) out.beats = round(beats) as TokenDiff['beats']
       return out
     })
     for (const id of this.sentTokens.keys()) {
@@ -1206,9 +1260,15 @@ export class Room {
       this.sentImages.delete(id)
     }
     this.lastTapeId = max
-    const { tokens: _all, ...rest } = this.market
-    void _all
-    return { ...(round(rest) as Omit<NetMarket, 'tokens'>), tokens }
+    this.lastBeatSeq = this.market.nextBeatId ?? 0
+    // The market's own header goes out every tick: not the queues, and not the trend list (it is in the welcome, and
+    // again only when the data source hands over a new one: a provider refreshed, or went out of date).
+    const { tokens: _all, shillQueue: _q, beatQueue: _b, beatTape: _t, trends: _tr, lateEvents: _l, ...rest } = this.market
+    void _all, void _q, void _b, void _t, void _l
+    const fresh = _tr && this.sentTrends !== null && _tr !== this.sentTrends ? { trends: _tr } : {}
+    this.sentTrends = _tr ?? this.sentTrends ?? null
+    // (World: the market's dice stay on the server too.)
+    return { ...(round(rest) as Omit<NetMarket, 'tokens'>), ...(this.world ? { seed: 0 } : {}), ...fresh, tokens }
   }
 
   /** Only wallets that changed (a trade, a position) go out; `trades` carries just the new ones. */
@@ -1691,7 +1751,7 @@ export class Room {
     }
     const cooked = cookToken(this.market, rng, spec)
     const id = cooked.token.id
-    this.market = { ...cooked.market, tokens: cooked.market.tokens.map((t) => (t.id === id ? ({ ...t, creator: 'you', creatorId: m.info.id, creatorName: m.info.name, devAddr: walletAddress(m.info.id, main, 'sol') } as NetToken) : t)) }
+    this.market = { ...cooked.market, tokens: cooked.market.tokens.map((t) => (t.id === id ? ({ ...t, creator: 'you', creatorId: m.info.id, creatorName: m.info.name, devAddr: walletAddress(m.info.id, main, 'sol'), sim: t.sim.flow ? { ...t.sim, flow: { ...t.sim.flow, botDev: true } } : t.sim } as NetToken) : t)) }
     m.wallet = { ...w, cash: Math.max(0, w.cash - COOK_FEE - marketing), feesPaid: w.feesPaid + COOK_FEE }
     this.freshIds.add(id)
     this.cooked.set(id, { pid: m.info.id, walletId: main, chain: 'sol', vault: 0, feeMark: 0, grad: false })
@@ -1708,6 +1768,8 @@ export class Room {
     this.botChat(m, trend && rng.chance(0.5) ? `${trend.theme} szn. just cooked $${ticker} 🍳` : this.say('cook', rng, ticker))
     b.lastPost = tick - 900 // always shills its own launch
     this.botPost(m, after, trend ? `${ticker} just launched, ${trend.theme} meta is running 🍳 early` : `${ticker} just launched on pump 🍳 early`)
+    // Its snipers and that post's readers are in before the coin is shown to anybody (see launchBlock).
+    this.market = launchBlock(this.market, id, rng)
   }
 
   // ─── Admin ─────────────────────────────────────────────────────────────────

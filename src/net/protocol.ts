@@ -3,8 +3,8 @@
 import type { CandlePoint } from '../game/marketEngine'
 import type { WalletLayout, WalletState } from '../game/orders'
 import type { Asset } from '../game/tradingEngine'
-import type { Chain, TradeSetting } from '../types'
-import type { Candle, GameMode, LaunchStyle, MarketEngine, MarketEvent, MarketState, SimWallet, SocialPost, Timeframe, Token, VolumeBot, WalletAction } from '../types'
+import type { Beat, BeatPatch, Chain, TradeSetting } from '../types'
+import type { Candle, GameMode, LaunchStyle, MarketEngine, MarketEvent, MarketState, SimWallet, SocialPost, TapeTrade, Timeframe, Token, VolumeBot, WalletAction } from '../types'
 
 export const MP_PATH = '/mp'
 
@@ -225,7 +225,7 @@ export type ClientMsg =
 
 // ─── Server → browser ────────────────────────────────────────────────────────
 /** A coin in a tick: `id` plus only the fields that changed since the last tick (`tape` = new trades only). */
-export type TokenDiff = Partial<NetToken> & { id: string }
+export type TokenDiff = Omit<Partial<NetToken>, 'beats'> & { id: string; beats?: (Beat | BeatPatch)[] } // (`beats` = new ones whole, changed ones as patches)
 /** A bot wallet in a tick: only wallets that changed are sent; `trades` = new trades only. */
 export type WalletDiff = Partial<SimWallet> & { id: string }
 
@@ -248,7 +248,12 @@ export type ServerMsg =
   | { t: 'players'; hostId: string; players: RoomPlayer[] }
   | { t: 'round'; round: RoundInfo; market?: NetMarket; wallets?: SimWallet[] }
   | TickMsg
-  | { t: 'candles'; tokenId: string; candles: Record<Timeframe, Candle[]> | null }
+  // (World: the answer also carries the coin's tape, and from then on that coin is the one this player is sent the
+  // live chart points and every trade of: see `focus`.)
+  | { t: 'candles'; tokenId: string; candles: Record<Timeframe, Candle[]> | null; tape?: TapeTrade[] }
+  // World: the live chart points and trades of the coin a player has open, sent just before the tick they belong
+  // to. (The tick itself carries no chart points there, and of the tapes only real players' trades.)
+  | { t: 'focus'; tokenId: string; points?: CandlePoint[]; tape?: TapeTrade[] }
   | { t: 'card'; id: string; card: PlayerCard | null } // null: nobody with a wallet here by that id
   | { t: 'chat'; from: string; name: string; avatar: string; text: string; time: number }
   | { t: 'error'; message: string }

@@ -299,6 +299,60 @@ async function checklistBot(page: Page) {
     await shot(page, 'coin-tabs')
   })
 
+  await step(page, 'Story tab', 'The Story tab under the chart should open and say how to read it, and its filters (Story, Market, Outside data, All) should each switch.', async () => {
+    await onCoinPage(page)
+    act('Click the "Story" tab under the chart')
+    // (The chart's own "Story" switch for its pins comes first on the page: the tab is the one in the tab bar.)
+    await page.locator('main button.relative', { hasText: /^Story/ }).first().click()
+    await page.waitForTimeout(400)
+    if (!/How to read this/.test(await page.locator('main').innerText())) throw new Error('the Story tab did not open')
+    for (const f of ['Story', 'Market', 'Outside data', 'All']) {
+      act(`Click the "${f}" filter on the Story tab`)
+      await page.locator('main .sticky button', { hasText: new RegExp(`^${f}`) }).first().click()
+      await page.waitForTimeout(200)
+    }
+    await shot(page, 'story-tab')
+    act('Back to the "Trades" tab')
+    await page.locator('main button.relative', { hasText: /^Trades/ }).first().click()
+    await page.waitForTimeout(300)
+  })
+
+  await step(page, 'Tracked tab', 'Tracking a wallet that trades the open coin should list it on the Tracked tab with its position, and clicking its row should pick it out on the chart and let it go again.', async () => {
+    await onCoinPage(page)
+    act('Track a wallet that has traded this coin (as the Track button on a wallet does)')
+    const found = await page.evaluate(() => {
+      const g = (window as unknown as { __game: { getState(): { selectedId?: string | null; market: { tokens: { id: string; status: string }[] }; wallets: { id: string; trades: { tokenId: string }[] }[]; trackedWallets: string[]; toggleTrackWallet(id: string): void; select(id: string): void } } }).__game.getState()
+      // The coin most wallets have traded: open it, and track one of them.
+      const live = new Set(g.market.tokens.filter((t) => t.status === 'bonding' || t.status === 'graduated').map((t) => t.id))
+      const seen = new Map<string, string[]>()
+      for (const w of g.wallets) for (const t of w.trades) if (live.has(t.tokenId) && !seen.get(t.tokenId)?.includes(w.id)) seen.set(t.tokenId, [...(seen.get(t.tokenId) ?? []), w.id])
+      const best = [...seen.entries()].sort((a, b) => b[1].length - a[1].length)[0]
+      if (!best) return false
+      if (!g.trackedWallets.includes(best[1][0])) g.toggleTrackWallet(best[1][0])
+      g.select(best[0])
+      return true
+    })
+    if (!found) return act('No wallet has traded a live coin yet in this round: nothing to show (skipped)')
+    await page.waitForTimeout(500)
+    act('Click the "Tracked" tab under the chart')
+    await page.locator('main button.relative', { hasText: /^Tracked/ }).first().click()
+    await page.waitForTimeout(400)
+    const text = await page.locator('main').innerText()
+    if (!/Tracked on this coin/.test(text) || !/% of supply/.test(text)) throw new Error('the Tracked tab did not list the tracked wallet')
+    act('Click the trader row to pick it out on the chart, then again to let it go')
+    const rowEl = page.locator('main table tbody tr.cursor-pointer').first()
+    await rowEl.click()
+    await page.waitForTimeout(300)
+    if (!/Showing one trader on the chart/.test(await page.locator('main').innerText())) throw new Error('clicking a trader did not pick it out on the chart')
+    await shot(page, 'tracked-tab')
+    await rowEl.click()
+    await page.waitForTimeout(300)
+    if (/Showing one trader on the chart/.test(await page.locator('main').innerText())) throw new Error('clicking the trader again did not let it go')
+    act('Back to the "Trades" tab')
+    await page.locator('main button.relative', { hasText: /^Trades/ }).first().click()
+    await page.waitForTimeout(300)
+  })
+
   let boughtId: string | null = null
   await step(page, 'Buy a coin', 'Choosing an amount and pressing BUY should give you some of the coin, and your total value should only drop by fees.', async () => {
     await onCoinPage(page)

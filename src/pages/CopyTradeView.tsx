@@ -7,6 +7,7 @@ import { useTokenMap } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { useGame } from '../game/store'
 import { walletStats, type Period, type WalletStats } from '../game/walletEngine'
+import { MIND_META, mindOf } from '../game/traderMinds'
 import type { CopyConfig, SimWallet, WalletStyle } from '../types'
 import { fmtAge, fmtCompact, fmtNum, fmtPct, fmtUsd, toneClass } from '../utils/format'
 
@@ -208,6 +209,7 @@ function WalletDrawer({ walletId, period, onClose, onCopy }: { walletId: string;
           <div className="min-w-0 flex-1">
             <div className="font-display text-[17px] font-bold">{w.name}</div>
             <div className="mt-0.5 flex items-center gap-1.5"><StyleBadge style={w.style} /><span className="text-[10px] text-dim">skill hidden · judge the stats</span></div>
+            {mindOf(w) && <div className="mt-1 text-[11px] text-muted" title="How this wallet reacts to what a coin's feed says"><span className="font-semibold text-ink">{MIND_META[mindOf(w)!].icon} {MIND_META[mindOf(w)!].label}.</span> {MIND_META[mindOf(w)!].blurb}.</div>}
           </div>
           <button onClick={onClose} className="rounded p-1 text-muted hover:bg-raise hover:text-ink" aria-label="Close"><X size={16} /></button>
         </div>
@@ -240,13 +242,16 @@ function WalletDrawer({ walletId, period, onClose, onCopy }: { walletId: string;
           </Sub>
           <Sub title="Recent trades">
             {w.trades.length === 0 ? <EmptyState icon="📭" title="No trades this session yet" /> : w.trades.slice(0, 25).map((tr) => (
-              <div key={tr.id} className="flex items-center gap-2 border-b border-line/50 px-3 py-1.5 text-[11px]">
+              <div key={tr.id} className="border-b border-line/50 px-3 py-1.5 text-[11px]">
+              <div className="flex items-center gap-2">
                 <span className="num w-9 text-dim">{fmtAge(now - tr.time)}</span>
                 <span className={clsx('w-8 font-semibold', tr.side === 'buy' ? 'text-up' : 'text-down')}>{tr.side === 'buy' ? 'Buy' : 'Sell'}</span>
                 <TokenIcon token={{ emoji: tr.emoji, hue: tr.hue, status: 'graduated' }} size={18} />
                 <span className="font-semibold">{tr.ticker}</span>
                 <span className="ml-auto num">{fmtUsd(tr.usd)}</span>
                 <span className={clsx('num w-16 text-right', tr.pnl !== undefined ? toneClass(tr.pnl) : 'text-dim')}>{tr.pnl !== undefined ? `${tr.pnl >= 0 ? '+' : '-'}${fmtCompact(Math.abs(tr.pnl))}` : '—'}</span>
+              </div>
+              {tr.why && <div className="mt-0.5 truncate pl-[44px] text-[10px] text-dim" title={tr.why}>↳ {tr.why}</div>}
               </div>
             ))}
           </Sub>

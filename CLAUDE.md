@@ -37,6 +37,12 @@ npx tsx scripts/seat-test.ts                # guest seats: only the browser with
 npx tsx scripts/kol-test.ts                 # KOL copy traders: followers copy a KOL's buys and sells
 npx tsx scripts/social-test.ts              # followers are the server's count: the World ignores claims, calls judged on the server
 npx tsx scripts/charts-test.ts 30           # charts across a restart: short timeframes rebuilt from the real 1m candles
+npx tsx scripts/story-test.ts 1 0.25 3      # a coin's story feed, what stories do to trading, that copying them is not free money (8 min)
+npx tsx scripts/fair-test.ts 4              # no simple rule makes money in the World (run 4 to 6 side by side with --json, then `sum`; after ANY market change)
+npx tsx scripts/fair-test.ts classic        # the same on the classic engine (solo play's default)
+npx tsx scripts/minds-test.ts 1 0.25        # trader types: each mind acts only on what it says, on lines a player could have read
+npx tsx scripts/source-test.ts              # the data-source plug: outside data cleaned, dated, honest about its source; stale lists dropped
+npx tsx scripts/scale-test.ts               # what a World player is sent: only the open coin's chart and tape, no hidden state, under budget (6 min)
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/health-test.ts              # safety net: health verdicts, backups (stand-in database), World restore, admin routes
@@ -149,6 +155,7 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
 |---|---|
 | `src/game/marketEngine.ts` | The market: coins, price moves, launches, bonding curves, rugs, candles. Shared by game and server. |
 | `src/game/tradingEngine.ts` | One buy / sell / swap on one wallet (fees, slippage, MEV). |
+| `src/game/storyEngine.ts`, `traderMinds.ts`, `traderView.ts`, `dataSources.ts` | V2: a coin's story feed, trader types, a tracked trader on a coin, the door for outside data. |
 | `src/game/orders.ts` | **Shared pure money functions** (`runBuy`, `runSell`, `runSwap`, `runTransfer`, `runGiveAway`, `payNative`, wallet state). The game and the server both call these. |
 | `src/game/store.ts` | The game's state (Zustand): solo ticks, actions, optimistic results in rooms. |
 | `src/net/protocol.ts` | Every message between game and server. Change both sides together. |
@@ -233,6 +240,9 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
    crowd launch's insiders can dump into the pool (`rugProb` by archetype). Tuning any of it: read
    `npx tsx scripts/market-report.ts` before and after (columns, time to bond, launch odds, rugs an hour), then run
    `curve-test`, `crowd-test` and a long `world-soak` (coins must not pile up; `SIZE_CAP_MULT` keeps the giants few).
+   **The simulated market is also fair**: no predictable push may be left for a buyer to ride (see "The fair
+   market" in the V2 section and `TOPS` in `marketEngine.ts`). Run `fair-test` after touching any of it, and give
+   every new push (an event, a tool, a kind of wallet) its answer in the same change.
 9. Player-facing behaviour follows Axiom Pro / GMGN where they have an equivalent. Check how they do it first.
 
 ## Conventions
@@ -242,7 +252,8 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
 - Files are UTF-8 with emoji in strings. Edit with a real editor or a Node script. **Never rewrite source files
   with PowerShell** (`Set-Content` has corrupted the emoji before).
 - Numbers on the wire are rounded to 6 significant digits (`round()` in `server/room.ts`).
-- What a browser receives each second is the limit on how many can play. In the World a coin's on-screen statistics
+- What a browser receives each second is the limit on how many can play (see "Stage 5" in the V2 section: a World
+  tick carries no chart points and only real players' trades). In the World a coin's on-screen statistics
   (`SLOW_FIELDS` in `server/room.ts`) go out every `SLOW_FIELD_TICKS` seconds, each coin on its own turn; anything a trade
   quote reads stays live. Full refreshes are staggered per coin and wallet (`KEYFRAME_TICKS`), never all on one tick.
 - Feature switches the owner flips live are in Supabase `app_flags` (`src/game/flags.ts`). New risky features
@@ -270,6 +281,156 @@ Next, in order:
 4. Phase 4: ops and monitoring.
 
 Known gaps: cashback tier still comes from the client's reported volume (bounded 10–30%); real referral links (the old fake referrals are off, `REFERRALS_ENABLED`).
+
+## V2: stories, the fair market, tracked traders, trader types, the data plug, scale
+
+The owner's brief for V2 was a professional real-time trading terminal: stories that move the market, tracked traders
+on the chart, trader types, an honest data-source plug, and scale. It was built and measured in a separate test copy
+(the folder `moonrush-v2` next to this one, on the owner's PC) and brought into the game in one piece on his word on
+2026-10-08. The notes below are that copy's, as measured there.
+
+**Stage 1, stories: done (2026-10-06).** Test: `npx tsx scripts/story-test.ts [World hours=2] [warm-up=0.5] [A/B hours=3]`.
+
+- A coin has a feed of **beats** (`Token.beats`, newest first, `BEATS_KEPT`), shown on the coin page's Story tab
+  (`components/token/StoryFeed.tsx`) and pinned on its chart (`bubbles.ts`, `PriceChart.tsx`, the "Story" and "Events"
+  switches under the chart). A minute after a beat it says what the price did next (`move`).
+- **Three kinds of content, never mixed up.** A beat's `src` says which, and every place that shows a beat shows it
+  (`SRC_META` in `components/token/beatMeta.ts`): `market` = facts read off this simulated market's trades and events;
+  `story` = generated narrative, and every account, outlet and brand in it is invented (`src/data/stories.ts`: never
+  add a real name or a parody of one); `trend` = outside data, a theme from the real launches the owner recorded,
+  worded with its date so nobody takes it for a live feed. `market.trends` is a `TrendFeed` with its `source` and
+  `asOf`: solo play ships a labelled sample (`src/data/trends.ts`), the World's server uses the brain's recording
+  (`worldTrends()` in `server/brainBots.ts`). A real data provider plugs in by producing a `TrendFeed`. The approved
+  theme words are shared now (`src/data/themeWords.ts`; `server/trendThemes.ts` re-exports them).
+- `tickStories(market, input)` (`src/game/storyEngine.ts`) runs after `tickSocial` wherever a market ticks: `advanceLocal`
+  in the store and `tick()` in the room. It has its own dice (the market's seed and tick), and **it never touches a
+  price** (the test checks every tick). A development's followers are queued orders like a call's readers
+  (`shillQueue`; `sellAfter` = that buyer flips exactly what the buy got, some ticks later) plus a little attention.
+- **A post reaches the feed a few seconds after it was made** (`STORY.seenAfter`, `market.beatQueue`): its fastest
+  followers are in first, as with a real post. The beat is stamped with when it was made, so its pin sits where the
+  move starts. This is what keeps the feed from being a buy signal; the Help text says so to players.
+- A story has an arc (`meme`, `caller`, `community`, `builder`, `whale`), heats up as posts land (bigger accounts
+  join), can turn sour at any step (`drama`: holders sell), and fades. Its lines never repeat within a story, and a
+  line that refers back ("that partnership was made up", marked `[partner]` in the text file) is only used when that
+  happened.
+- All tuning is in one object, `STORY`. `STORY.pull = 0` tells the same kind of beats with nobody acting on them: the
+  test runs the market both ways to see what stories themselves do.
+- Wire: beats travel like trades (new ones whole, changed ones as `{ id, seq, move }`, `lastBeatSeq` in the room;
+  `mergeBeats` in the browser). The engine's queues (`shillQueue`, `beatQueue`) are not sent at all any more (orders
+  and posts that have not happened yet are nobody's to read), and the trend list comes once, in the welcome.
+- Measured in the World with its bots (1 h, `story-test`): a story post moves its coin about +5% before it can be read;
+  a drama leaves it 6 to 10% lower a minute later; a coin's feed gets 2 to 3 lines a minute while its story runs;
+  about 15 stories run at a time; the feed is under 1% of what a browser receives. **Buying every story post when it
+  shows loses money**: -5% after 30 s, -6% after a minute, -9% after two, -13% after five (`fair-test`, with the fair
+  market below; before it, on the live game's drifting market, a story post made +4 to +15% like everything else).
+  Stories cost the server about 1.4 ms a tick on the dev PC (7.7 → 9.2 ms). The World's save is 10 to 15% bigger
+  (the feeds): when this moves to the real game, decide whether feeds are saved or start empty after a restart.
+  (Measured before the fair market: with stories on, slightly fewer coins bonded, 2.6% of launches against 3.1%.)
+
+**The fair market: done (2026-10-07), on the owner's word ("close the trick first").** Found while measuring stage 1:
+the market itself paid whoever bought what was running (so did the live game until V2 came in). `scripts/fair-test.ts` is
+the measure: a paper trader puts $100, fees included, on rules anybody can follow, in a World with its bots
+(`npx tsx scripts/fair-test.ts 4`, several runs added up with `sum`; `FAIR_REPO=<folder>` measures another copy, read
+only) and on the classic engine (`npx tsx scripts/fair-test.ts classic`). A rule that makes money on average is a hole.
+
+- **Before (the game as it was until 2026-10-08)** (World, 12 h; average after fees at 30 s / 1 min / 2 min / 5 min): a coin first
+  reaching 40% of its curve +19 / +32 / +52 / +77%; any launch as it appears +24% in 30 s (3 in 4 win); a bot chef's
+  launch +93% in 30 s; a coin that has just bonded +18 / +40 / +70 / +120% (9 in 10 win); a "trending" event
+  +22 / +38 / +56 / +79%; a migrated coin up 25% in a minute +5 / +10 / +18 / +26%. A coin at 40% bonded 19 times in
+  100 where its price allowed 10. Classic engine: first reaching 22% +6 / +11 / +16 / +22%, a "viral" event +34% in
+  2 min, just bonded +46% in 2 min.
+- **After** (World, 24 h): first reaching 40% -0 / -1 / -1 / -4%; 50% and 60% between +3 and -2%; a bot
+  chef's launch -3 / -2 / -1 / +1%; just bonded +1 / -1 / -2 / -3%; "trending" 0 / +1 / +2 / -2%; a migrated coin up
+  25% in a minute -4 / -3 / -2 / -4%. Held to the end (it bonds, dies or 15 minutes pass) every rule loses 5 to 13%.
+  A coin at 40% bonds 8 times in 100 (its price allows 10), at 60% 23 (23), at 80% 43 (45). Classic: every rule
+  between -13% and +5%, none clearly above zero.
+- **What does it** is listed above `TOPS` in `marketEngine.ts` (read that first). In short: on a real-time curve the
+  crowd's net buying carries a matching chance that holders dump into it (`TOPS`, `climbOf`, `topTakes`), the crowd
+  buys no more than could be dumped back and nothing in a coin nobody holds, and first holders come in one go before
+  anybody can be ahead (`snipe`, `launchBlock`); the crowd trades against orders from outside it and against event
+  jumps (`outsideNet`, `flow.jolt`, `sim.jolt`); every coin the regime model moves (pools, classic curves) gets a
+  matching chance of a jump against its pull (steps 4a / 4b of `tickMarket`); a pool opens with no pull (`migrate`);
+  good news is announced when it has played out (`lateEvents`), warnings at once. `TOPS.k = 0` switches it off.
+- **A real player's own launch is left alone on its curve** (`rules` in `stepFlow`; a bot chef's coin carries
+  `flow.botDev` and is not): cooking goes as in the live game (curve-test: 19 of 45 strong launches bonded, 2 of 45
+  lazy ones; market-report: lazy 0%, decent 14%, strong 45%). Whoever buys a real player's running launch still rides
+  it, as in the live game: that is the cook's game, the owner's to change. Once bonded it is a pool like any other.
+- **What it costs.** About 1% of launches bond (22 an hour in
+  the World, was 62; real pump.fun: 0.2 to 2.7%), so the Migrated column holds about 48 coins (was 90) and New about
+  29 (was 36). The Final Stretch is kept at 7 to 8 (was 10) by a slower clock high on a curve (`FLOW.stretchPace`:
+  no odds change), so bonding takes longer (half within 3.6 min, was 2.8). Charts on running coins show sudden dumps,
+  pools jump both ways. A bot chef's coin appears already about 40% up its curve (its snipers and its post's readers
+  are its launch block). The bots end a 3-hour test between 0% (pros) and -12% (degens); skill still shows. On the
+  classic engine a 20-hour market bonds 9 to 17 coins (was 41). More winners without reopening the hole: make
+  launches open higher (the launch block, `snipe`), never by letting a running coin drift.
+- **What is still against a buyer is readable**: a dev who holds a bag (crowd devs sell into a pump: `FLOW.devDump`),
+  a rug in a pool, a post everybody has acted on, and the fees. That is why "any coin, any moment" loses 7 to 13%.
+- Dials: `TOPS` (k, drop, scare, keep), `FLOW.hotPace` / `stretchPace` / `crowdHold` / `left`, `POOL_DROP`,
+  `GRAD_SUPPLY`. `FLOW.exit` (a quiet coin's holders selling out) is OFF on purpose: on, every buy lost a fifth.
+- **A new signal needs a new rule in `fair-test`.** The rules there are the ones the game shows today (curve lines,
+  price runs, bonding, crashes, calls, events, large buys, story posts, bot chefs' launches). Stage 2 and 3 will show
+  more (tracked traders on the chart, trader types): add each as a paper rule when it is built, and it must not pay.
+- A World saved before V2 keeps running: a bot chef's coin from before has no `botDev` and plays as a player's until
+  it ends (rehearsed on a World saved by the old code before the push).
+
+**Stage 2, tracked traders on the chart: done (2026-10-08).** `src/game/traderView.ts` (pure: `tradersOn`, a colour
+per tracked wallet by its place in `trackedWallets`), the coin page's Tracked tab (`components/token/TrackedTab.tsx`:
+position, share of supply, average entry, unrealized / realized, history, Track / Untrack), and on the chart
+(`PriceChart.tsx`, `bubbles.ts`): tracked trades ringed in the trader's colour (`Bubble.tint`), a dashed
+average-entry line per tracked holder (marker kind `entries`, "Trader avg", the six biggest), and click a row to
+pick one trader out (`traderFocus.ts`). Browser only: nothing new on the wire or the server. A wallet remembers 60
+trades, so realized profit on a coin is what those show. `fair-test` has the matching rules ("copying a
+smart-money / KOL / sniper / whale / World bot's first buy"): all lose 3 to 19% (World, 18 h). UI bots have a
+"Tracked tab" step.
+
+**Stage 3, trader types: done (2026-10-08).** `src/game/traderMinds.ts`: besides its style a tracked wallet has a
+mind (`mindOf`: narrative, FOMO, contrarian, panic, swing; from its id and style, so nothing is saved; snipers and
+the World bots have none). A mind reads only what a player can (the coin's `beats`, its five-minute change, its
+status), never a line younger than `MIND.seen` seconds, and makes `MIND.share` of the wallet's entries
+(`mindEntry`) and its exits first (`mindExit`), in `tickWallets`. A trade a mind made carries `why`
+(`WalletTrade`, `WalletAction`): shown under the trade on the wallet's profile and the Tracked tab, and as the
+"why" of the feed's opened / sold lines. Test: `npx tsx scripts/minds-test.ts 1 0.25` (each mind acts only on what
+it says). Measured: minds make about a third of these wallets' trades. **Found with `fair-test`:** with minds
+sending KOLs into whatever was running, a KOL's followers (the 1 to 3x crowd buys behind a KOL's buy) made a coin
+at 80% of its curve pay +9% in two minutes. So only a KOL's own pick brings followers, and a KOL's mind picks few of
+its entries (`MIND.kolShare`). After: every rule in `fair-test` loses or is flat, World (24 h) and classic.
+
+**Stage 4, the data-source plug: done (2026-10-08).** One thing comes into the game from outside: which themes are
+hot in real launches (a `TrendFeed`). `src/game/dataSources.ts` is the door: `cleanFeed` (only approved theme words
+from `themeWords.ts` get in, it must carry an `asOf` date, a theme's narrative is the game's own), `isStale` (older
+than `TREND_MAX_AGE_DAYS`, the one number shared with trend coins: the story engine then stops leaning on it) and
+`describeSources` (the three kinds of content: simulated, generated, outside data). `server/trendSource.ts` is the
+plug: a provider if one is configured (`TREND_FEED_URL` or `TREND_FEED_FILE`, `TREND_FEED_NAME`,
+`TREND_FEED_MINUTES`; shape in `server/data/trend-feed.example.json`), else the owner's recording, else the sample.
+**Nothing is configured, so no request is made: never give it a made-up address or call a recording live.** A
+provider that fails keeps its last good list until that list's own date runs out. `/sources` on the server says
+what is in use (never the provider's address). A new list reaches the World's players once, in a tick. Help shows
+"Where the data comes from" (`components/DataSources.tsx`). Test: `npx tsx scripts/source-test.ts` (23 checks; its
+"provider" is a temp file and a local test server, nothing leaves the PC). The owner has not picked a provider, so
+on Render none of the `TREND_FEED_*` variables is set.
+
+**Stage 5, scale (send each World player less): done (2026-10-08).** In the World only (`server/room.ts`; friends
+rooms are as before): a tick carries no chart points and, of the tapes, only real players' trades; the coin a
+player has open (`Member.focus`, set when their browser asks for its chart with `candles`) is sent that coin's
+points and whole tape in a `focus` message just ahead of each tick, built once per coin; the `candles` answer
+carries the coin's tape. A market cap rides on its price; `hype` is a slow field; a coin's hidden `sim` goes out as
+a stand-in (`WIRE_SIM`: a joining browser still sketches opening charts from it, and stripping it bare crashed the
+join) and the market's `seed` as 0, which closes the old "a cheater could read sim" gap. Browser:
+`focusNext` / `mergeTape` in `src/net/client.ts`. Measured (100 bots, this PC): a tick 42.7 -> 27 KB raw; a player
+56 -> 37 KB a second raw, 15.7 -> 9.5 KB compressed, 0.9 -> 0.4 ms of processor; `load-test`'s estimate for the
+Starter plan about doubles. **What a player gives up:** the Holders / Top Traders tabs of a coin now start from its
+last 40 trades when it is opened (they used to build up from everything seen since joining). Test:
+`npx tsx scripts/scale-test.ts` (11 checks, 6 min). Next wins, not built: the per-coin `win` statistics (13% of
+a tick), whole wallets resent on every trade (13%), the list of coin ids every tick (7%).
+
+Also open after stage 1:
+- (Done in stage 5: in the World a coin's `sim` and the market's `seed` no longer reach browsers. Friends rooms still send them.)
+- (Done in stage 4: a trend list older than 14 days is marked out of date and no story leans on it.)
+- (Done with the fair market: stories were measured again on it, `story-test` and the "a story post" rule in `fair-test`.)
+
+The five stages, as agreed: 2) tracked traders on the chart (a colour each, average-entry line, position, share
+of supply, profit, history); 3) trader types that react to stories (narrative trader, contrarian, panic seller, FOMO,
+swing) on top of the real-data brain; 4) the data-source plug with provenance; 5) scale (send each player less).
 
 ## Working with the owner
 

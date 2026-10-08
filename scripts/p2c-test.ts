@@ -96,10 +96,12 @@ ok(me().wallet.cash > cashCb && me().cashback!.sol === 0, `cashback ${pend.toExp
 // Airdrop 10% of the dev bag to 5 holders; a fake queue can't dump more than was given.
 const bagA = main().positions[cooked.token.id].qty
 const give = bagA * 0.1
+// (Other sells can be queued on the coin already: a story's followers flipping what they bought. Count the airdrop's own.)
+const dumps = () => (room.market.shillQueue ?? []).filter((x) => x.tokenId === cooked.token.id && x.side === 'sell').reduce((a, x) => a + (x.qty ?? 0), 0)
+const queuedBefore = dumps()
 r.handle('p1', { t: 'airdrop', seq: 7, tokenId: cooked.token.id, walletId: main().id, qty: give, wallets: 5, target: 'holders', queue: [{ tokenId: cooked.token.id, atTick: room.market.tick + 2, usd: 0, wallet: 'x', side: 'sell', qty: 1e11 }] })
 ok(Math.abs(main().positions[cooked.token.id].qty - (bagA - give)) < 1e-6, 'airdropped tokens left the dev wallet')
-const q = (room.market.shillQueue ?? []).filter((x) => x.tokenId === cooked.token.id && x.side === 'sell')
-ok(q.reduce((a, x) => a + (x.qty ?? 0), 0) <= give + 1e-6, 'dumpers capped at what was airdropped')
+ok(dumps() - queuedBefore <= give + 1e-6 && dumps() > queuedBefore, 'dumpers capped at what was airdropped')
 
 // Convert: SOL in the main wallet → BNB in the same wallet, one fee, on the server.
 const solC = main().balances.sol

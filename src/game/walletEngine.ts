@@ -3,7 +3,8 @@ import { WALLET_SEEDS } from '../data/wallets'
 import { addWin, getWin } from './windows'
 import type { MarketState, SimWallet, Token, WalletAction, WalletHistory, WalletStyle, WalletTrade } from '../types'
 import { clamp, type Rng } from '../utils/rng'
-import { fillSim, HOUR_TICKS, quoteBuy, quoteSell, SUPPLY, touchCandles, walletName } from './marketEngine'
+import { MIND, mindEntry, mindExit, mindOf } from './traderMinds'
+import { secPerTickOf, fillSim, HOUR_TICKS, quoteBuy, quoteSell, SUPPLY, touchCandles, walletName } from './marketEngine'
 
 // Simulated trader wallets that really trade the market. Their fills move prices through the same pool
 // the player uses, so anyone copying them enters after them, at a worse price.
@@ -157,9 +158,13 @@ function pickEntry(w: SimWallet, tokens: Token[], m: MarketState, rng: Rng): Tok
   const pool = tokens.filter((t) => live(t) && !w.positions[t.id] && t.liquidity > 1500)
   let c: Token[] = []
   switch (w.style) {
-    case 'sniper':
-      c = pool.filter((t) => t.status === 'bonding' && age(t) < 240).sort((a, b) => b.createdAt - a.createdAt).slice(0, 3)
+    case 'sniper': {
+      // Snipers buy in the launch block: a coin launched this very tick, which nobody outside it has been shown yet,
+      // so nobody gets in ahead of them. (Now and then one picks up a young coin late.)
+      const fresh = pool.filter((t) => t.status === 'bonding' && age(t) < secPerTickOf(m))
+      c = fresh.length ? fresh : rng.chance(0.25) ? pool.filter((t) => t.status === 'bonding' && age(t) < 240) : []
       break
+    }
     case 'smart':
       // Skilled wallets read the hidden regime (and dodge scheduled rugs); otherwise they follow momentum.
       c = rng.chance(w.skill)
@@ -227,6 +232,7 @@ export function tickWallets(wallets: SimWallet[], m: MarketState, rng: Rng): { w
 
   const next = wallets.map((w0) => {
     let w: SimWallet = w0
+    const mind = mindOf(w0)
     const touch = () => {
       if (w === w0) w = { ...w0, positions: { ...w0.positions }, live: { ...w0.live } }
     }
@@ -243,7 +249,9 @@ export function tickWallets(wallets: SimWallet[], m: MarketState, rng: Rng): { w
       }
       if (!rng.chance(w.style === 'smart' ? 0.7 : 0.5)) continue
       const pnlPct = (pos.qty * t.price) / pos.cost - 1
-      const frac = exitFraction(w, t, pnlPct, m.tick - pos.openedTick, pos.tookProfit, rng)
+      // Its mind first (what the coin's feed said since it bought), then its style's own exits.
+      const minded = mind && live(t) ? mindExit(mind, t, pos, pnlPct, (m.tick - pos.openedTick) * secPerTickOf(m), m) : null
+      const frac = minded ? minded.frac : exitFraction(w, t, pnlPct, m.tick - pos.openedTick, pos.tookProfit, rng)
       if (frac <= 0) continue
       touch()
       const qty = frac >= 1 ? pos.qty : pos.qty * frac
@@ -266,9 +274,9 @@ export function tickWallets(wallets: SimWallet[], m: MarketState, rng: Rng): { w
       if (pnl > 0) w.live.wins++
       else w.live.losses++
       const kind = frac >= 1 ? 'all' : 'partial'
-      w.trades = record(w, { tokenId: id, ticker: t.ticker, emoji: t.emoji, hue: t.hue, side: 'sell', usd, qty, price: q.avgPrice, pnl, pnlPct: pnl / costPart, mcap: t.mcap, action: kind })
+      w.trades = record(w, { tokenId: id, ticker: t.ticker, emoji: t.emoji, hue: t.hue, side: 'sell', usd, qty, price: q.avgPrice, pnl, pnlPct: pnl / costPart, mcap: t.mcap, action: kind, ...(minded ? { why: minded.why } : {}) })
       w.lastActive = m.tick
-      actions.push({ walletId: w.id, tokenId: id, side: 'sell', usd, fraction: frac >= 1 ? 1 : frac, kind, mcap: t.mcap })
+      actions.push({ walletId: w.id, tokenId: id, side: 'sell', usd, fraction: frac >= 1 ? 1 : frac, kind, mcap: t.mcap, ...(minded ? { why: minded.why } : {}) })
     }
 
     // Conviction adds: winners sometimes buy more of a position that's working.
@@ -301,7 +309,9 @@ export function tickWallets(wallets: SimWallet[], m: MarketState, rng: Rng): { w
     // Entries.
     // Rival wallets trade at half pace so the extra 20 wallets don't swamp the market.
     if (Object.keys(w.positions).length < MAX_POS[w.style] && rng.chance(ACT_RATE[w.style] * (w.rival ? 0.5 : 1))) {
-      const t = pickEntry(w, m.tokens, m, rng)
+      // Its mind picks most of a minded wallet's entries (what the feed says); the rest are its style's, as before.
+      const minded = mind && rng.chance(w.style === 'kol' ? MIND.kolShare : MIND.share) ? mindEntry(mind, w, m.tokens.filter((x) => live(x) && x.liquidity > 1500), m, rng) : undefined
+      const t = minded?.t ?? pickEntry(w, m.tokens, m, rng)
       if (t) {
         const [lo, hi] = SIZE[w.style]
         // Real traders size to the pool: ~1.5% of liquidity keeps their own impact to a few percent.
@@ -316,12 +326,20 @@ export function tickWallets(wallets: SimWallet[], m: MarketState, rng: Rng): { w
           // A KOL's call pulls in a wave of followers right behind them.
           touchCandles(t, m.time, prev, usd, m.native)
           fill(t, w, 'buy', usd, q.avgPrice)
-          if (w.style === 'kol') {
+          // (Only a KOL's own pick is a call. One made by its mind is a reaction to somebody else's post or to a run:
+          // followers on those sent KOLs' crowds into whatever was already running, and a coin at 80% of its curve
+          // made +9% in two minutes. See fair-test.)
+          if (w.style === 'kol' && !minded) {
             // A KOL's call pulls in followers right behind them: a few real buys, on the tape like any other.
             const crowd = usd * rng.range(1, 3)
             const k = rng.int(2, 4)
             let bought = 0
             for (let i = 0; i < k; i++) bought += fillSim(m, t, 'buy', crowd / k, m.time, walletName(rng))
+            // (In a pool the crowd answers them like an event's jump: see step 4b of tickMarket. Left to stand there,
+            // every KOL who bought was a pump, and the pools KOLs pile into, the freshly bonded ones, drifted up: $100
+            // on any coin the moment it bonded made +37% in fifteen minutes. On a curve the same buys are part of what
+            // holders live on against their dev's selling; answering them there too cost every buyer a tenth.)
+            if (bought > 0 && t.status === 'graduated') t.sim.jolt = (t.sim.jolt ?? 0) + bought
             t.volume += bought
             t.buys += k
             t.hype = Math.min(100, t.hype + 10)
@@ -332,9 +350,9 @@ export function tickWallets(wallets: SimWallet[], m: MarketState, rng: Rng): { w
           w.live.buys++
           w.live.volume += usd
           w.live.inflow -= usd
-          w.trades = record(w, { tokenId: t.id, ticker: t.ticker, emoji: t.emoji, hue: t.hue, side: 'buy', usd, qty: q.qty, price: q.avgPrice, mcap: t.mcap, action: 'first' })
+          w.trades = record(w, { tokenId: t.id, ticker: t.ticker, emoji: t.emoji, hue: t.hue, side: 'buy', usd, qty: q.qty, price: q.avgPrice, mcap: t.mcap, action: 'first', ...(minded ? { why: minded.why } : {}) })
           w.lastActive = m.tick
-          actions.push({ walletId: w.id, tokenId: t.id, side: 'buy', usd, fraction: 1, kind: 'first', mcap: t.mcap })
+          actions.push({ walletId: w.id, tokenId: t.id, side: 'buy', usd, fraction: 1, kind: 'first', mcap: t.mcap, ...(minded ? { why: minded.why } : {}) })
         }
       }
     }

@@ -1,5 +1,6 @@
 // MOONRUSH multiplayer server: private rooms with a shared market. Run with `npm run server`.
 // In production it also serves the built game (dist/), so one deploy hosts everything on one port.
+import { trendSource } from './trendSource'
 import { createServer } from 'node:http'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, join, normalize } from 'node:path'
@@ -215,6 +216,13 @@ const http = createServer((req, res) => {
     res.end(JSON.stringify({ ok: true, saving: persistOn, rooms: rooms.size, players: online() }))
     return
   }
+  // Where the World's outside data comes from right now (see server/trendSource.ts). No secrets: a provider's
+  // address is never in it, only its name and whether it answered.
+  if (url.pathname === '/sources') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(trendSource.status()))
+    return
+  }
   if (url.pathname === '/status') {
     const r = report()
     res.writeHead(r.status === 'ok' ? 200 : 503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
@@ -392,4 +400,5 @@ setInterval(() => {
   }
 }, 60_000)
 
+void trendSource.start() // (asks a provider only if one is configured)
 http.listen(PORT, () => console.log(`MOONRUSH multiplayer server on http://localhost:${PORT} (ws path ${MP_PATH}) · saving rooms: ${persistOn ? 'on' : 'off (no SUPABASE_SECRET_KEY)'}`))

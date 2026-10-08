@@ -2,9 +2,10 @@
 // scripts/market-learner.ts → server/data/market-brain.json). World bots ask it how people like them trade: which
 // moments they buy in, how much, when they sell, and how often a coin's dev dumps. It holds only odds and ranges per
 // style and skill level, never anyone's wallet. Without the file the bots fall back to their old fixed rules.
+import { TREND_MAX_AGE_DAYS } from '../src/game/dataSources'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Narrative, Token } from '../src/types'
+import type { TrendFeed, Narrative, Token } from '../src/types'
 import type { Rng } from '../src/utils/rng'
 
 export type Tier = 'pro' | 'good' | 'average' | 'bad' | 'degen'
@@ -143,11 +144,24 @@ export const PILE_ON_LIMIT = 2
 /** Share of chef launches that ride a current real-market trend (the rest get the game's usual random names). */
 export const TREND_SHARE = 0.6
 /** Trends older than this many days are treated as stale (refresh the brain to bring them back). */
-export const TREND_MAX_AGE_DAYS = 14
+export { TREND_MAX_AGE_DAYS } // (one number for "too old", shared with the story engine: src/game/dataSources.ts)
 /** A theme with this many live coins already is crowded: chefs pick another, or a random name. */
 export const TREND_CROWDED = 2
 const ICON: Partial<Record<string, string>> = { horse: '🐴', squirrel: '🐿️', mink: '🦦', cat: '🐱', dog: '🐶', frog: '🐸', agent: '🕵️', bot: '🤖', robot: '🤖', artificial: '🧠', rocket: '🚀', moon: '🌙', alien: '👽', pizza: '🍕', burger: '🍔', banana: '🍌', ghost: '👻', wizard: '🧙', dragon: '🐉', shark: '🦈', whale: '🐋', ape: '🦍', monkey: '🐒', owl: '🦉', duck: '🦆', penguin: '🐧', hamster: '🐹', panda: '🐼', goblin: '👺', ninja: '🥷', pirate: '🏴‍☠️', cowboy: '🤠', clown: '🤡', rogue: '🗡️', trencher: '⛏️', renter: '🏠', cache: '📦', chill: '🧊', giga: '💪', pump: '⛽' }
 const BY_NARRATIVE: Record<Narrative, string> = { dogs: '🐶', cats: '🐱', frogs: '🐸', ai: '🤖', food: '🍔', space: '🚀', absurd: '🌀', retro: '👾' }
+
+/**
+ * The recorded trends as the story engine takes them (see src/data/trends.ts): the approved themes, hottest first,
+ * with the date they were recorded so nothing presents them as a live feed. Null without a brain.
+ */
+export function worldTrends(): TrendFeed | null {
+  if (trendFeed !== undefined) return trendFeed
+  const list = BRAIN?.trends ?? []
+  if (!BRAIN || !list.length) return (trendFeed = null)
+  const top = Math.max(...list.map((t) => Math.sqrt(t.volumeSol + 1)))
+  return (trendFeed = { source: 'recorded', asOf: BRAIN.learnedAt.slice(0, 10), themes: list.map((t) => ({ word: t.word, narrative: t.narrative, weight: Math.sqrt(t.volumeSol + 1) / top })).sort((a, b) => b.weight - a.weight).slice(0, 25) })
+}
+let trendFeed: TrendFeed | null | undefined // worked out once: the brain is read when the server starts
 
 /**
  * A coin idea from the trends: a theme picked by how much the real market traded it, dressed up the way pump.fun names
