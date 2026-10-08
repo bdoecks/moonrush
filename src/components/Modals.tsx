@@ -9,6 +9,7 @@ import { fmtClock, fmtPct, fmtUsd, toneClass } from '../utils/format'
 import { Logo } from './TopBar'
 import { Kbd, Modal, Segmented, Toggle } from './ui'
 import { LobbyModal, WorldCard } from './Multiplayer'
+import { BugReportModal } from './BugReport'
 import { useFlags } from '../game/flags'
 import { useAccount } from '../net/account'
 import { INVITE_MINUTES, INVITE_REWARD, useInvites } from '../net/invites'
@@ -22,6 +23,7 @@ export function Modals() {
   if (modal === 'settings') return <SettingsModal />
   if (modal === 'help') return <HelpModal />
   if (modal === 'lobby') return <LobbyModal />
+  if (modal === 'bug') return <BugReportModal />
   return null
 }
 
@@ -240,6 +242,7 @@ function SettingsModal() {
   return (
     <Modal title="Settings" onClose={() => setModal(null)}>
       <div className="divide-y divide-line">
+        <Row label="Found a bug?" hint="Tell us what went wrong. It goes straight to the team"><button onClick={() => setModal('bug')} className="rounded-md border border-line2 px-2.5 py-1 text-[12px] font-semibold text-ink hover:border-accent/60 hover:text-accent">🐞 Report a bug</button></Row>
         <Row label="Sound effects" hint="Synth blips for trades, alerts and level-ups"><Toggle label="Sound" on={settings.sound} onChange={(v) => update({ sound: v })} /></Row>
         <Row label="Animations" hint="Price flashes, slide-ins, marquee"><Toggle label="Animations" on={settings.animations} onChange={(v) => update({ animations: v })} /></Row>
         <Row label="Compact mode" hint="Denser rows and smaller type"><Toggle label="Compact mode" on={settings.compact} onChange={(v) => update({ compact: v })} /></Row>
@@ -306,6 +309,10 @@ function HelpModal() {
     <Modal title="How to play" onClose={() => setModal(null)} wide>
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2 text-[12px] text-muted">
+          <button onClick={() => setModal('bug')} className="flex w-full items-center justify-between rounded-md border border-line2 bg-panel2/60 px-3 py-2 text-left text-[12px] hover:border-accent/60">
+            <span><span className="font-semibold text-ink">🐞 Found a bug?</span> <span className="text-muted">Tell us what went wrong.</span></span>
+            <span className="font-semibold text-accent">Report a bug →</span>
+          </button>
           <p><span className="font-semibold text-ink">MOONRUSH is a game.</span> Every token, price, trade, wallet and rival is simulated. No wallets, no blockchain, no real money.</p>
           <p><span className="font-semibold text-ink">The market has moods.</span> Tokens move through regimes (accumulation, pumps, distribution, dumps, recoveries), but a pump can be dumped into and a dip bought at any moment: the chart shows what happened, not what comes next.</p>
           <p><span className="font-semibold text-ink">Liquidity is everything.</span> Fills use a constant-product pool: size up in a thin pool and slippage will eat you. There's a 1% arena fee on every trade.</p>

@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { CircleHelp, PanelLeft, PanelRight, Pause, Play, Settings as SettingsIcon, Timer, Volume2, VolumeX } from 'lucide-react'
+import { Bug, CircleHelp, PanelLeft, PanelRight, Pause, Play, Settings as SettingsIcon, Timer, Volume2, VolumeX } from 'lucide-react'
 import { CHAINS, fmtNative } from '../data/chains'
 import { cashbackOf, REFERRALS_ENABLED } from '../game/rewardsEngine'
 import type { Chain } from '../types'
@@ -190,6 +190,9 @@ export function TopBar() {
         <DockToggle />
         <button onClick={() => updateSettings({ sound: !sound })} className="rounded-md p-1.5 text-muted hover:bg-panel2 hover:text-ink" aria-label="Toggle sound" title="Sound">
           {sound ? <Volume2 size={15} /> : <VolumeX size={15} />}
+        </button>
+        <button onClick={() => setModal('bug')} className="hidden sm:block rounded-md p-1.5 text-muted hover:bg-panel2 hover:text-ink" aria-label="Report a bug" title="Report a bug">
+          <Bug size={15} />
         </button>
         <button onClick={() => setModal('help')} className="hidden sm:block rounded-md p-1.5 text-muted hover:bg-panel2 hover:text-ink" aria-label="Help" title="Help & shortcuts (?)">
           <CircleHelp size={15} />

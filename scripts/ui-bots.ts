@@ -445,6 +445,23 @@ async function checklistBot(page: Page) {
     return `launched $${ticker}`
   })
 
+  await step(page, 'Report a bug', 'The bug button (top right) should open a short form; Send stays off until something is written; nothing is sent by this test.', async () => {
+    act('Click the "Report a bug" button (top right)')
+    await page.getByRole('button', { name: 'Report a bug', exact: true }).first().click()
+    await page.waitForTimeout(300)
+    const dialog = page.getByRole('dialog')
+    const send = dialog.getByRole('button', { name: 'Send report' })
+    if (!(await send.isDisabled())) throw new Error('Send was on with nothing written')
+    act('Write what went wrong')
+    await dialog.getByLabel('What went wrong').fill('The UI bot is checking that this form can be filled in.')
+    if (await send.isDisabled()) throw new Error('Send stayed off after writing a report')
+    if (!/Nothing about your wallet/.test(await dialog.innerText())) throw new Error('the form does not say what is sent with a report')
+    await shot(page, 'bug-report')
+    act('Click "Cancel" (the bots never send a report)')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await page.waitForTimeout(200)
+  })
+
   await step(page, 'Settings and Help windows', 'The Settings and Help buttons should open their windows, and Escape should close them.', async () => {
     for (const w of ['Settings', 'Help']) {
       act(`Click the "${w}" button (top right)`)

@@ -13,14 +13,21 @@ import type { Archetype, Chain } from '../types'
 import { fmtAge, fmtCompact, fmtUsd } from '../utils/format'
 import { EmptyState, Toggle } from '../components/ui'
 import { GiveBox } from '../components/GiveBox'
+import { AdminBugs } from '../components/AdminBugs'
+import { openBugCount } from '../net/bugs'
 
-type Tab = 'rooms' | 'market' | 'accounts' | 'switches'
+type Tab = 'rooms' | 'market' | 'accounts' | 'bugs' | 'switches'
 /** Admin panel: only shows for accounts on the admin list (the server and database enforce it too). */
 export function AdminView() {
   const admin = useAccount((s) => s.admin)
   const [tab, setTab] = useState<Tab>('rooms')
   const [rooms, setRooms] = useState<RoomSummary[]>([])
   const [roomsError, setRoomsError] = useState('')
+  // Open bug reports, for the tab's label (the tab itself keeps it up to date while it is open).
+  const [bugs, setBugs] = useState<number | null>(null)
+  useEffect(() => {
+    if (admin) void openBugCount().then(setBugs)
+  }, [admin])
 
   const refresh = useCallback(async () => {
     const r = await adminApi<{ rooms: RoomSummary[] }>('/admin/api/rooms')
@@ -48,6 +55,7 @@ export function AdminView() {
     { id: 'rooms', label: `🏠 Rooms & players ${rooms.length}` },
     { id: 'market', label: '📈 Market god mode' },
     { id: 'accounts', label: '👤 Accounts' },
+    { id: 'bugs', label: `🐞 Bug reports${bugs ? ` ${bugs}` : ''}` },
     { id: 'switches', label: '🎛 Switches & stats' },
   ]
   return (
@@ -62,10 +70,11 @@ export function AdminView() {
             ))}
           </div>
         </div>
-        {roomsError && tab !== 'accounts' && tab !== 'switches' && <div className="rounded-md border border-down/40 bg-down/10 px-3 py-2 text-[12px] text-down">Game server: {roomsError}</div>}
+        {roomsError && tab !== 'accounts' && tab !== 'bugs' && tab !== 'switches' && <div className="rounded-md border border-down/40 bg-down/10 px-3 py-2 text-[12px] text-down">Game server: {roomsError}</div>}
         {tab === 'rooms' && <Rooms rooms={rooms} act={act} />}
         {tab === 'market' && <Market rooms={rooms} />}
         {tab === 'accounts' && <Accounts />}
+        {tab === 'bugs' && <AdminBugs onCount={setBugs} />}
         {tab === 'switches' && <Switches rooms={rooms} />}
       </div>
     </div>

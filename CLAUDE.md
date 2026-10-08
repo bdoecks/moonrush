@@ -45,6 +45,7 @@ npx tsx scripts/source-test.ts              # the data-source plug: outside data
 npx tsx scripts/scale-test.ts               # what a World player is sent: only the open coin's chart and tape, no hidden state, under budget (6 min)
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
+npx tsx scripts/bugs-test.ts                # bug reports: what the game sends is clean and small, and only admins can read the table
 npx tsx scripts/health-test.ts              # safety net: health verdicts, backups (stand-in database), World restore, admin routes
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
 npx tsx scripts/market-report.ts            # the World in numbers (not pass/fail): read before and after tuning the market
@@ -279,6 +280,13 @@ Next, in order:
 3. If people come back: monetization, starting with cosmetics and a supporter pass. Never let in-game money cash
    out to real money, and rename real third-party brand names (pump.fun, Raydium…) before charging anyone.
 4. Phase 4: ops and monitoring.
+
+**Bug reports** (`supabase/009_bug_reports.sql`, which the owner must run once): anybody can send one from the bug
+button in the top bar, Help or Settings (`components/BugReport.tsx`, `net/bugs.ts`; limits and the row's shape in
+`game/bugReports.ts`). The game adds where the player was (page, mode, open coin, screen, browser, its last few
+caught errors) and never anything about wallets or the account's email. Straight from the browser to the table:
+row level security lets anyone insert and only admins read, mark or delete (Admin → Bug reports,
+`components/AdminBugs.tsx`). A trigger stops floods (20 a day per account, 60 an hour for guests together).
 
 Known gaps: cashback tier still comes from the client's reported volume (bounded 10–30%); real referral links (the old fake referrals are off, `REFERRALS_ENABLED`).
 
