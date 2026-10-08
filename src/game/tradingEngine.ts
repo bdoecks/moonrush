@@ -42,12 +42,19 @@ function dexFee(tiers: [number, number][] | undefined, flat: number, t: { mcap?:
   return f0 + (f1 - f0) * (Math.log(mc / c0) / Math.log(c1 / c0))
 }
 
-/** Share of a token's volume paid to its creator: the pad's creator fee plus the average tax. */
+/**
+ * How much of a launchpad's real creator fee a coin's creator is paid here. At the real rates (1) a coin that bonded
+ * paid its maker $1,500 and more, on a starting balance of a few thousand: the owner halved it (2026-10-08). It is the
+ * creator's slice of the fee only: what a trader pays is the same. Measure with scripts/cook-report.ts.
+ */
+export const CREATOR_CUT = 0.5
+
+/** Share of a token's volume paid to its creator: the pad's creator fee (times `CREATOR_CUT`) plus the average tax. */
 export function creatorRate(t: Pick<Token, 'pad' | 'tax'> & { status?: Token['status']; mcap?: number; chain?: Chain }) {
   const pad = LAUNCHPADS[t.pad]
   // pump.fun after migration: PumpSwap's dynamic creator fee (0.95% just after, tapering to 0.05% as it grows).
   const base = pad?.pumpSwap && t.status === 'graduated' ? pumpSwapTier(t)[1] : pad?.creatorFee ?? 0
-  return base + (t.tax ? (t.tax.buy + t.tax.sell) / 2 : 0)
+  return base * CREATOR_CUT + (t.tax ? (t.tax.buy + t.tax.sell) / 2 : 0)
 }
 
 export interface BuyPreview {

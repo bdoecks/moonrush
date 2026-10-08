@@ -12,7 +12,7 @@ import { EmptyState, Segmented, TokenIcon } from '../components/ui'
 import { COOK_EMOJIS, NARRATIVES, narrativeLabel } from '../data/narratives'
 import { COOK_FEE, cookAllowance, cookQuality, secPerTickOf, SUPPLY, vampBoost } from '../game/marketEngine'
 import { COOK_COOLDOWN_TICKS, GRAD_BONUS, selectSpeed, useGame, validateCook } from '../game/store'
-import { creatorRate, previewBuy, SWAP_FEE } from '../game/tradingEngine'
+import { CREATOR_CUT, creatorRate, previewBuy, SWAP_FEE } from '../game/tradingEngine'
 import { curveAt, curveLiquidityUsd, gradMcapUsd, gradRaise, launchMcapUsd } from '../game/curve'
 import { defaultPad, LAUNCHPADS, padsFor } from '../data/launchpads'
 import { PadBadge } from '../components/pad'
@@ -323,7 +323,7 @@ export function CookingView() {
                       <span className="text-right text-muted">{fmtCompact(launchMcapUsd(p.id, px))}</span>
                       <span className="text-right text-muted">{fmtCompact(gradMcapUsd(p.id, px))} <span className="text-dim">→ {p.dex}</span></span>
                       <span className="text-right text-dim">{fmtFee(p.fee)}</span>
-                      <span className="text-right text-up" title={p.pumpSwap ? 'On the curve, then PumpSwap’s dynamic creator fee after migrating (0.95%, tapering to 0.05% as the coin grows)' : undefined}>{p.tax ? 'tax' : p.pumpSwap ? `${fmtFee(p.creatorFee)}→0.95%` : fmtFee(p.creatorFee)}</span>
+                      <span className="text-right text-up" title={p.pumpSwap ? `On the curve, then a dynamic creator fee after migrating (${fmtFee(0.0095 * CREATOR_CUT)}, tapering to ${fmtFee(0.0005 * CREATOR_CUT)} as the coin grows)` : undefined}>{p.tax ? 'tax' : p.pumpSwap ? `${fmtFee(p.creatorFee * CREATOR_CUT)}→${fmtFee(0.0095 * CREATOR_CUT)}` : fmtFee(p.creatorFee * CREATOR_CUT)}</span>
                     </button>
                   )
                 })}

@@ -378,6 +378,9 @@ only) and on the classic engine (`npx tsx scripts/fair-test.ts classic`). A rule
   Measured again with it, 360 launches a recipe: +$47 and -$43 a launch, where the same two recipes read +$32 and
   +$51 before. **A few coins that bond decide these averages: one run of 360 launches is good to about $50 a launch
   either way.** Add several runs up before telling the owner a number, and say how sure it is.
+  Then creator fees were halved (`CREATOR_CUT` in `tradingEngine.ts`: the creator's slice only, traders pay the
+  same): the best free launch -$0 a launch, a small bag held -$17, a bag sold after 30 s -$97 (360 launches each).
+  A coin that bonds still pays its maker (about half of before, plus the $250 bonus): cooking is now a bet, not a wage.
 - **What it costs.** About 1% of launches bond (22 an hour in
   the World, was 62; real pump.fun: 0.2 to 2.7%), so the Migrated column holds about 48 coins (was 90) and New about
   29 (was 36). The Final Stretch is kept at 7 to 8 (was 10) by a slower clock high on a curve (`FLOW.stretchPace`:
