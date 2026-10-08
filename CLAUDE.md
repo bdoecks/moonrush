@@ -374,6 +374,10 @@ only) and on the classic engine (`npx tsx scripts/fair-test.ts classic`). A rule
   zero, lower those or raise the launch fee (the owner's call). **Run `cook-report` before and after touching
   anything a cooked coin lives by**, with the recipes that dump a bag. Solo play and friends rooms keep the old
   cook's game (their launches carry no `botDev`).
+  The launch fee went from $25 to $50 the same day (`COOK_FEE`, everywhere: solo, rooms, the World, bot chefs).
+  Measured again with it, 360 launches a recipe: +$47 and -$43 a launch, where the same two recipes read +$32 and
+  +$51 before. **A few coins that bond decide these averages: one run of 360 launches is good to about $50 a launch
+  either way.** Add several runs up before telling the owner a number, and say how sure it is.
 - **What it costs.** About 1% of launches bond (22 an hour in
   the World, was 62; real pump.fun: 0.2 to 2.7%), so the Migrated column holds about 48 coins (was 90) and New about
   29 (was 36). The Final Stretch is kept at 7 to 8 (was 10) by a slower clock high on a curve (`FLOW.stretchPace`:

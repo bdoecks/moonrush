@@ -1746,7 +1746,7 @@ export function applyPlayerTrade(m: MarketState, tokenId: string, side: 'buy' | 
 }
 
 // ─── Cooking: player-launched tokens ─────────────────────────────────────────
-export const COOK_FEE = 25
+export const COOK_FEE = 50 // was 25 until 2026-10-08: with it the best free launch in the World still made about +$32 (scripts/cook-report.ts)
 export const GRAD_BONUS = 250 // USD paid to a coin's creator when it graduates
 export const COOK_COOLDOWN_TICKS = 30
 export const MAX_COOKS_PER_ROUND = 8
