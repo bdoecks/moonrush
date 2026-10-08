@@ -389,7 +389,7 @@ export interface FlowState {
   ema: number // slow price average (holders take profit when price runs above it)
   lastTrade: number // market time of the last trade
   koth?: boolean // reached "king of the hill"
-  botDev?: boolean // cooked by a World bot, not by a player: part of the simulated market, so its rules apply (see TOPS)
+  botDev?: boolean // cooked by a World bot, or by a player in the World: the simulated market's rules apply to it (see TOPS)
   tops?: number // tops so far
   sniped?: boolean // its launch snipers have landed
   seen?: number // the last trade by a wallet from outside the crowd that the crowd has answered

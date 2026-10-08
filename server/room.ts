@@ -922,7 +922,11 @@ export class Room {
       bundle: b ?? { wallets: 0, perWallet: 0, stagger: false }, vampOf: c0.vampOf?.id,
     }
     const built = cookToken(this.market, new Rng((Math.random() * 2 ** 32) >>> 0), spec).token
-    const token: NetToken = { ...built, id, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, devAddr: walletAddress(me.info.id, devWallet, 'sol'), status: 'bonding', creatorFees: 0 }
+    // In the World a player's coin plays by the simulated market's rules, as a bot chef's does (`flow.botDev`, see
+    // TOPS in the market engine): left out of them, a well-made launch bonded half the time and paid its dev
+    // hundreds of dollars in fees, launch after launch (scripts/cook-report.ts).
+    const fairSim = this.world && built.sim.flow ? { ...built.sim, flow: { ...built.sim.flow, botDev: true } } : built.sim
+    const token: NetToken = { ...built, sim: fairSim, id, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, devAddr: walletAddress(me.info.id, devWallet, 'sol'), status: 'bonding', creatorFees: 0 }
     this.market = { ...this.market, tokens: [token, ...this.market.tokens] }
     // cookToken drew the coin's first candle under its own id; move it to the id the game knows the coin by.
     const firstCandles = candleStore.get(built.id)
@@ -958,6 +962,9 @@ export class Room {
       failures.push(...r.failures)
     }
     this.earn(me, fills)
+    // Its snipers are in before the coin is shown to anybody, as on every coin of the simulated market (see launchBlock).
+    // (The more of the supply the dev took in the launch itself, the fewer of them: that bag is ahead of the block.)
+    if (this.world) this.market = launchBlock(this.market, token.id, new Rng((Math.random() * 2 ** 32) >>> 0), ((me.wallet.positions[token.id]?.qty ?? 0) / SUPPLY) * 100)
     const c = this.cooked.get(token.id)!
     c.feeMark = this.market.tokens.find((x) => x.id === token.id)?.creatorFees ?? 0
     this.playerEvents.push({ by: me.info.id, id: this.market.tick * 100 + 97, tick: this.market.tick, time: this.market.time, kind: 'cook', tokenId: token.id, ticker: token.ticker, text: `${me.info.avatar} ${me.info.name} cooked $${token.ticker}`, icon: '🍳', tone: 'info' })

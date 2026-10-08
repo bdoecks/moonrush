@@ -45,6 +45,8 @@ npx tsx scripts/source-test.ts              # the data-source plug: outside data
 npx tsx scripts/scale-test.ts               # what a World player is sent: only the open coin's chart and tape, no hidden state, under budget (6 min)
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
+npx tsx scripts/cook-test.ts                # cooking in the World: a player's launch is under the fair-market rules, snipers pass on a big dev bag
+npx tsx scripts/cook-report.ts 3            # what cooking pays, recipe by recipe (not pass/fail): read before and after touching launches or creator fees
 npx tsx scripts/trench-info-test.ts         # the Trenches card: KOLs and smart money in a coin, the dev's migrated / launched
 npx tsx scripts/reset-test.ts               # the admin's World starting balance, and starting every World player over
 npx tsx scripts/bugs-test.ts                # bug reports and ideas: what the game sends is clean and small, and only admins can read the table
@@ -361,10 +363,17 @@ only) and on the classic engine (`npx tsx scripts/fair-test.ts classic`). A rule
   jumps (`outsideNet`, `flow.jolt`, `sim.jolt`); every coin the regime model moves (pools, classic curves) gets a
   matching chance of a jump against its pull (steps 4a / 4b of `tickMarket`); a pool opens with no pull (`migrate`);
   good news is announced when it has played out (`lateEvents`), warnings at once. `TOPS.k = 0` switches it off.
-- **A real player's own launch is left alone on its curve** (`rules` in `stepFlow`; a bot chef's coin carries
-  `flow.botDev` and is not): cooking goes as in the live game (curve-test: 19 of 45 strong launches bonded, 2 of 45
-  lazy ones; market-report: lazy 0%, decent 14%, strong 45%). Whoever buys a real player's running launch still rides
-  it, as in the live game: that is the cook's game, the owner's to change. Once bonded it is a pool like any other.
+- **A real player's launch in the World plays by the same rules** (since 2026-10-08; it carries `flow.botDev` like a
+  bot chef's, and its snipers come in a launch block). Left out of them, as it was at first, cooking printed money:
+  a well-made launch bonded half the time and made its dev +$600 to +$950 a launch, mostly creator fees (the top
+  player made $115K in a day that way: 35 launches, 19 bonded, $55K of fees). Now (`scripts/cook-report.ts`, World
+  with bots, 36 h a recipe): the best launch with no dev buy +$32 a launch (3.3% bond), with a small bag held +$51,
+  with marketing or a bag sold early -$1 to -$69; a lazy one -$5. A dev's own buy is ahead of the launch block, so
+  snipers pass on a coin whose dev took a big bag (`SNIPE_AHEAD`, `launchBlock(…, aheadPct)`): dumping 10 SOL on
+  them made +$365 a launch before that, -$12 after. What is left is creator fees on the few that bond; to take it to
+  zero, lower those or raise the launch fee (the owner's call). **Run `cook-report` before and after touching
+  anything a cooked coin lives by**, with the recipes that dump a bag. Solo play and friends rooms keep the old
+  cook's game (their launches carry no `botDev`).
 - **What it costs.** About 1% of launches bond (22 an hour in
   the World, was 62; real pump.fun: 0.2 to 2.7%), so the Migrated column holds about 48 coins (was 90) and New about
   29 (was 36). The Final Stretch is kept at 7 to 8 (was 10) by a slower clock high on a curve (`FLOW.stretchPace`:

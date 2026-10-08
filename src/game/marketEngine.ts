@@ -632,9 +632,10 @@ export const FLOW = {
  *    pull either way (`migrate`). On a classic curve the pull works on the part of the price above the coin's floor.
  *  - Good news is said when the push it is about has mostly played out (`lateEvents` in eventEngine, a parabolic
  *    run in tickMarket): said at once it was a tip. Warnings are said at once.
- * They are for the simulated market: the crowd's own launches and the bot chefs' (`flow.botDev`). A real player's
- * own launch still goes up its curve as its launch decides, exactly as before (cooking is a game of its own; the
- * rules above apply to it again once it has bonded).
+ * They are for the simulated market: the crowd's own launches, the bot chefs' and, in the World, a real player's
+ * (all carry `flow.botDev`: left out, a well-made player launch bonded half the time and paid its dev hundreds of
+ * dollars a launch; scripts/cook-report.ts measures it). Only a player's launch in solo play or a friends room
+ * still goes up its curve as its launch alone decides.
  * What is left against a buyer is what a buyer can read and avoid: a dev who still holds a bag, a coin that looks
  * like a rug, a post everybody has already acted on. `scripts/fair-test.ts` measures all of it, in a World with its
  * bots and on the classic engine: read it before and after touching any of this.
@@ -738,11 +739,11 @@ function outsideNet(t: Token, from: number) {
 }
 
 /** A launch's snipers in the simulated market: they buy in the launch block, before the coin has been shown to anybody. */
-function snipe(m: MarketState, t: Token, rng: Rng) {
+function snipe(m: MarketState, t: Token, rng: Rng, share = 1) {
   const f = t.sim.flow
   if (!f) return
   f.sniped = true
-  const n = rng.poisson(2.4 + 9 * f.q)
+  const n = rng.poisson((2.4 + 9 * f.q) * share)
   t.snipers += n
   for (let k = 0; k < n && t.status === 'bonding'; k++) {
     const usd = fillSim(m, t, 'buy', Math.min(FLOW.maxTrade, lognormal(rng, 55, 0.9)), m.time, walletName(rng), 'sniper')
@@ -760,14 +761,19 @@ function snipe(m: MarketState, t: Token, rng: Rng) {
  * readers its dev's launch post brings (their orders are waiting in `shillQueue`), all buy before the coin has been
  * shown to anybody, as a crowd launch's snipers do. Every such launch has this pop, so nobody may be in ahead of it.
  * Call it right after the dev's own buy and post. Returns the market with that coin as a fresh copy.
+ * `aheadPct`: the share of the supply a REAL player bought in the launch itself (dev buy and bundle). That player is
+ * in ahead of the block, and every dollar the snipers bring is theirs to dump on, so snipers pass on a coin whose
+ * dev took a big bag (as real ones do): `SNIPE_AHEAD` is sized so the best bag to dump makes less than a launch costs
+ * (scripts/cook-report.ts). A bot chef's coin passes nothing: it is the simulated market's own.
  */
-export function launchBlock(prev: MarketState, tokenId: string, rng: Rng): MarketState {
+export const SNIPE_AHEAD = 4 // % of supply held ahead of the block at which the snipers are down to about a third
+export function launchBlock(prev: MarketState, tokenId: string, rng: Rng, aheadPct = 0): MarketState {
   const old = prev.tokens.find((t) => t.id === tokenId)
   if (!old?.sim.flow || old.status !== 'bonding' || old.sim.flow.sniped) return prev
   const t: Token = { ...old, sim: { ...old.sim, flow: { ...old.sim.flow } }, change: { ...old.change } }
   const mine = (prev.shillQueue ?? []).filter((q) => q.tokenId === tokenId && q.side !== 'sell')
   const m: MarketState = { ...prev, tokens: prev.tokens.map((x) => (x === old ? t : x)), shillQueue: (prev.shillQueue ?? []).filter((q) => !mine.includes(q)) }
-  snipe(m, t, rng)
+  snipe(m, t, rng, Math.exp(-Math.max(0, aheadPct) / SNIPE_AHEAD))
   for (const q of mine) {
     const usd = t.status === 'bonding' ? fillSim(m, t, 'buy', q.usd, m.time, q.wallet) : 0
     if (!(usd > 0)) continue
