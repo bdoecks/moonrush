@@ -45,6 +45,7 @@ npx tsx scripts/source-test.ts              # the data-source plug: outside data
 npx tsx scripts/scale-test.ts               # what a World player is sent: only the open coin's chart and tape, no hidden state, under budget (6 min)
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
+npx tsx scripts/trench-info-test.ts         # the Trenches card: KOLs and smart money in a coin, the dev's migrated / launched
 npx tsx scripts/reset-test.ts               # the admin's World starting balance, and starting every World player over
 npx tsx scripts/bugs-test.ts                # bug reports and ideas: what the game sends is clean and small, and only admins can read the table
 npx tsx scripts/health-test.ts              # safety net: health verdicts, backups (stand-in database), World restore, admin routes

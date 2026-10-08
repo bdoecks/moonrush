@@ -6,13 +6,14 @@ import { HideButton } from '../HideButton'
 import { useHidden, useVisible } from '../../game/hidden'
 import { PadBadge } from '../pad'
 import { LAUNCHPADS } from '../../data/launchpads'
-import { AtSign, Boxes, ChefHat, Crosshair, Eye, Ghost, Globe, GraduationCap, Search, Send, Star, UserRound, Users } from 'lucide-react'
+import { AtSign, Boxes, Brain, ChefHat, Crosshair, Crown, Eye, Ghost, Globe, GraduationCap, Megaphone, Search, Send, Star, UserRound, Users } from 'lucide-react'
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { OnScreen } from '../OnScreen'
 import { useTokenMap } from '../../hooks/useDerived'
 import { useGame } from '../../game/store'
 import { publicBundlePct } from '../../game/devTools'
 import { devPctOf, top10Of } from '../../game/ledger'
+import { crowdCode, crowdFromCode, devRecord, devRecordBad, devRecordGood } from '../../game/coinCrowd'
 import type { PadId, Token, TrenchColumn } from '../../types'
 import { load, save } from '../../utils/storage'
 import { countActive, EMPTY_FILTER, matchesFilter, presetFor, withDefaults, type TrenchFilter } from './trenchFilter'
@@ -180,10 +181,15 @@ export const Card = memo(function Card({ t, now, preview, col, fresh = true }: {
   const buyShare = tx > 0 ? t.buys / tx : 0.5
   const watchers = useMemo(() => Math.round(t.hype * 0.6 + Math.sqrt(t.holders) * 2), [t.hype, t.holders])
   const bundler = publicBundlePct(t)
+  // Tracked KOLs and smart-money wallets holding it now (one number, so the card only redraws when a count changes).
+  const crowd = crowdFromCode(useGame((s) => crowdCode(s.wallets, t.id)))
+  // The dev's record: coins migrated out of coins launched. Your own coin reads your own launches (as text, for the same reason).
+  const mine = useGame((s) => (t.creator === 'you' ? s.launches.map((l) => `${l.tokenId}:${s.market.tokens.find((x) => x.id === l.tokenId)?.status ?? l.status}`).join('|') : ''))
+  const dev = useMemo(() => devRecord(t, t.creator === 'you' ? mine.split('|').filter(Boolean).map((x) => ({ tokenId: x.slice(0, x.lastIndexOf(':')), status: x.slice(x.lastIndexOf(':') + 1) })) : undefined), [t.id, t.status, t.creator, mine])
   const round = d.image === 'circle' ? 'rounded-full' : 'rounded-md'
   const big = d.metrics === 'large'
   const mc = d.roundMc ? fmtRounded : fmtCompact
-  const audit = [show('top10'), show('dev'), show('snipers'), show('insiders'), show('bundlers')].some(Boolean) || show('change')
+  const audit = [show('top10'), show('dev'), show('devRecord'), show('snipers'), show('insiders'), show('bundlers')].some(Boolean) || show('change')
 
   return (
     <div
@@ -249,6 +255,8 @@ export const Card = memo(function Card({ t, now, preview, col, fresh = true }: {
             {show('age') && <span className={clsx('num font-semibold', age < 300 ? 'text-up' : 'text-muted')}>{fmtAge(age)}</span>}
             {show('holders') && <span className="flex items-center gap-0.5 text-muted" title="Holders"><Users size={11} /><span className="num">{fmtNum(t.holders)}</span></span>}
             {show('watchers') && <span className="flex items-center gap-0.5 text-muted" title="Watching (simulated)"><Eye size={11} /><span className="num">{watchers}</span></span>}
+            {show('kols') && <span className={clsx('flex items-center gap-0.5', crowd.kols ? 'text-warn' : 'text-dim')} title={`KOLs holding this coin: ${crowd.kols}`}><Megaphone size={11} /><span className="num">{crowd.kols}</span></span>}
+            {show('smart') && <span className={clsx('flex items-center gap-0.5', crowd.smart ? 'text-info' : 'text-dim')} title={`Smart-money wallets holding this coin: ${crowd.smart}`}><Brain size={11} /><span className="num">{crowd.smart}</span></span>}
             {show('socials') && t.socials && (t.socials.x || t.socials.tg || t.socials.web) && (
               <span className="flex items-center gap-1 text-dim" title="Socials (fictional)">
                 {t.socials.x && <AtSign size={10} />}
@@ -284,6 +292,12 @@ export const Card = memo(function Card({ t, now, preview, col, fresh = true }: {
         <div className={clsx('mt-1.5 flex min-h-[18px] flex-wrap items-center gap-1', !preview && 'pr-[84px] md:pr-0')}>
           {show('top10') && <Metric icon={<UserRound size={10} />} label="Top 10 holders" value={`${top10Of(t).toFixed(0)}%`} bad={top10Of(t) > 40} />}
           {show('dev') && <Metric icon={<ChefHat size={10} />} label="Dev holdings" value={`${devPctOf(t).toFixed(1)}%`} bad={devPctOf(t) > 8} />}
+          {show('devRecord') && (
+            <span title={`Dev's coins: ${dev.migrated} migrated out of ${dev.total} launched${dev.total === 1 ? ' (this is their first)' : ''}`} className={clsx('num inline-flex items-center gap-0.5 rounded border px-1 py-px text-[10px]', devRecordBad(dev) ? 'border-down/30 bg-down/5 text-down' : devRecordGood(dev) ? 'border-warn/40 bg-warn/10 text-warn' : 'border-line2 text-muted')}>
+              <Crown size={10} />
+              {dev.migrated}/{dev.total}
+            </span>
+          )}
           {show('snipers') && <Metric icon={<Crosshair size={10} />} label="Snipers" value={String(t.snipers)} bad={t.snipers > 10} />}
           {show('insiders') && <Metric icon={<Ghost size={10} />} label="Insiders" value={`${t.insidersPct.toFixed(0)}%`} bad={t.insidersPct > 15} />}
           {show('bundlers') && <Metric icon={<Boxes size={10} />} label="Bundlers" value={`${bundler.toFixed(0)}%`} bad={bundler > 12} />}

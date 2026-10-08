@@ -41,10 +41,13 @@ export const ROW_ELEMENTS: { group: string; items: { id: string; label: string; 
   { group: 'Trader', items: [
     { id: 'holders', label: 'Holders', sample: '👥 82' },
     { id: 'watchers', label: 'Watching', sample: '👁 9' },
+    { id: 'kols', label: 'KOLs in', sample: '📣 3' },
+    { id: 'smart', label: 'Smart money in', sample: '🧠 2' },
   ] },
   { group: 'Audit', items: [
     { id: 'top10', label: 'Top 10 holders', sample: '9%' },
     { id: 'dev', label: 'Dev holding', sample: '4%' },
+    { id: 'devRecord', label: 'Dev migrations', sample: '👑 1/4' },
     { id: 'snipers', label: 'Snipers', sample: '3' },
     { id: 'insiders', label: 'Insiders', sample: '2%' },
     { id: 'bundlers', label: 'Bundlers', sample: '7%' },
