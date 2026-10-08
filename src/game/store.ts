@@ -33,7 +33,7 @@ import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX
 
 export type View = 'discover' | 'trenches' | 'token' | 'portfolio' | 'missions' | 'leaderboard' | 'cooking' | 'copytrade' | 'sniper' | 'monitor' | 'track' | 'rewards' | 'admin'
 export type DockTab = 'positions' | 'watchlist' | 'history' | 'feed' | 'tracker' | 'social'
-export type Modal = null | 'settings' | 'help' | 'mode' | 'results' | 'lobby' | 'bug'
+export type Modal = null | 'settings' | 'help' | 'mode' | 'results' | 'lobby' | 'bug' | 'idea'
 
 export interface RunResult {
   mode: GameMode

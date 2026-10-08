@@ -1,5 +1,5 @@
 // Bug reports, browser side: send one (anybody), read and mark them (admins; the database decides who is one).
-import { bugProblem, buildBugRow, type BugContext, type BugReport, type BugStatus } from '../game/bugReports'
+import { bugProblem, buildBugRow, type BugContext, type BugReport, type BugStatus, type IdeaWant, type ReportKind } from '../game/bugReports'
 import { useGame } from '../game/store'
 import { load, save } from '../utils/storage'
 import { useAccount } from './account'
@@ -34,23 +34,32 @@ export function bugContext(): BugContext {
 }
 
 export const lastBugSentAt = () => load<number>('bugSentAt') ?? 0
+const missing = /does not exist|schema cache|column/i
 
-export async function sendBugReport(what: string, doing: string): Promise<{ ok: boolean; error?: string }> {
-  const problem = bugProblem(what, lastBugSentAt(), Date.now())
+/** Send a bug report, or (with `idea`) an idea. Each has its own one-a-minute wait. */
+export async function sendBugReport(what: string, doing: string, idea?: { want: IdeaWant }): Promise<{ ok: boolean; error?: string }> {
+  const sentKey = idea ? 'ideaSentAt' : 'bugSentAt'
+  const problem = bugProblem(what, load<number>(sentKey) ?? 0, Date.now())
   if (problem) return { ok: false, error: problem }
-  if (!supabase) return { ok: false, error: 'Reports cannot be sent from this copy of the game.' }
+  if (!supabase) return { ok: false, error: `${idea ? 'Ideas' : 'Reports'} cannot be sent from this copy of the game.` }
   const acc = useAccount.getState()
-  const row = buildBugRow({ what, doing, userId: acc.userId, username: acc.profile?.username ?? load<string>('mpName') ?? '', context: bugContext() })
+  const row = buildBugRow({ what, doing, userId: acc.userId, username: acc.profile?.username ?? load<string>('mpName') ?? '', context: bugContext(), idea })
   const { error } = await supabase.from('bug_reports').insert(row)
-  if (error) return { ok: false, error: /does not exist|schema cache/i.test(error.message) ? 'Reports are not switched on yet. Please try again later.' : error.message }
-  save('bugSentAt', Date.now())
+  if (error) return { ok: false, error: missing.test(error.message) ? `${idea ? 'Ideas' : 'Reports'} are not switched on yet. Please try again later.` : error.message }
+  save(sentKey, Date.now())
   return { ok: true }
 }
 
 // ── Admin ──
-export async function loadBugReports(): Promise<{ rows: BugReport[]; error?: string }> {
+export async function loadBugReports(kind: ReportKind = 'bug'): Promise<{ rows: BugReport[]; error?: string }> {
   if (!supabase) return { rows: [], error: 'No database in this copy' }
-  const { data, error } = await supabase.from('bug_reports').select('*').order('created_at', { ascending: false }).limit(300)
+  const { data, error } = await supabase.from('bug_reports').select('*').eq('kind', kind).order('created_at', { ascending: false }).limit(300)
+  // Before supabase/010_ideas.sql is run there is no `kind`: every row is a bug report, and there are no ideas yet.
+  if (error && /kind/i.test(error.message)) {
+    if (kind === 'idea') return { rows: [], error: 'Ideas are not switched on yet: run supabase/010_ideas.sql in the Supabase SQL editor.' }
+    const all = await supabase.from('bug_reports').select('*').order('created_at', { ascending: false }).limit(300)
+    return { rows: (all.data as BugReport[]) ?? [], error: all.error?.message }
+  }
   return { rows: (data as BugReport[]) ?? [], error: error?.message }
 }
 
@@ -67,8 +76,12 @@ export async function deleteBugReport(id: number): Promise<string | null> {
 }
 
 /** How many reports are still open (for the admin's tab label). Null when it cannot be read. */
-export async function openBugCount(): Promise<number | null> {
+export async function openBugCount(kind: ReportKind = 'bug'): Promise<number | null> {
   if (!supabase) return null
-  const { count, error } = await supabase.from('bug_reports').select('id', { count: 'exact', head: true }).eq('status', 'open')
-  return error ? null : count ?? 0
+  const { count, error } = await supabase.from('bug_reports').select('id', { count: 'exact', head: true }).eq('status', 'open').eq('kind', kind)
+  if (!error) return count ?? 0
+  if (kind !== 'bug') return null
+  // (Before 010_ideas.sql: no `kind` yet, every row is a bug report.)
+  const all = await supabase.from('bug_reports').select('id', { count: 'exact', head: true }).eq('status', 'open')
+  return all.error ? null : all.count ?? 0
 }

@@ -445,6 +445,28 @@ async function checklistBot(page: Page) {
     return `launched $${ticker}`
   })
 
+  await step(page, 'Share an idea', 'The idea button (top right) should open a short form with three kinds of idea; Send stays off until something is written; nothing is sent by this test.', async () => {
+    act('Click the "Share an idea" button (top right)')
+    await page.getByRole('button', { name: 'Share an idea', exact: true }).first().click()
+    await page.waitForTimeout(300)
+    const dialog = page.getByRole('dialog')
+    const send = dialog.getByRole('button', { name: 'Send idea' })
+    if (!(await send.isDisabled())) throw new Error('Send was on with nothing written')
+    act('Pick "Something to get rid of" and write the idea')
+    const rid = dialog.getByRole('button', { name: /Something to get rid of/ })
+    await rid.click()
+    if ((await rid.getAttribute('aria-pressed')) !== 'true') throw new Error('picking a kind of idea did not stick')
+    await dialog.getByLabel('Your idea').fill('The UI bot is checking that this form can be filled in.')
+    if (await send.isDisabled()) throw new Error('Send stayed off after writing an idea')
+    if (!/Nothing about your wallet/.test(await dialog.innerText())) throw new Error('the form does not say what is sent with an idea')
+    await shot(page, 'idea')
+    act('Click "Cancel" (the bots never send an idea)')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await page.waitForTimeout(200)
+    if (await page.getByRole('dialog').count()) throw new Error('the form did not close')
+    return 'the idea form opens, takes a kind and a text, and closes'
+  })
+
   await step(page, 'Report a bug', 'The bug button (top right) should open a short form; Send stays off until something is written; nothing is sent by this test.', async () => {
     act('Click the "Report a bug" button (top right)')
     await page.getByRole('button', { name: 'Report a bug', exact: true }).first().click()

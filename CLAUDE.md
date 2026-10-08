@@ -46,7 +46,7 @@ npx tsx scripts/scale-test.ts               # what a World player is sent: only 
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/reset-test.ts               # the admin's World starting balance, and starting every World player over
-npx tsx scripts/bugs-test.ts                # bug reports: what the game sends is clean and small, and only admins can read the table
+npx tsx scripts/bugs-test.ts                # bug reports and ideas: what the game sends is clean and small, and only admins can read the table
 npx tsx scripts/health-test.ts              # safety net: health verdicts, backups (stand-in database), World restore, admin routes
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
 npx tsx scripts/market-report.ts            # the World in numbers (not pass/fail): read before and after tuning the market
@@ -440,6 +440,13 @@ Also open after stage 1:
 The five stages, as agreed: 2) tracked traders on the chart (a colour each, average-entry line, position, share
 of supply, profit, history); 3) trader types that react to stories (narrative trader, contrarian, panic seller, FOMO,
 swing) on top of the real-data brain; 4) the data-source plug with provenance; 5) scale (send each player less).
+
+## Ideas (Share an idea)
+
+- The ideas form is the bug-report form under other words (`BugReport.tsx`, modal `idea`): a row of `bug_reports` with
+  `kind: 'idea'` and `context.want` (add, change, remove). `supabase/010_ideas.sql` only adds the `kind` column; who
+  may read and write is untouched. A bug report names no kind, and the admin lists fall back when the column is not
+  there, so the code is safe on either side of that SQL. Admin > Ideas is `AdminBugs` with `kind="idea"`.
 
 ## The World's starting balance and "Reset the whole World" (Admin > Rooms)
 

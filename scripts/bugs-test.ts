@@ -2,7 +2,7 @@
 // supabase/009_bug_reports.sql: anybody may add a report, only admins can read one.)
 //   npx tsx scripts/bugs-test.ts
 import { readFileSync } from 'node:fs'
-import { BUG_COOLDOWN_MS, BUG_DOING_MAX, BUG_MAX, BUG_MIN, bugProblem, buildBugRow, cleanBugText } from '../src/game/bugReports'
+import { BUG_COOLDOWN_MS, BUG_DOING_MAX, BUG_MAX, BUG_MIN, bugProblem, buildBugRow, cleanBugText, IDEA_WANTS } from '../src/game/bugReports'
 
 const ok = (cond: boolean, what: string) => console.log(`${cond ? 'PASS' : 'FAIL'} ${what}`)
 const now = 1_800_000_000_000
@@ -26,6 +26,15 @@ ok(row.user_id === null && buildBugRow({ what: 'The chart froze when I sold', do
 const keys = Object.keys(row).sort().join()
 ok(keys === 'context,doing,user_id,username,what' && Object.keys(row.context).every((k) => ['page', 'mode', 'engine', 'coin', 'version', 'screen', 'browser', 'errors'].includes(k)), 'a report carries the two answers and where the player was: no wallet, no balances, no email')
 ok(cleanBugText('a\nb', 10) === 'a\nb' || cleanBugText('a\nb', 10) === 'a b', 'line breaks are kept or turned into spaces, never lost words')
+
+// Ideas travel the same road, told apart by `kind`.
+const idea = buildBugRow({ what: 'Let me sort my portfolio by profit', doing: 'I cannot find my winners', userId: null, username: 'Guest', context: { page: 'portfolio', errors: ['boom'] }, idea: { want: 'remove' } }) as ReturnType<typeof buildBugRow> & { kind?: string }
+ok(idea.kind === 'idea' && idea.context.want === 'remove' && idea.context.errors === undefined, 'an idea is marked as one, says what it asks for (add, change or get rid of), and carries no error list')
+ok(!('kind' in row) && row.context.want === undefined, 'a bug report names no kind (so reports keep working before the ideas SQL is run)')
+ok((buildBugRow({ what: 'An idea with a made-up kind', doing: '', userId: null, username: '', context: {}, idea: { want: 'hack' as never } }).context.want as string) === 'add', 'a made-up kind of idea is not stored')
+ok(IDEA_WANTS.map((w) => w.id).join() === 'add,change,remove', 'the three kinds: add, change, get rid of')
+const sql2 = readFileSync(new URL('../supabase/010_ideas.sql', import.meta.url), 'utf8')
+ok(/add column if not exists kind text not null default 'bug'/.test(sql2) && sql2.includes("check (kind in ('bug', 'idea'))") && !/policy|grant|disable row level/i.test(sql2.replace(/^--.*$/gm, '')), 'the ideas SQL only adds the kind (bug or idea): who may read and write stays exactly as it was')
 
 // The database's side, read off the SQL the owner runs.
 const sql = readFileSync(new URL('../supabase/009_bug_reports.sql', import.meta.url), 'utf8')

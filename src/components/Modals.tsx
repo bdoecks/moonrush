@@ -9,7 +9,7 @@ import { fmtClock, fmtPct, fmtUsd, toneClass } from '../utils/format'
 import { Logo } from './TopBar'
 import { Kbd, Modal, Segmented, Toggle } from './ui'
 import { LobbyModal, WorldCard } from './Multiplayer'
-import { BugReportModal } from './BugReport'
+import { BugReportModal, IdeaModal } from './BugReport'
 import { useFlags } from '../game/flags'
 import { useAccount } from '../net/account'
 import { INVITE_MINUTES, INVITE_REWARD, useInvites } from '../net/invites'
@@ -24,6 +24,7 @@ export function Modals() {
   if (modal === 'help') return <HelpModal />
   if (modal === 'lobby') return <LobbyModal />
   if (modal === 'bug') return <BugReportModal />
+  if (modal === 'idea') return <IdeaModal />
   return null
 }
 
@@ -242,6 +243,7 @@ function SettingsModal() {
   return (
     <Modal title="Settings" onClose={() => setModal(null)}>
       <div className="divide-y divide-line">
+        <Row label="Got an idea?" hint="What the game needs, what should change, or go"><button onClick={() => setModal('idea')} className="rounded-md border border-line2 px-2.5 py-1 text-[12px] font-semibold text-ink hover:border-accent/60 hover:text-accent">💡 Share an idea</button></Row>
         <Row label="Found a bug?" hint="Tell us what went wrong. It goes straight to the team"><button onClick={() => setModal('bug')} className="rounded-md border border-line2 px-2.5 py-1 text-[12px] font-semibold text-ink hover:border-accent/60 hover:text-accent">🐞 Report a bug</button></Row>
         <Row label="Sound effects" hint="Synth blips for trades, alerts and level-ups"><Toggle label="Sound" on={settings.sound} onChange={(v) => update({ sound: v })} /></Row>
         <Row label="Animations" hint="Price flashes, slide-ins, marquee"><Toggle label="Animations" on={settings.animations} onChange={(v) => update({ animations: v })} /></Row>
@@ -312,6 +314,10 @@ function HelpModal() {
           <button onClick={() => setModal('bug')} className="flex w-full items-center justify-between rounded-md border border-line2 bg-panel2/60 px-3 py-2 text-left text-[12px] hover:border-accent/60">
             <span><span className="font-semibold text-ink">🐞 Found a bug?</span> <span className="text-muted">Tell us what went wrong.</span></span>
             <span className="font-semibold text-accent">Report a bug →</span>
+          </button>
+          <button onClick={() => setModal('idea')} className="flex w-full items-center justify-between rounded-md border border-line2 bg-panel2/60 px-3 py-2 text-left text-[12px] hover:border-accent/60">
+            <span><span className="font-semibold text-ink">💡 Got an idea?</span> <span className="text-muted">What the game needs, or could lose.</span></span>
+            <span className="font-semibold text-accent">Share an idea →</span>
           </button>
           <p><span className="font-semibold text-ink">MOONRUSH is a game.</span> Every token, price, trade, wallet and rival is simulated. No wallets, no blockchain, no real money.</p>
           <p><span className="font-semibold text-ink">The market has moods.</span> Tokens move through regimes (accumulation, pumps, distribution, dumps, recoveries), but a pump can be dumped into and a dip bought at any moment: the chart shows what happened, not what comes next.</p>

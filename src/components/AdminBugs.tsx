@@ -1,21 +1,24 @@
-// Admin > Bug reports: what players sent through "Report a bug", newest first. Mark one fixed, leave yourself a
-// note, or delete it. Only admins can read the table (the database enforces it).
+// Admin > Bug reports and Admin > Ideas: what players sent through "Report a bug" and "Share an idea", newest first.
+// Mark one done, leave yourself a note, or delete it. Only admins can read the table (the database enforces it).
 import clsx from 'clsx'
 import { RefreshCw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import type { BugReport, BugStatus } from '../game/bugReports'
+import { IDEA_WANTS, type BugReport, type BugStatus, type ReportKind } from '../game/bugReports'
 import { useGame } from '../game/store'
 import { deleteBugReport, loadBugReports, markBugReport } from '../net/bugs'
 import { fmtAge } from '../utils/format'
 import { EmptyState } from './ui'
 
-const STATUS: Record<BugStatus, { label: string; cls: string }> = {
-  open: { label: 'Open', cls: 'bg-warn/15 text-warn' },
-  fixed: { label: 'Fixed', cls: 'bg-up/15 text-up' },
-  wontfix: { label: 'Not a bug', cls: 'bg-panel2 text-dim' },
+const CLS: Record<BugStatus, string> = { open: 'bg-warn/15 text-warn', fixed: 'bg-up/15 text-up', wontfix: 'bg-panel2 text-dim' }
+/** The same three states under each kind's own words. */
+const WORDS: Record<ReportKind, { labels: Record<BugStatus, string>; done: string; no: string; icon: string; empty: string; hint: string; more: string }> = {
+  bug: { labels: { open: 'Open', fixed: 'Fixed', wontfix: 'Not a bug' }, done: 'Mark fixed', no: 'Not a bug', icon: '🐞', empty: 'No open bug reports', hint: 'Players send them from Help → Report a bug.', more: 'Just before: ' },
+  idea: { labels: { open: 'New', fixed: 'Done', wontfix: 'Not doing' }, done: 'Mark done', no: 'Not doing', icon: '💡', empty: 'No new ideas', hint: 'Players send them from Help → Share an idea.', more: 'Why: ' },
 }
 
-export function AdminBugs({ onCount }: { onCount?: (open: number) => void }) {
+export function AdminBugs({ onCount, kind = 'bug' }: { onCount?: (open: number) => void; kind?: ReportKind }) {
+  const words = WORDS[kind]
+  const STATUS = { open: { label: words.labels.open, cls: CLS.open }, fixed: { label: words.labels.fixed, cls: CLS.fixed }, wontfix: { label: words.labels.wontfix, cls: CLS.wontfix } }
   const notify = useGame((s) => s.notify)
   const [rows, setRows] = useState<BugReport[]>([])
   const [error, setError] = useState('')
@@ -24,12 +27,12 @@ export function AdminBugs({ onCount }: { onCount?: (open: number) => void }) {
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
-    const r = await loadBugReports()
+    const r = await loadBugReports(kind)
     setRows(r.rows)
     setError(r.error ? (/does not exist|schema cache/i.test(r.error) ? 'The bug_reports table is not there yet: run supabase/009_bug_reports.sql in the Supabase SQL editor.' : r.error) : '')
     setLoading(false)
     onCount?.(r.rows.filter((x) => x.status === 'open').length)
-  }, [onCount])
+  }, [onCount, kind])
   useEffect(() => {
     void load()
     const id = setInterval(() => void load(), 60_000)
@@ -68,7 +71,7 @@ export function AdminBugs({ onCount }: { onCount?: (open: number) => void }) {
         <button onClick={() => void load()} className="ml-auto flex items-center gap-1 rounded-md border border-line2 px-2 py-1 text-[12px] text-muted hover:text-ink" title="Reload"><RefreshCw size={12} /> Reload</button>
       </div>
       {error && <div className="rounded-md border border-down/40 bg-down/10 px-3 py-2 text-[12px] text-down">{error}</div>}
-      {!error && !loading && !shown.length && <EmptyState icon="🐞" title={show === 'open' ? 'No open bug reports' : 'Nothing here'} hint="Players send them from Help → Report a bug." />}
+      {!error && !loading && !shown.length && <EmptyState icon={words.icon} title={show === 'open' ? words.empty : 'Nothing here'} hint={words.hint} />}
       {shown.map((b) => {
         const c = b.context ?? {}
         const draft = notes[b.id]
@@ -76,17 +79,18 @@ export function AdminBugs({ onCount }: { onCount?: (open: number) => void }) {
           <div key={b.id} className="rounded-lg border border-line bg-panel p-3 text-[12px]">
             <div className="flex flex-wrap items-center gap-2">
               <span className={clsx('rounded px-1.5 py-px text-[10px] font-bold', STATUS[b.status]?.cls)}>{STATUS[b.status]?.label ?? b.status}</span>
+              {c.want && <span className="rounded bg-accent/15 px-1.5 py-px text-[10px] font-bold text-accent">{IDEA_WANTS.find((w) => w.id === c.want)?.label ?? c.want}</span>}
               <span className="font-semibold text-ink">{b.username || 'Guest'}</span>
               <span className="text-[10px] text-dim">{b.user_id ? 'signed in' : 'guest'} · #{b.id} · {fmtAge(Math.max(0, (Date.now() - Date.parse(b.created_at)) / 1000))} ago · {new Date(b.created_at).toLocaleString()}</span>
               <span className="ml-auto flex gap-1">
-                {b.status !== 'fixed' && <button onClick={() => void mark(b, 'fixed')} className="rounded border border-up/50 px-2 py-0.5 text-[11px] font-semibold text-up hover:bg-up/10">Mark fixed</button>}
-                {b.status !== 'wontfix' && <button onClick={() => void mark(b, 'wontfix')} className="rounded border border-line2 px-2 py-0.5 text-[11px] font-semibold text-muted hover:text-ink">Not a bug</button>}
+                {b.status !== 'fixed' && <button onClick={() => void mark(b, 'fixed')} className="rounded border border-up/50 px-2 py-0.5 text-[11px] font-semibold text-up hover:bg-up/10">{words.done}</button>}
+                {b.status !== 'wontfix' && <button onClick={() => void mark(b, 'wontfix')} className="rounded border border-line2 px-2 py-0.5 text-[11px] font-semibold text-muted hover:text-ink">{words.no}</button>}
                 {b.status !== 'open' && <button onClick={() => void mark(b, 'open')} className="rounded border border-warn/50 px-2 py-0.5 text-[11px] font-semibold text-warn hover:bg-warn/10">Reopen</button>}
                 <button onClick={() => void remove(b)} className="rounded border border-down/40 p-1 text-down hover:bg-down/10" title="Delete this report" aria-label="Delete this report"><Trash2 size={12} /></button>
               </span>
             </div>
             <p className="mt-2 whitespace-pre-wrap break-words text-[13px] text-ink">{b.what}</p>
-            {b.doing && <p className="mt-1.5 whitespace-pre-wrap break-words text-muted"><span className="font-semibold text-dim">Just before: </span>{b.doing}</p>}
+            {b.doing && <p className="mt-1.5 whitespace-pre-wrap break-words text-muted"><span className="font-semibold text-dim">{words.more}</span>{b.doing}</p>}
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-dim">
               {c.page && <span>Page: <span className="text-muted">{c.page}</span></span>}
               {c.mode && <span>Playing: <span className="text-muted">{c.mode}</span></span>}

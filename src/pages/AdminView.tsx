@@ -17,7 +17,7 @@ import { GiveBox } from '../components/GiveBox'
 import { AdminBugs } from '../components/AdminBugs'
 import { openBugCount } from '../net/bugs'
 
-type Tab = 'rooms' | 'market' | 'accounts' | 'bugs' | 'switches'
+type Tab = 'rooms' | 'market' | 'accounts' | 'bugs' | 'ideas' | 'switches'
 /** Admin panel: only shows for accounts on the admin list (the server and database enforce it too). */
 export function AdminView() {
   const admin = useAccount((s) => s.admin)
@@ -26,8 +26,10 @@ export function AdminView() {
   const [roomsError, setRoomsError] = useState('')
   // Open bug reports, for the tab's label (the tab itself keeps it up to date while it is open).
   const [bugs, setBugs] = useState<number | null>(null)
+  const [ideas, setIdeas] = useState<number | null>(null)
   useEffect(() => {
     if (admin) void openBugCount().then(setBugs)
+    if (admin) void openBugCount('idea').then(setIdeas)
   }, [admin])
 
   const refresh = useCallback(async () => {
@@ -57,6 +59,7 @@ export function AdminView() {
     { id: 'market', label: '📈 Market god mode' },
     { id: 'accounts', label: '👤 Accounts' },
     { id: 'bugs', label: `🐞 Bug reports${bugs ? ` ${bugs}` : ''}` },
+    { id: 'ideas', label: `💡 Ideas${ideas ? ` ${ideas}` : ''}` },
     { id: 'switches', label: '🎛 Switches & stats' },
   ]
   return (
@@ -71,11 +74,12 @@ export function AdminView() {
             ))}
           </div>
         </div>
-        {roomsError && tab !== 'accounts' && tab !== 'bugs' && tab !== 'switches' && <div className="rounded-md border border-down/40 bg-down/10 px-3 py-2 text-[12px] text-down">Game server: {roomsError}</div>}
+        {roomsError && tab !== 'accounts' && tab !== 'bugs' && tab !== 'ideas' && tab !== 'switches' && <div className="rounded-md border border-down/40 bg-down/10 px-3 py-2 text-[12px] text-down">Game server: {roomsError}</div>}
         {tab === 'rooms' && <Rooms rooms={rooms} act={act} />}
         {tab === 'market' && <Market rooms={rooms} />}
         {tab === 'accounts' && <Accounts />}
         {tab === 'bugs' && <AdminBugs onCount={setBugs} />}
+        {tab === 'ideas' && <AdminBugs kind="idea" onCount={setIdeas} />}
         {tab === 'switches' && <Switches rooms={rooms} />}
       </div>
     </div>
