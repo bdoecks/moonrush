@@ -456,6 +456,41 @@ async function checklistBot(page: Page) {
     return `launched $${ticker}`
   })
 
+  await step(page, 'Dev wallet and dev panel', 'A coin you launch deploys from a dev wallet; on its page the Dev panel buys and sells from that wallet, whatever wallet is selected for trading.', async () => {
+    const mine = await page.evaluate(() => {
+      const s = (window as any).__game.getState()
+      const l = s.launches.find((x: any) => { const t = s.market.tokens.find((y: any) => y.id === x.tokenId); return t && (t.status === 'bonding' || t.status === 'graduated') })
+      const acc = l && s.portfolio.accounts.find((a: any) => a.id === l.devWallet)
+      return l ? { id: l.tokenId, emoji: acc?.emoji, devWallet: l.devWallet, active: s.portfolio.active } : null
+    })
+    if (!mine) return 'no live coin of yours to try it on (the launch died): skipped'
+    if (mine.emoji !== '🧑‍💻') throw new Error(`the coin was deployed from a wallet marked ${mine.emoji}, not a dev wallet`)
+    if (mine.active.includes(mine.devWallet)) throw new Error('the dev wallet became the selected trading wallet')
+    act('Open your coin')
+    await page.evaluate((id) => (window as any).__game.getState().select(id), mine.id)
+    await page.waitForTimeout(600)
+    const opener = page.getByRole('button', { name: /Dev panel/ })
+    if (await opener.count()) await opener.first().click()
+    const panel = page.getByRole('region', { name: 'Dev panel' })
+    await panel.waitFor({ timeout: 5000 })
+    // (No named helpers inside evaluate: the test runner's wrapper for them does not exist in the page.)
+    const bag = () => page.evaluate((m) => { const acc = (window as any).__game.getState().portfolio.accounts; return { dev: acc.filter((a: any) => a.id === m.devWallet).reduce((n: number, a: any) => n + (a.positions[m.id]?.qty ?? 0), 0), others: acc.filter((a: any) => a.id !== m.devWallet).reduce((n: number, a: any) => n + (a.positions[m.id]?.qty ?? 0), 0) } }, mine)
+    const b0 = await bag()
+    act('Click the smallest "Dev buy" amount')
+    await panel.getByRole('button', { name: /^Dev buy / }).first().click()
+    await page.waitForTimeout(600)
+    const b1 = await bag()
+    if (!(b1.dev > b0.dev) || b1.others !== b0.others) throw new Error('the dev buy did not land in the dev wallet alone')
+    await shot(page, 'dev-panel')
+    act('Click "Dev sell 100%"')
+    await panel.getByRole('button', { name: 'Dev sell 100%' }).click()
+    await page.waitForTimeout(600)
+    const b2 = await bag()
+    if (b2.dev > 0 || b2.others !== b0.others) throw new Error('the dev sell did not empty the dev wallet alone')
+    await checkMoney(page, 'after dev panel trades')
+    return 'deployed from a dev wallet; the panel bought and sold from it alone'
+  })
+
   await step(page, 'Share an idea', 'The idea button (top right) should open a short form with three kinds of idea; Send stays off until something is written; nothing is sent by this test.', async () => {
     act('Click the "Share an idea" button (top right)')
     await page.getByRole('button', { name: 'Share an idea', exact: true }).first().click()

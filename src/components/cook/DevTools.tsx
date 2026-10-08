@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { Bot, Boxes, Check, Copy, EyeOff, Gift, Info, Play, Plus, Square, Wallet } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CHAINS, fmtNative } from '../../data/chains'
 import { airdropFeePerWallet, BOT_RATES, BUNDLE_MAX_WALLETS, botCostPerMin, washShare, type AirdropTarget } from '../../game/devTools'
 import { SUPPLY } from '../../game/marketEngine'
@@ -10,7 +10,7 @@ import type { BundleSpec, CookSpec, LaunchRecord, Token } from '../../types'
 import { fmtUsd } from '../../utils/format'
 import { Segmented, Toggle } from '../ui'
 import { useWallets } from '../../hooks/useWallets'
-import { DEV_EMOJI, MAX_DEV_WALLETS } from '../../game/accounts'
+import { DEV_EMOJI, MAX_DEV_WALLETS, MAX_WALLETS } from '../../game/accounts'
 import { playerId } from '../../net/client'
 import { walletAddress } from '../../utils/address'
 
@@ -112,7 +112,8 @@ export function SideWalletsSection({ spec, onChange }: { spec: CookSpec; onChang
   const [naming, setNaming] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
   const devWallets = all.filter((a) => a.emoji === DEV_EMOJI)
-  const choices = [...(primary && primary.emoji !== DEV_EMOJI ? [primary] : []), ...devWallets]
+  // Only dev wallets deploy. (Your primary is offered only if you have none and are at the wallet limit.)
+  const choices = devWallets.length ? devWallets : all.length >= MAX_WALLETS && primary ? [primary] : []
   const addrOf = (id: string) => walletAddress(playerId(), id, 'sol') // the same address the tape shows for it
   const makeDev = () => {
     const id = createWallet((naming ?? '').trim() || `Dev ${devWallets.length + 1}`, DEV_EMOJI)
@@ -126,7 +127,17 @@ export function SideWalletsSection({ spec, onChange }: { spec: CookSpec; onChang
     notify({ title: 'COPIED', body: `Dev wallet address ${addrOf(id)}`, tone: 'info', icon: '📋' })
   }
   const c = CHAINS[spec.chain]
-  const devId = spec.devWallet && all.some((a) => a.id === spec.devWallet) ? spec.devWallet : primary?.id
+  const devId = choices.find((a) => a.id === spec.devWallet)?.id ?? choices[0]?.id
+  // No dev wallet yet: your first one is made for you. And the form always points at a dev wallet.
+  const made = useRef(false)
+  useEffect(() => {
+    if (!devWallets.length && all.length && all.length < MAX_WALLETS && !made.current) {
+      made.current = true
+      const id = createWallet('Dev 1', DEV_EMOJI)
+      if (id) onChange({ devWallet: id })
+    } else if (devId && spec.devWallet !== devId) onChange({ devWallet: devId, sideBuys: (spec.sideBuys ?? []).filter((x) => x.walletId !== devId) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devWallets.length, all.length, devId, spec.devWallet])
   const sides = spec.sideBuys ?? []
   const amountOf = (id: string) => sides.find((x) => x.walletId === id)?.amount
   const setSide = (id: string, amount: number | null) => {
@@ -145,11 +156,11 @@ export function SideWalletsSection({ spec, onChange }: { spec: CookSpec; onChang
         </div>
         <button type="button" onClick={() => openManager(true)} className="text-[10px] text-dim hover:text-ink">Manage wallets…</button>
       </div>
-      <p className="mt-1 text-[11px] text-muted">The deploying wallet is the coin’s <b className="text-ink">dev wallet</b>: its address shows on the Dev Token tab and anyone can track it. A fresh dev wallet keeps your main wallet’s history out of it.</p>
+      <p className="mt-1 text-[11px] text-muted">The deploying wallet is the coin’s <b className="text-ink">dev wallet</b>: its address shows on the Dev Token tab and anyone can track it. Coins launch from a <b className="text-ink">dev wallet</b> only ({DEV_EMOJI}): your trading wallets stay out of it, and only this wallet’s buys and sells count as the dev’s.</p>
 
       {/* Dev wallet cards */}
       <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
-        {[...choices, ...(devId && !choices.some((a) => a.id === devId) ? all.filter((a) => a.id === devId) : [])].map((a) => {
+        {choices.map((a) => {
           const on = a.id === devId
           const bal = a.balances[spec.chain] ?? 0
           return (

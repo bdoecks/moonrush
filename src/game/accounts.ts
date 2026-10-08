@@ -7,6 +7,13 @@ export const MAX_WALLETS = 10
 // Dev wallets: wallets made to deploy coins from (marked by their emoji, which the server keeps with the wallet layout).
 export const DEV_EMOJI = '🧑‍💻'
 export const MAX_DEV_WALLETS = 3
+/** Your dev wallets. Coins are launched from one of these only (your trading wallets stay out of it). */
+export const devAccounts = (p: Pick<Portfolio, 'accounts'>): Account[] => (p.accounts ?? []).filter((a) => a.emoji === DEV_EMOJI)
+/** The dev wallet a launch deploys from: the one asked for if it is a dev wallet, else your first one (null: you have none yet). */
+export const devWalletFor = (p: Pick<Portfolio, 'accounts'>, wanted?: string): string | null => {
+  const devs = devAccounts(p)
+  return (devs.find((a) => a.id === wanted) ?? devs[0])?.id ?? null
+}
 export const WALLET_EMOJIS = ['🟢', '🔵', '🟣', '🟠', '🔴', '🟡', '⚫', '⚪', '🐸', '🐋', '🦊', '🤖']
 const empty = (): Record<Chain, number> => ({ sol: 0, bsc: 0, hood: 0 })
 

@@ -11,6 +11,7 @@ import { ArrowLeft, BarChart3, CandlestickChart, Copy, Eye, Globe, LineChart, Ma
 import { useEffect, useRef, useState, type ReactNode, useMemo } from 'react'
 import { FlowStats } from '../components/token/FlowStats'
 import { InstantTrade } from '../components/token/InstantTrade'
+import { DevPanel } from '../components/token/DevPanel'
 import { PriceChart, type ScaleMode } from '../components/token/PriceChart'
 import { RiskPanel } from '../components/token/RiskPanel'
 import { TradePanel } from '../components/token/TradePanel'
@@ -131,6 +132,7 @@ export function TokenView() {
     <div className="flex h-full flex-col overflow-y-auto lg:overflow-hidden">
       <Header t={t} />
       <InstantTrade />
+      <DevPanel t={t} />
 
       {/* Chart */}
       <div className="flex h-[380px] shrink-0 flex-col border-b border-line lg:h-auto lg:min-h-0 lg:flex-1 lg:shrink">

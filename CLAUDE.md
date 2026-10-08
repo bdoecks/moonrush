@@ -451,6 +451,19 @@ The five stages, as agreed: 2) tracked traders on the chart (a colour each, aver
 of supply, profit, history); 3) trader types that react to stories (narrative trader, contrarian, panic seller, FOMO,
 swing) on top of the real-data brain; 4) the data-source plug with provenance; 5) scale (send each player less).
 
+## Dev wallets and the dev panel
+
+- **Only a dev wallet deploys a coin, and only that wallet is the coin's dev** (2026-10-08, the owner's call). The
+  Cooking page offers dev wallets only (`DevTools.tsx`) and makes the first one for a player who has none; `cook`
+  in the store does the same (`devWalletFor` in `game/accounts.ts`). The server takes the dev's share of a coin from
+  the deploying wallet alone (`cooked.walletId`, in `tick()`), and only a sell from it is a dev sell (`devSold`). It
+  used to add up all of the player's wallets, so a side-wallet buy showed as the dev buying. The server does not
+  refuse a launch from a wallet that is not marked as a dev wallet: nothing is gained by it.
+- **The dev panel** (`components/token/DevPanel.tsx`, on the page of a coin you launched): buy amounts and sell
+  percentages that trade from that coin's dev wallet whatever wallets are selected (`buyFromWallet`, `sell` with the
+  wallet as scope). Drags like Instant Trade; starts closed on a phone. `cook-test` holds the server side, the UI
+  bots have a "Dev wallet and dev panel" step.
+
 ## Hidden pages (the `labs` switch)
 
 - CopyTrade, Sniper and Monitor are hidden from players while they are being worked on (2026-10-08, the owner's

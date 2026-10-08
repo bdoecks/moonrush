@@ -19,7 +19,7 @@ import { candleStore, COOK_FEE, cookAllowance, cookToken, COOK_COOLDOWN_TICKS, G
 import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
 import { lengthTicks, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS, type RoundLength } from './progression'
-import { accountOf, activeAccounts, commitView, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf } from './accounts'
+import { accountOf, activeAccounts, commitView, DEV_EMOJI, devWalletFor, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf } from './accounts'
 import { emptyBalances, executeBuy, nativePrice, type Asset } from './tradingEngine'
 import { CHAINS, fmtNative } from '../data/chains'
 import { DEFAULT_INSTANT, DEFAULT_TRADE_SETTINGS, migrateTradeSettings } from '../data/tradeSettings'
@@ -346,6 +346,8 @@ export interface GameState {
   fundWallets: (source: 'usd' | string, toIds: string[], chain: Chain, amountEach: number) => number
   /** Buy using an amount of the token's chain coin (e.g. 0.5 SOL). */
   buyNative: (amount: number, tokenId?: string, slot?: number) => boolean
+  /** Buy from one named wallet, whatever wallets are selected (the dev panel buys from the coin's dev wallet). */
+  buyFromWallet: (walletId: string, usd: number, tokenId: string) => boolean
   /** Start, retune or stop the volume bot on one of your launches. */
   setBot: (tokenId: string, patch: Partial<VolumeBot>) => void
   /** Post on the (simulated) X timeline; attach a coin to make it a call that bots may ape. */
@@ -1534,6 +1536,9 @@ export const useGame = create<GameState>()((set, get) => {
 
     cook: (spec) => {
       if (watchingOnly()) return null
+      // Coins are launched from a dev wallet only. No dev wallet yet: one is made now (it is funded from the USD bank
+      // like any wallet when auto-swap is on).
+      if (get().runStatus === 'running' && !devWalletFor(get().portfolio, spec.devWallet)) get().createWallet('Dev 1', DEV_EMOJI)
       const s = get()
       const fail = (body: string) => {
         s.notify({ title: 'CAN’T COOK', body, tone: 'warn', icon: '🍳' }, 'alert')
@@ -1552,8 +1557,9 @@ export const useGame = create<GameState>()((set, get) => {
       const bundleFees = bundleNative > 0 ? bundle.wallets * BUNDLE_WALLET_FEE + (bundle.stagger ? bundleUsd * STAGGER_FEE : 0) : 0
       const usdCosts = COOK_FEE + spec.marketing + bundleFees
       const devUsd = (spec.devBuy + bundleNative) * nativePrice(s.market, spec.chain)
-      // The deployer (dev) wallet pays the dev buy and bundle and earns the creator fees. Defaults to your primary.
-      const devId = spec.devWallet && accountOf(s.portfolio, spec.devWallet) ? spec.devWallet : primaryId(s.portfolio)
+      // The deployer (dev) wallet pays the dev buy and bundle and earns the creator fees: always one of your dev
+      // wallets (your primary only if no dev wallet could be made, at the wallet limit).
+      const devId = devWalletFor(s.portfolio, spec.devWallet) ?? primaryId(s.portfolio)
       const nativeUsd = (accountOf(s.portfolio, devId)?.balances[spec.chain] ?? 0) * nativePrice(s.market, spec.chain)
       if (usdCosts > s.portfolio.cash + 1e-9) return fail(`Need ${fmtUsd(usdCosts)} USD for fees + marketing — you have ${fmtUsd(s.portfolio.cash)}`)
       const devShort = Math.max(0, devUsd - nativeUsd)
@@ -1887,6 +1893,11 @@ export const useGame = create<GameState>()((set, get) => {
       if (done) s.notify({ title: `FUNDED ${done} WALLET${done > 1 ? 'S' : ''}`, body: `${fmtNative(got, chain)} total from ${src}${errors.length ? ` · stopped: ${errors[0]}` : ''}`, tone: errors.length ? 'warn' : 'info', icon: '💸' }, 'click')
       else s.notify({ title: 'FUNDING FAILED', body: errors[0] ?? 'Nothing to fund', tone: 'warn', icon: '⛔' }, 'alert')
       return done
+    },
+    buyFromWallet: (walletId, usd, tokenId) => {
+      const s = get()
+      if (s.runStatus !== 'running' || !accountOf(s.portfolio, walletId)) return false
+      return buyFrom([walletId], usd, tokenId)
     },
     buyNative: (amount, tokenId, slot) => {
       const s = get()

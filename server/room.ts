@@ -734,7 +734,9 @@ export class Room {
     me.wallet = r.portfolio
     this.market = r.market
     this.earn(me, r.fills)
-    if (o.side === 'sell' && this.cooked.get(t.id)?.pid === me.info.id) this.devSold(t.id, w.positions[t.id]?.qty ?? 0, me.wallet.positions[t.id]?.qty ?? 0)
+    // (Only the wallet that deployed the coin is its dev: a sell from another of the dev's wallets is anybody's sell.)
+    const mineCooked = o.side === 'sell' ? this.cooked.get(t.id) : undefined
+    if (mineCooked?.pid === me.info.id) this.devSold(t.id, accountOf(w, mineCooked.walletId)?.positions[t.id]?.qty ?? 0, accountOf(me.wallet, mineCooked.walletId)?.positions[t.id]?.qty ?? 0)
     // A real player's big buy gets noticed: the crowd looks at the coin, and somebody may say so.
     if (o.side === 'buy' && !me.info.bot) {
       const spent = r.fills.reduce((a, x) => a + x.value, 0)
@@ -766,7 +768,7 @@ export class Room {
 
   /**
    * A dev sold some of their own coin: the crowd sees the dev wallet selling and part of it leaves (the game does the
-   * same to a solo player's coin). `before` and `after` are all the coins the dev holds, in every wallet.
+   * same to a solo player's coin). `before` and `after` are what the coin's dev wallet holds (the one that deployed it).
    */
   private devSold(tokenId: string, before: number, after: number) {
     const frac = before > 0 ? Math.min(1, Math.max(0, (before - after) / before)) : 0
@@ -1108,9 +1110,11 @@ export class Room {
       c.feeMark = Math.max(c.feeMark, fees)
       const dev = this.members.get(c.pid)
       // What the dev really holds shows on the coin's page and in how the crowd takes to it (see stepFlow). A bot
-      // never reports its bag, and a game that understates one is put right here.
+      // never reports its bag, and a game that understates one is put right here. The dev is the wallet that deployed
+      // the coin, and only that one: what the same player buys with another wallet is not the dev's bag (it used to be
+      // counted, so a side-wallet buy showed up as the dev buying).
       if (dev?.wallet && (t.status === 'bonding' || t.status === 'graduated')) {
-        const held = ((dev.wallet.positions[id]?.qty ?? 0) / SUPPLY) * 100
+        const held = (((dev.info.bot ? dev.wallet.positions[id] : accountOf(dev.wallet, c.walletId)?.positions[id])?.qty ?? 0) / SUPPLY) * 100
         if (dev.info.bot) t.devPct = held
         else if (t.devPct + (t.bundlePct ?? 0) < held - 0.05) t.devPct = Math.min(100, held - (t.bundlePct ?? 0))
       }

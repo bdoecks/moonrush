@@ -32,6 +32,31 @@ const cook = (r: R, room: Room, pid: string, ticker: string, devBuy: number, seq
 const mine = cook(w, world, 'u-chef', 'FAIRA', 0, 2)
 ok(!!mine?.sim.flow?.botDev, "a player's World launch plays by the simulated market's rules")
 ok(!!mine?.sim.flow?.sniped, 'its snipers are in before the coin is shown to anybody (nobody but its dev is ahead of them)')
+// ── Only the wallet that deployed a coin is its dev ──────────────────────────
+{
+  type Acc = { id: string; positions: Record<string, { qty: number }> }
+  const me = () => (w as unknown as { members: Map<string, { wallet: { accounts: Acc[] } }> }).members.get('u-chef')!
+  const now = Date.now()
+  w.handle('u-chef', { t: 'layout', seq: 10, layout: { accounts: [{ id: 'w-main', name: 'Main', emoji: '🟢', createdAt: now }, { id: 'w-dev', name: 'Dev 1', emoji: '🧑‍💻', createdAt: now }, { id: 'w-side', name: 'Side', emoji: '🔵', createdAt: now }], active: ['w-main'] } })
+  ok(me().wallet.accounts.length === 3, 'the player has a main, a dev and a side wallet')
+  for (const id of ['w-dev', 'w-side']) w.handle('u-chef', { t: 'op', seq: 11, op: { kind: 'swap', from: 'usd', to: 'sol', amount: 3000, walletId: id } })
+  for (let i = 0; i < 31; i++) w.tick() // (the kitchen cools down between launches)
+  const c = cookToken(world.market, new Rng(991), spec('DEVONLY', 1))
+  w.handle('u-chef', { t: 'cook', seq: 12, ref: 12, token: c.token, money: { devWallet: 'w-dev', devBuy: 1, marketing: 0, style: 'hyped' } })
+  const coin = () => w.market.tokens.find((t) => t.id === c.token.id) as unknown as { devPct: number; hype: number; status: string }
+  const qty = (id: string) => me().wallet.accounts.find((x) => x.id === id)?.positions[c.token.id]?.qty ?? 0
+  w.tick()
+  const dev0 = coin().devPct
+  ok(qty('w-dev') > 0 && qty('w-main') === 0 && Math.abs(dev0 - (qty('w-dev') / 1e9) * 100) < 0.05, `the dev buy is in the dev wallet, and the coin shows it as the dev's share (${dev0.toFixed(2)}%)`)
+  w.handle('u-chef', { t: 'order', seq: 13, ref: 13, order: { side: 'buy', tokenId: c.token.id, walletIds: ['w-side'], usdEach: 300 } })
+  for (let i = 0; i < 3; i++) w.tick()
+  ok(qty('w-side') > 0 && Math.abs(coin().devPct - dev0) < 0.05, `a buy from the side wallet is not the dev buying: the dev's share stays ${coin().devPct.toFixed(2)}%`)
+  const hype0 = coin().hype
+  w.handle('u-chef', { t: 'order', seq: 14, ref: 14, order: { side: 'sell', tokenId: c.token.id, legs: [{ walletId: 'w-side', qty: qty('w-side') }] } })
+  ok(qty('w-side') === 0 && coin().hype === hype0, 'selling the side wallet out is not a dev sell (the coin loses none of its crowd for it)')
+  w.handle('u-chef', { t: 'order', seq: 15, ref: 15, order: { side: 'sell', tokenId: c.token.id, legs: [{ walletId: 'w-dev', qty: qty('w-dev') / 2 }] } })
+  ok(coin().hype < hype0, 'selling from the dev wallet is (half the bag: the coin loses some of its crowd)')
+}
 world.dispose()
 
 // ── A friends room keeps the cook's own game ─────────────────────────────────
