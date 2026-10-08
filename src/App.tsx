@@ -18,7 +18,7 @@ import { resumeRoom } from './net/client'
 import { initAccount, whenAccountReady } from './net/account'
 import { initSocial } from './net/social'
 import { CookingView } from './pages/CookingView'
-import { CopyTradeView } from './pages/CopyTradeView'
+import { CopyTradeView, WalletProfileOnly } from './pages/CopyTradeView'
 import { SniperView } from './pages/SniperView'
 import { PnlCard } from './components/PnlCard'
 import { ShareHost } from './components/ShareCard'
@@ -30,7 +30,8 @@ import { WatchBanner } from './components/Multiplayer'
 import { BrokeBanner } from './components/WorldBoard'
 import { PlayerCardDrawer } from './components/PlayerCard'
 import { AdminFloat } from './components/AdminFloat'
-import { watchFlags } from './game/flags'
+import { LAB_VIEWS, setLabsVisible, watchFlags } from './game/flags'
+import { useLabs } from './hooks/useLabs'
 import { DiscoverView } from './pages/DiscoverView'
 import { TrenchesView } from './pages/TrenchesView'
 import { LeaderboardView } from './pages/LeaderboardView'
@@ -87,6 +88,17 @@ export default function App() {
     }
   }), [])
 
+  // CopyTrade, Sniper and Monitor are hidden while they are being worked on (the `labs` switch; admins still see
+  // them). Hidden, nobody is left standing on one: a wallet's profile still opens (it lives on the CopyTrade page),
+  // over the market page, and closing it leads back there.
+  const labs = useLabs()
+  const labView = useGame((s) => LAB_VIEWS.includes(s.view))
+  const profileOpen = useGame((s) => s.view === 'copytrade' && !!s.walletDrawer)
+  useEffect(() => {
+    setLabsVisible(labs)
+    if (!labs && labView && !profileOpen) useGame.getState().setView('discover')
+  }, [labs, labView, profileOpen])
+
   // Start (or roll over to) this week's ranked season.
   useEffect(() => useGame.getState().checkSeason(), [])
 
@@ -118,7 +130,7 @@ export default function App() {
         <TrackerDock />
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="min-h-0 flex-1">
-            {view === 'discover' && <DiscoverView />}
+            {(view === 'discover' || (!labs && labView)) && <DiscoverView />}
             {view === 'trenches' && <TrenchesView />}
             {view === 'token' && <TokenView />}
             {view === 'portfolio' && (
@@ -128,9 +140,9 @@ export default function App() {
             )}
             {view === 'missions' && <MissionsView />}
             {view === 'cooking' && <CookingView />}
-            {view === 'copytrade' && <CopyTradeView />}
-            {view === 'sniper' && <SniperView />}
-            {view === 'monitor' && <MonitorView />}
+            {view === 'copytrade' && (labs ? <CopyTradeView /> : <WalletProfileOnly />)}
+            {labs && view === 'sniper' && <SniperView />}
+            {labs && view === 'monitor' && <MonitorView />}
             {view === 'track' && <TrackView />}
             {view === 'rewards' && (
               <Suspense fallback={<PageSkeleton />}>

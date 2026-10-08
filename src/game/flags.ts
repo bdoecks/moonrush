@@ -9,11 +9,23 @@ export interface GameFlags {
   multiplayer: boolean // "Play with friends"
   world: boolean // "MOONRUSH World" (off: only admins see it, until launch day)
   notice: string // banner at the top for everyone ('' = none)
+  labs: boolean // CopyTrade, Sniper and Monitor (off: only admins see them, while they are being worked on)
 }
 
-export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '' }
+export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false }
 
-export const useFlags = create<GameFlags & { loaded: boolean }>(() => ({ ...DEFAULT_FLAGS, loaded: false }))
+// (`labsDev`: test copies only, so the UI bots can open the hidden pages. Never set by the live game.)
+export const useFlags = create<GameFlags & { loaded: boolean; labsDev?: boolean }>(() => ({ ...DEFAULT_FLAGS, loaded: false }))
+
+/** The pages behind the `labs` switch. */
+export const LAB_VIEWS: readonly string[] = ['copytrade', 'sniper', 'monitor']
+// Whether this player sees them right now (the switch is on, or they are an admin): kept here by the app
+// (`useLabs` in hooks/useLabs.ts) for code outside React: the keyboard, and the game loop that runs copy trades and snipers.
+let labsNow = false
+export const labsVisible = () => labsNow
+export const setLabsVisible = (v: boolean) => {
+  labsNow = v
+}
 
 export async function loadFlags() {
   if (!supabase) return

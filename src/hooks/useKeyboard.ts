@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { labsVisible } from '../game/flags'
 import { useGame } from '../game/store'
 
 const isTyping = (el: EventTarget | null) => {
@@ -41,9 +42,10 @@ export function useKeyboard() {
           case 'd': s.setView('discover'); return true
           case 'm': s.setView('missions'); return true
           case 'c': s.setView('cooking'); return true
-          case 'y': s.setView('copytrade'); return true
-          case 'n': s.setView('sniper'); return true
-          case 'o': s.setView('monitor'); return true
+          // (CopyTrade, Sniper and Monitor: only while they are shown, see the `labs` switch.)
+          case 'y': if (!labsVisible()) return false; s.setView('copytrade'); return true
+          case 'n': if (!labsVisible()) return false; s.setView('sniper'); return true
+          case 'o': if (!labsVisible()) return false; s.setView('monitor'); return true
           case 'k': s.setView('track'); return true
           case 'r': s.setView('rewards'); return true
           case 'l': s.setView('leaderboard'); return true

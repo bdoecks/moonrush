@@ -1,3 +1,4 @@
+import { useFlags } from './game/flags'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
@@ -6,7 +7,7 @@ import { useGame } from './game/store'
 import { startInvites } from './net/invites'
 
 // Dev-only handle for inspecting game state from the console.
-if (import.meta.env.DEV) Object.assign(window, { __game: useGame })
+if (import.meta.env.DEV) Object.assign(window, { __game: useGame, __flags: useFlags })
 
 startInvites() // remembers an invite link's ?ref= code and applies it once you're signed in
 

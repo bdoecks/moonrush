@@ -237,6 +237,17 @@ async function checklistBot(page: Page) {
     await shot(page, '01-start')
   })
 
+  await step(page, 'Hidden tabs', 'CopyTrade, Sniper and Monitor are hidden from players for now: no tab, and their letter keys do nothing.', async () => {
+    const dismiss = page.getByRole('button', { name: /Practice/ })
+    void dismiss
+    for (const label of ['CopyTrade', 'Monitor']) if (await page.getByRole('button', { name: label, exact: true }).count()) throw new Error(`the ${label} tab is showing`)
+    if (await page.getByRole('button', { name: /Sniper$/ }).count()) throw new Error('the Sniper tab is showing')
+    act('Switch the three pages on for the rest of this test (test copies only)')
+    await page.evaluate(() => (window as any).__flags.setState({ labsDev: true }))
+    await page.waitForTimeout(300)
+    return 'no CopyTrade, Sniper or Monitor tab until the switch is on'
+  })
+
   await step(page, 'Start a Practice round', 'Picking Practice should close the menu and start a round with $100,000.', async () => {
     act('Click "Practice"')
     await page.getByRole('button', { name: /Practice/ }).click()
@@ -722,6 +733,7 @@ async function explorerBot(page: Page) {
     if (!s || !(await pageLooksAlive(page))) {
       addProblem({ severity: 'high', title: 'The screen went blank while exploring', what: 'After a click the whole game disappeared. A player would have to reload.', where: currentPlace, tech: 'root element empty after: ' + trail.slice(-1)[0], screenshot: await shot(page, `blank-${i}`) })
       await page.goto(URL); await page.waitForTimeout(1500)
+      await page.evaluate(() => (window as any).__flags?.setState({ labsDev: true })).catch(() => {})
       await page.getByRole('button', { name: /Practice/ }).click().catch(() => {})
       continue
     }

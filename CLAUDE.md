@@ -451,6 +451,17 @@ The five stages, as agreed: 2) tracked traders on the chart (a colour each, aver
 of supply, profit, history); 3) trader types that react to stories (narrative trader, contrarian, panic seller, FOMO,
 swing) on top of the real-data brain; 4) the data-source plug with provenance; 5) scale (send each player less).
 
+## Hidden pages (the `labs` switch)
+
+- CopyTrade, Sniper and Monitor are hidden from players while they are being worked on (2026-10-08, the owner's
+  call). The `labs` flag (Admin > Switches, default off) shows them to everyone; admins always see them. One answer
+  for React (`useLabs`) and one for code outside it (`labsVisible()` in `game/flags.ts`, set by `App`): the tabs
+  (desktop and phone), the letter keys Y / N / O, the Help list. Hidden, nobody stays on one of the pages, and copy
+  trades and sniper tasks set up before do not run (`runCopies`, `runSnipers`). A wallet's profile lives on the
+  CopyTrade page, so it still opens over the market page, without its Copy button (`WalletProfileOnly`).
+- The UI bots check the tabs are hidden, then switch them on for themselves (`__flags.setState({ labsDev: true })`,
+  test copies only) and test the pages as before.
+
 ## Ideas (Share an idea)
 
 - The ideas form is the bug-report form under other words (`BugReport.tsx`, modal `idea`): a row of `bug_reports` with

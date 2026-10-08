@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { SocialProfile, CashbackState, SniperTask, Trade, VolumeBot, Chain, Challenge, CookSpec, CopyConfig, GameMode, LaunchRecord, MarketEvent, MarketState, Player, Portfolio, Profile, RunStatus, Settings, PriceAlert, RewardClaim, RewardsState, SimWallet, SocialPost, Toast, Token, TrackerSettings, WalletAction, WalletActionKind, WalletLabel } from '../types'
 import { clamp, Rng } from '../utils/rng'
-import { useFlags } from './flags'
+import { labsVisible, useFlags } from './flags'
 import { restoreCharts, saveCharts } from './chartSave'
 import { fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { fakeAddress } from '../utils/address'
@@ -704,6 +704,7 @@ export const useGame = create<GameState>()((set, get) => {
   function runSnipers(newIds: string[]) {
     const s0 = get()
     if (s0.online?.spectator) return
+    if (!labsVisible()) return // the Sniper page is hidden (the `labs` switch): tasks set up before wait, they do not trade unseen
     if (!s0.snipers.some((x) => x.enabled)) return
     const words = (str: string) => str.split(',').map((w) => w.trim().toLowerCase().replace(/^\$/, '')).filter(Boolean)
     let snipers = s0.snipers.map((x) => ({ ...x, holdings: { ...x.holdings }, stats: { ...x.stats } }))
@@ -824,6 +825,7 @@ export const useGame = create<GameState>()((set, get) => {
   function runCopies(actions: WalletAction[]) {
     const s0 = get()
     if (s0.online?.spectator) return
+    if (!labsVisible()) return // the CopyTrade page is hidden (the `labs` switch): copies set up before wait, they do not trade unseen
     if (!s0.copies.some((c) => !c.paused)) return
     // Copy trades run from your primary wallet. In rooms each one is an order the server runs too (its result wins).
     const pid = primaryId(s0.portfolio)

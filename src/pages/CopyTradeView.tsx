@@ -55,6 +55,13 @@ export function CopyTradeView() {
   )
 }
 
+/** A wallet's profile on its own, for while the CopyTrade page is hidden (the `labs` switch): no copy button. */
+export function WalletProfileOnly() {
+  const drawer = useGame((s) => s.walletDrawer)
+  const openWallet = useGame((s) => s.openWallet)
+  return drawer ? <WalletDrawer walletId={drawer} period="24H" onClose={() => openWallet(null)} /> : null
+}
+
 function useStats(period: Period) {
   const wallets = useGame((s) => s.wallets)
   const tick = useGame((s) => s.market.tick)
@@ -189,7 +196,7 @@ function Th({ k, sort, onSort, children }: { k: SortKey; sort: { key: SortKey; d
   )
 }
 
-function WalletDrawer({ walletId, period, onClose, onCopy }: { walletId: string; period: Period; onClose: () => void; onCopy: (id: string) => void }) {
+function WalletDrawer({ walletId, period, onClose, onCopy }: { walletId: string; period: Period; onClose: () => void; onCopy?: (id: string) => void }) {
   const w = useGame((s) => s.wallets.find((x) => x.id === walletId))
   const tick = useGame((s) => s.market.tick)
   const now = useGame((s) => s.market.time)
@@ -256,13 +263,15 @@ function WalletDrawer({ walletId, period, onClose, onCopy }: { walletId: string;
             ))}
           </Sub>
         </div>
-        <div className="grid grid-cols-2 gap-2 border-t border-line p-3">
+        <div className={clsx('grid gap-2 border-t border-line p-3', onCopy ? 'grid-cols-2' : 'grid-cols-1')}>
           <button onClick={() => toggleTrack(w.id)} className={clsx('flex h-10 items-center justify-center gap-1.5 rounded-md border text-[13px] font-semibold', tracked ? 'border-accent/50 text-accent' : 'border-line2 text-muted hover:text-ink')}>
             {tracked ? <Bell size={14} /> : <BellOff size={14} />} {tracked ? 'Tracking' : 'Track'}
           </button>
-          <button onClick={() => onCopy(w.id)} className="flex h-10 items-center justify-center gap-1.5 rounded-md bg-up text-[13px] font-extrabold text-black hover:brightness-110">
-            <Zap size={14} fill="currentColor" /> {copying ? 'Edit copy' : 'Copy trade'}
-          </button>
+          {onCopy && (
+            <button onClick={() => onCopy(w.id)} className="flex h-10 items-center justify-center gap-1.5 rounded-md bg-up text-[13px] font-extrabold text-black hover:brightness-110">
+              <Zap size={14} fill="currentColor" /> {copying ? 'Edit copy' : 'Copy trade'}
+            </button>
+          )}
         </div>
       </aside>
     </div>
