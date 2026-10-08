@@ -15,6 +15,8 @@ export type AdminAction =
   | { action: 'mute'; room: string; playerId: string; minutes: number } // 0 = unmute
   | { action: 'dismissReport'; room: string; id: number }
   | { action: 'reset'; room: string; playerId?: string } // wipe a wallet back to the start (no player = everyone)
+  | { action: 'startBalance'; room: string; usd: number } // World: what a new (or reset) wallet starts with from now on
+  | { action: 'resetWorld'; room: string; confirm?: string } // World: every wallet back to the start, players' coins off the market, records to zero
 
 /** Guests banned from this server (until it restarts); accounts are banned in the database. */
 export const bannedGuests = new Set<string>()
@@ -116,6 +118,17 @@ export async function handleAdmin(req: IncomingMessage, res: ServerResponse, pat
       case 'reset': {
         const n = room.resetWallets(a.playerId ? String(a.playerId) : undefined)
         return json(res, n ? 200 : 404, n ? { ok: true, reset: n } : { error: a.playerId ? 'That player has no wallet in this room' : 'No wallets to reset (is a round running?)' })
+      }
+      case 'startBalance': {
+        const v = room.world ? ops.setWorldStart(Number(a.usd)) : null
+        return json(res, v === null ? 400 : 200, v === null ? { error: 'Only the World has a starting balance to set, and it must be a number' } : { ok: true, startBalance: v })
+      }
+      case 'resetWorld': {
+        // Wipes every player's World wallet, coins and records: the admin has to type the word.
+        if (!room.world) return json(res, 400, { error: 'Only the World can be reset this way' })
+        if (a.confirm !== 'RESET') return json(res, 400, { error: 'Type RESET to confirm' })
+        const r = await ops.resetWorld()
+        return json(res, r.ok ? 200 : 500, r.ok ? r : { error: r.error ?? 'The reset failed' })
       }
       case 'market': {
         const r = room.adminMarket(a.market)

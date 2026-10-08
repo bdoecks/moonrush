@@ -27,7 +27,7 @@ import { createWallets, ensureRivalWallets, tickWallets } from './walletEngine'
 import { ACCOUNTS, addFollowers, CALL_SETTLE_TICKS, callerKey, type CallResult, copyBuys, copySells, type CopyBook, freshSocial, judgeCalls, KOL_FOLLOWERS, POST_COOLDOWN_TICKS, saneSocial, shill, tickSocial, type ShillResult } from './socialEngine'
 import { COIN_IMAGE_MAX, hasLink, visibleCount } from './textRules'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
-import { WORLD_START_BALANCE, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
+import { worldStartOf, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
 import { payNative, runBuy, runConvert, runGiveAway, runSell, runSwap } from './orders'
 import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, REFERRALS_ENABLED, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
 
@@ -1458,7 +1458,7 @@ export const useGame = create<GameState>()((set, get) => {
         set({ market, wallets: createWallets(new Rng((market.seed ^ 0xa11ce) >>> 0)), events: [], socialFeed: [], walletFeed: [], selectedId: defaultSelection(market), watchlist: [] })
       }
       const s = get()
-      const balance = s.online?.round.world ? WORLD_START_BALANCE : startBalanceFor(mode, s.settings, !!s.online)
+      const balance = s.online?.round.world ? worldStartOf(s.online.round) : startBalanceFor(mode, s.settings, !!s.online)
       const runDuration = opts?.durationTicks !== undefined ? opts.durationTicks : lengthTicks(mode, s.roundLength)
       // Your wallets carry over to the new round (emptied); the bank starts with the mode's balance.
       const portfolio = ensureAccounts({

@@ -12,6 +12,11 @@ export const MP_PATH = '/mp'
 export const WORLD_CODE = 'WORLD'
 /** What a new player starts with in the World (USD). */
 export const WORLD_START_BALANCE = 10_000
+/** The admin can set another one for the World (Admin > Rooms): it travels in the World's `round.startBalance`. */
+export const WORLD_START_MIN = 100
+export const WORLD_START_MAX = 100_000_000
+/** What a new World wallet starts with, as this round says (the admin's figure, or the usual one). */
+export const worldStartOf = (round?: { startBalance?: number } | null) => round?.startBalance ?? WORLD_START_BALANCE
 /** Going broke in the World: below this net worth you can restart with `WORLD_RESTART_BALANCE`, once every `WORLD_RESTART_EVERY_MS`. */
 export const WORLD_BROKE_BELOW = 250
 export const WORLD_RESTART_BALANCE = 1_000
@@ -153,6 +158,7 @@ export interface RoundInfo {
   startTime: number // market time the round's market was created at
   engine?: MarketEngine // Classic (6x clock) or Realistic (real-time, pump.fun order flow)
   world?: boolean // the public World: one round that never ends
+  startBalance?: number // World: the starting balance the admin set (not there: WORLD_START_BALANCE)
 }
 
 /**

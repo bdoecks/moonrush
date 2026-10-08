@@ -10,7 +10,7 @@ import { supabase } from './supabase'
 export interface RoomSummary {
   code: string
   hostId: string
-  round: { state: string; mode: string; engine: string; tick: number }
+  round: { state: string; mode: string; engine: string; tick: number; startBalance?: number }
   players: RoomPlayer[]
   emptySince: number | null
   coins: { id: string; ticker: string; emoji: string; chain: Chain; mcap: number; status: string; creator: string | null }[]
@@ -97,6 +97,18 @@ export interface BackupRow {
  * The server's public verdict on itself (`/status`): no login needed. The admin health route asks the database who you
  * are, so on a day the database is not answering it refuses everyone; this still works then.
  */
+/** What a new World wallet starts with right now, as the game server says (null: no answer, so the usual figure is shown). */
+export async function worldStartNow(): Promise<number | null> {
+  try {
+    const res = await fetch('/status', { cache: 'no-store' })
+    if (!/json/.test(res.headers.get('content-type') ?? '')) return null
+    const v = ((await res.json()) as { worldStart?: unknown }).worldStart
+    return typeof v === 'number' && v > 0 ? v : null
+  } catch {
+    return null
+  }
+}
+
 export async function serverStatus(): Promise<{ status: 'ok' | 'degraded'; problems: string[] } | null> {
   try {
     const res = await fetch('/status', { cache: 'no-store' })

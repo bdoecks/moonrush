@@ -11,6 +11,7 @@ import { useAccount } from '../net/account'
 import { supabase } from '../net/supabase'
 import type { Archetype, Chain } from '../types'
 import { fmtAge, fmtCompact, fmtUsd } from '../utils/format'
+import { WORLD_START_BALANCE, WORLD_START_MAX, WORLD_START_MIN } from '../net/protocol'
 import { EmptyState, Toggle } from '../components/ui'
 import { GiveBox } from '../components/GiveBox'
 import { AdminBugs } from '../components/AdminBugs'
@@ -105,6 +106,7 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
         </form>
         <p className="mt-1 text-[10px] text-dim">Pops up for everyone in a room right now. For a banner everyone sees (solo too), use Switches → Notice banner.</p>
       </Card>
+      <WorldStartCard rooms={rooms} act={act} />
       <ResetByName act={act} />
       {!rooms.length && <EmptyState icon="🏠" title="No rooms open right now" />}
       {rooms.map((r) => (
@@ -193,6 +195,48 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
         </Card>
       ))}
     </div>
+  )
+}
+
+/** The World's starting balance (what a new or reset wallet gets), and starting every player over. */
+function WorldStartCard({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: string) => Promise<boolean> }) {
+  const world = rooms.find((r) => r.code === 'WORLD')
+  const now = world?.round.startBalance ?? WORLD_START_BALANCE
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const notify = useGame((s) => s.notify)
+  const usd = Number(text.replace(/[$,\s]/g, ''))
+  const good = text.trim() !== '' && Number.isFinite(usd) && usd >= WORLD_START_MIN && usd <= WORLD_START_MAX
+  if (!world) return null
+  const save = async () => {
+    if (!good) return
+    if (await act({ action: 'startBalance', room: 'WORLD', usd }, `New World wallets now start with ${fmtUsd(Math.round(usd), 0)}`)) setText('')
+  }
+  const resetAll = async () => {
+    const typed = window.prompt(`Start EVERY World player over?\n\n• Every wallet (online or not) goes back to ${fmtUsd(now, 0)} and loses its coins.\n• Every coin a player made is removed from the market.\n• Leaderboards, profit history, coin-maker stats, trophies and the hall of fame go back to zero.\n\nXP, levels and accounts are kept. A backup of the World is taken first (Switches → Backups).\n\nType RESET to go ahead.`)
+    if (typed !== 'RESET') return
+    setBusy(true)
+    try {
+      const r = await adminApi<{ wallets?: number; coins?: number; backup?: boolean }>('/admin/api/action', { action: 'resetWorld', room: 'WORLD', confirm: 'RESET' })
+      notify(r.ok ? { title: 'WORLD RESET', body: `${r.data?.wallets ?? 0} wallets back to ${fmtUsd(now, 0)}, ${r.data?.coins ?? 0} player coins removed${r.data?.backup ? '. A backup was taken first.' : ''}`, tone: 'info', icon: '🔄' } : { title: 'RESET FAILED', body: r.error ?? 'Failed', tone: 'warn', icon: '⚠️' })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Card title="💰 World starting balance">
+      <div className="mb-2 text-[12px]">New World wallets start with <b className="num text-accent">{fmtUsd(now, 0)}</b>{now === WORLD_START_BALANCE ? ' (the usual amount)' : ''}.</div>
+      <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); void save() }}>
+        <input value={text} onChange={(e) => setText(e.target.value)} inputMode="numeric" placeholder="New amount, e.g. 25000" aria-label="New World starting balance" className="h-8 min-w-0 flex-1 rounded-md border border-line2 bg-bg px-2 text-[12px] outline-none focus:border-accent/60" />
+        <button disabled={!good} className={clsx(btn, 'border-accent/50 text-accent hover:bg-accent/10 disabled:opacity-40')}>Save</button>
+        {[1_000, 10_000, 25_000, 100_000].map((v) => <button type="button" key={v} onClick={() => setText(String(v))} className={clsx(btn, 'border-line2 text-muted')}>{fmtUsd(v, 0)}</button>)}
+      </form>
+      <p className="mt-1 text-[10px] text-dim">Between {fmtUsd(WORLD_START_MIN, 0)} and {fmtUsd(WORLD_START_MAX, 0)}. It applies to players who join from now on and to anyone you reset. Wallets people already have don't change until you reset them. The World's bots always keep {fmtUsd(WORLD_START_BALANCE, 0)}.</p>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-down/30 bg-down/5 px-3 py-2">
+        <span className="text-[11px] text-muted"><b className="text-ink">Start everyone over.</b> Every World wallet back to {fmtUsd(now, 0)}, players' coins off the market, leaderboards and records to zero. A backup is taken first.</span>
+        <button disabled={busy} onClick={() => void resetAll()} className={clsx(btn, 'flex items-center gap-1 border-down/50 text-down hover:bg-down/10 disabled:opacity-40')}><RotateCcw size={11} /> {busy ? 'Resetting…' : 'Reset the whole World'}</button>
+      </div>
+    </Card>
   )
 }
 

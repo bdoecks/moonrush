@@ -163,7 +163,41 @@ async function restoreWorld(id: number): Promise<{ ok: boolean; error?: string }
   }
   return r
 }
-const adminOps = { health: () => report(), listBackups, takeBackup, loadBackup, restoreWorld }
+/** Save the World now (after an admin changed something that must not be lost to a restart). */
+const saveWorldNow = () => {
+  const w = rooms.get(WORLD_CODE)
+  if (w && persistOn) void saveRoom(WORLD_CODE, w.snapshot(), w.chartSnapshot())
+}
+/** Admin: the World's starting balance from now on (see Room.setStartBalance). */
+function setWorldStart(usd: number): number | null {
+  const v = rooms.get(WORLD_CODE)?.setStartBalance(usd) ?? null
+  if (v !== null) {
+    saveWorldNow()
+    console.log(`[admin] the World's starting balance is now $${v}`)
+  }
+  return v
+}
+/**
+ * Admin: start the World's players over (see Room.resetWorld). A backup is taken first, and without one there is no
+ * reset: it is the only way back.
+ */
+async function resetWorld(): Promise<{ ok: boolean; error?: string; wallets?: number; coins?: number; backup?: boolean }> {
+  const w = rooms.get(WORLD_CODE)
+  if (!w) return { ok: false, error: 'The World is not running' }
+  if (isRestoring()) return { ok: false, error: 'A restore is running' }
+  let backup = false
+  if (persistOn) {
+    const b = await takeBackup('before a World reset')
+    if (!b.ok) return { ok: false, error: `Nothing was reset: the backup that has to come first failed (${b.error ?? 'no reason given'}). Try again in a minute.` }
+    backup = true
+  }
+  const r = w.resetWorld()
+  if (!r) return { ok: false, error: 'The World could not be reset' }
+  saveWorldNow()
+  console.log(`[admin] the World was reset: ${r.wallets} wallets, ${r.coins} player coins removed`)
+  return { ok: true, ...r, backup }
+}
+const adminOps = { health: () => report(), listBackups, takeBackup, loadBackup, restoreWorld, setWorldStart, resetWorld }
 export type AdminOps = typeof adminOps
 
 function newCode() {
@@ -228,7 +262,7 @@ const http = createServer((req, res) => {
     res.writeHead(r.status === 'ok' ? 200 : 503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
     // tickMs: how long this server takes over one market tick. Comparing it with the same World on another machine
     // says how fast this one is (scripts/load-test.ts --render-tick-ms).
-    res.end(JSON.stringify({ status: r.status, problems: r.problems.filter((p) => !p.warning).map((p) => p.text), upMin: r.upMin, players: online(), world: r.worldLoaded, tickMs: r.tickMs?.avg ?? null, memoryMb: r.memoryMb }))
+    res.end(JSON.stringify({ status: r.status, problems: r.problems.filter((p) => !p.warning).map((p) => p.text), upMin: r.upMin, players: online(), world: r.worldLoaded, worldStart: rooms.get(WORLD_CODE)?.worldStart, tickMs: r.tickMs?.avg ?? null, memoryMb: r.memoryMb }))
     return
   }
   // Serve the built game if there is one (production); otherwise a small status page.

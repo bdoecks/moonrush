@@ -45,6 +45,7 @@ npx tsx scripts/source-test.ts              # the data-source plug: outside data
 npx tsx scripts/scale-test.ts               # what a World player is sent: only the open coin's chart and tape, no hidden state, under budget (6 min)
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
+npx tsx scripts/reset-test.ts               # the admin's World starting balance, and starting every World player over
 npx tsx scripts/bugs-test.ts                # bug reports: what the game sends is clean and small, and only admins can read the table
 npx tsx scripts/health-test.ts              # safety net: health verdicts, backups (stand-in database), World restore, admin routes
 npx tsx scripts/world-soak.ts 8             # World size / speed over 8 simulated hours (run after market changes)
@@ -439,6 +440,21 @@ Also open after stage 1:
 The five stages, as agreed: 2) tracked traders on the chart (a colour each, average-entry line, position, share
 of supply, profit, history); 3) trader types that react to stories (narrative trader, contrarian, panic seller, FOMO,
 swing) on top of the real-data brain; 4) the data-source plug with provenance; 5) scale (send each player less).
+
+## The World's starting balance and "Reset the whole World" (Admin > Rooms)
+
+- The owner sets what a new World wallet starts with (2026-10-08). It lives in the World's `round.startBalance`
+  (not there: `WORLD_START_BALANCE`, $10,000), so it is saved with the World and every browser in it has it
+  (`worldStartOf(round)`). Before joining, the World card asks the public `/status` (`worldStart`). Only new wallets
+  and reset ones get it; wallets that exist are never touched by a new figure. **The World's bots always start with
+  `WORLD_START_BALANCE`** (`startBalanceOf`): the fair market was measured with them at that size.
+- "Reset the whole World" (`Room.resetWorld`, admin action `resetWorld`, the word RESET): every wallet back to the
+  start, every coin a real player launched off the market (bot coins and the market's own stay), and the World's
+  records to zero (boards, profit history, coin-maker stats, trophies, restarts, the hall of fame). Accounts, XP,
+  levels, followers and chat are kept. The server takes a backup first and refuses the reset if that fails; the
+  way back is Switches > Backups > Restore. Both actions save the World at once.
+- The admin card itself cannot be opened in a local test (it needs the owner's sign-in): `reset-test` covers the
+  server side, and the card was only type-checked. Say so when changing it.
 
 ## Working with the owner
 

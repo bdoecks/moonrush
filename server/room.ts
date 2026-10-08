@@ -29,7 +29,7 @@ import { airdropFeePerWallet, BOT_RATES, botTickCost, BUNDLE_WALLET_FEE, flagBun
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, TapeTrade, Timeframe, Trade, VolumeBot } from '../src/types'
-import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, type BoardList, type BoardMsg, type BoardRow, type PlayerCard, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
+import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, WORLD_START_MAX, WORLD_START_MIN, worldStartOf, type BoardList, type BoardMsg, type BoardRow, type PlayerCard, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
@@ -647,13 +647,35 @@ export class Room {
   /** This player's wallets in the running round (created fresh when they first need them). */
   private walletOf(m: Member): Portfolio | null {
     if (this.round.state !== 'running' || m.info.spectator) return null
-    if (!m.wallet) m.wallet = freshWallet(this.startBalance(), m.layout)
+    if (!m.wallet) m.wallet = freshWallet(this.startBalanceOf(m), m.layout)
     return m.wallet
   }
 
-  /** What a fresh wallet starts with here. */
+  /** What a fresh wallet starts with here (in the World: what the admin set, see setStartBalance). */
   private startBalance() {
-    return this.world ? WORLD_START_BALANCE : MODES[this.round.mode].startBalance
+    return this.world ? worldStartOf(this.round) : MODES[this.round.mode].startBalance
+  }
+
+  /** …and what this member's does: the World's bots always start with the usual balance, whatever players are given (the market was measured with them at that size). */
+  private startBalanceOf(m: Member) {
+    return this.world && m.brain ? WORLD_START_BALANCE : this.startBalance()
+  }
+
+  /** The World's starting balance right now (public: the World card shows it before anybody joins). */
+  get worldStart() {
+    return worldStartOf(this.round)
+  }
+
+  /**
+   * Admin: what a new World wallet starts with from now on (a new player, or one who is reset). Wallets that exist
+   * are not touched. Saved with the World (it is part of the round), and every browser in it is told.
+   */
+  setStartBalance(usd: number): number | null {
+    if (!this.world || !Number.isFinite(usd)) return null
+    const v = Math.round(Math.max(WORLD_START_MIN, Math.min(WORLD_START_MAX, usd)))
+    this.round = { ...this.round, startBalance: v === WORLD_START_BALANCE ? undefined : v }
+    this.broadcast({ t: 'round', round: this.round })
+    return v
   }
 
   /** Tell a player their wallets as the server has them (after the wallet message numbered `m.ack`). */
@@ -1775,7 +1797,7 @@ export class Room {
   // ─── Admin ─────────────────────────────────────────────────────────────────
   summary() {
     return {
-      code: this.code, hostId: this.hostId, round: { state: this.round.state, mode: this.round.mode, engine: this.round.engine ?? 'classic', tick: this.market.tick },
+      code: this.code, hostId: this.hostId, round: { state: this.round.state, mode: this.round.mode, engine: this.round.engine ?? 'classic', tick: this.market.tick, startBalance: this.world ? this.worldStart : undefined },
       players: this.playerList(), emptySince: this.emptySince,
       coins: this.market.tokens.filter((t) => t.status === 'bonding' || t.status === 'graduated').sort((a, b) => b.mcap - a.mcap).slice(0, 60)
         .map((t) => ({ id: t.id, ticker: t.ticker, emoji: t.emoji, chain: t.chain, mcap: t.mcap, status: t.status, creator: (t as NetToken).creatorName ?? null })),
@@ -2014,7 +2036,8 @@ export class Room {
     let n = 0
     for (const m of this.members.values()) {
       if (m.info.spectator || (playerId && m.info.id !== playerId)) continue
-      m.wallet = freshWallet(this.startBalance(), m.layout)
+      const start = this.startBalanceOf(m)
+      m.wallet = freshWallet(start, m.layout)
       m.cashback = undefined
       m.weekBase = undefined
       m.pnlCarry = undefined
@@ -2024,14 +2047,59 @@ export class Room {
         // A bot starts over too: fresh memory, and its public wallet shows the reset.
         m.brain.entries = {}
         m.brain.cooked = {}
-        this.wallets = this.wallets.map((w) => (w.id === m.info.id ? { ...w, cash: this.startBalance(), startValue: this.startBalance(), positions: {} } : w))
+        this.wallets = this.wallets.map((w) => (w.id === m.info.id ? { ...w, cash: start, startValue: start, positions: {} } : w))
       }
-      m.info = { ...m.info, equity: this.startBalance(), startEquity: this.startBalance(), trades: 0, wins: 0 }
+      m.info = { ...m.info, equity: start, startEquity: start, trades: 0, wins: 0 }
       this.sendTo(m.info.id, { t: 'wallet', ack: m.ack, state: { ...walletStateOf(m.wallet), cashback: { sol: 0, bsc: 0, hood: 0 } }, reset: true })
       n++
     }
     if (n) this.playersDirty = true
     return n
+  }
+
+  /**
+   * Admin: start the World's players over. Every wallet goes back to the starting balance (see resetWallets), the
+   * coins real players launched leave the market (the bots' coins and the simulated market run on), and the World's
+   * records start from zero: the boards, profit history, coin-maker stats, trophies, restarts and the hall of fame.
+   * Accounts, XP, levels, followers and chat are not touched. Returns what it did.
+   */
+  resetWorld(): { wallets: number; coins: number } | null {
+    if (!this.world || this.round.state !== 'running') return null
+    const wallets = this.resetWallets()
+    const bot = (pid?: string) => !!pid && !!this.members.get(pid)?.brain
+    const gone = new Set<string>()
+    for (const [id, c] of this.cooked) if (!bot(c.pid)) gone.add(id)
+    for (const t of this.market.tokens as NetToken[]) if (t.creatorId && !bot(t.creatorId)) gone.add(t.id)
+    if (gone.size) {
+      this.market = { ...this.market, tokens: this.market.tokens.filter((t) => !gone.has(t.id)) }
+      for (const id of gone) {
+        candleStore.delete(id)
+        this.cooked.delete(id)
+        this.bots.delete(id)
+        this.pending.delete(id)
+        this.freshIds.delete(id)
+      }
+    }
+    for (const m of this.members.values()) {
+      if (m.info.spectator) continue
+      m.weekBase = m.dayBase = m.seasonBase = m.chainBase = undefined
+      m.chainPnl = undefined
+      m.dev = undefined
+      m.trophies = undefined
+      m.lastRestart = undefined
+      m.restarts = undefined
+      m.cbVolume = undefined
+      m.cooks = 0
+      m.lastCookTick = undefined
+      m.cookTicks = undefined
+      m.copyBook = undefined
+      if (m.focus && gone.has(m.focus)) m.focus = undefined
+      if (m.protect.some((id) => gone.has(id))) m.protect = m.protect.filter((id) => !gone.has(id))
+    }
+    this.hall = []
+    this.boardCache = null
+    this.playersDirty = true
+    return { wallets, coins: gone.size }
   }
 
   grant(playerId: string, amount: number, asset: 'usd' | 'sol' | 'bsc' | 'hood' = 'usd') {

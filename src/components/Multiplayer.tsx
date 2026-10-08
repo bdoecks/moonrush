@@ -6,7 +6,8 @@ import { useOpenPlayer } from './PlayerCard'
 import { useGame } from '../game/store'
 import { joinRoom, joinWorld, leaveRoom, mpProfile, reportChat, sendChat, setMpProfile, startRound } from '../net/client'
 import { load, save } from '../utils/storage'
-import { WORLD_START_BALANCE } from '../net/protocol'
+import { WORLD_START_BALANCE, worldStartOf } from '../net/protocol'
+import { worldStartNow } from '../net/adminApi'
 import type { GameMode, MarketEngine } from '../types'
 import { EnginePicker } from './Modals'
 import { fmtClock, fmtPct, fmtUsd, toneClass } from '../utils/format'
@@ -352,6 +353,13 @@ export function WorldCard({ adminOnly }: { adminOnly?: boolean }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [signIn, setSignIn] = useState(false)
+  // What a new wallet starts with: the admin can change it, so the server is asked (the usual figure until it answers).
+  const [start, setStart] = useState(WORLD_START_BALANCE)
+  useEffect(() => {
+    let on = true
+    void worldStartNow().then((v) => on && v && setStart(v))
+    return () => { on = false }
+  }, [])
   const go = async () => {
     setBusy(true)
     setError('')
@@ -374,7 +382,7 @@ export function WorldCard({ adminOnly }: { adminOnly?: boolean }) {
             {adminOnly && <span className="rounded bg-warn/15 px-1.5 py-0.5 text-[9px] font-bold text-warn" title="Only admins see this until you turn the World on in the admin panel">ADMIN PREVIEW</span>}
           </div>
           <p className="mt-1 text-[12px] text-muted">
-            One market for everyone, always running. Every coin, pump, rug and cook is shared. Start with <b className="text-ink">{fmtUsd(WORLD_START_BALANCE, 0)}</b>, and your wallet <b className="text-ink">never resets</b>: it's yours on every device.
+            One market for everyone, always running. Every coin, pump, rug and cook is shared. Start with <b className="text-ink">{fmtUsd(start, 0)}</b>, and your wallet <b className="text-ink">never resets</b>: it's yours on every device.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button disabled={busy} onClick={go} className="h-10 rounded-md bg-accent px-5 text-[14px] font-extrabold text-accent-ink hover:brightness-110 disabled:opacity-50">
@@ -464,6 +472,7 @@ function WorldPanel() {
 /** Guests watching the World: a strip saying so, with the way to start playing. Signing in rejoins as a player. */
 export function WatchBanner({ inline }: { inline?: boolean }) {
   const spectator = useGame((s) => !!s.online?.spectator)
+  const round = useGame((s) => s.online?.round)
   const signedIn = useAccount((s) => s.status === 'signedIn')
   const [signIn, setSignIn] = useState(false)
   useEffect(() => {
@@ -474,7 +483,7 @@ export function WatchBanner({ inline }: { inline?: boolean }) {
   return (
     <div className={clsx('flex flex-wrap items-center justify-center gap-2 border-accent/40 bg-accent/10 px-3 py-1.5 text-[12px]', inline ? 'rounded-md border' : 'border-b')}>
       <span>👀 You're <b>watching</b> the World as a guest.</span>
-      <span className="text-muted">Sign in to get your own {fmtUsd(WORLD_START_BALANCE, 0)} wallet and trade.</span>
+      <span className="text-muted">Sign in to get your own {fmtUsd(worldStartOf(round), 0)} wallet and trade.</span>
       <button onClick={() => setSignIn(true)} className="rounded border border-accent/60 px-2 py-0.5 text-[11px] font-bold text-accent hover:bg-accent/10">Sign in</button>
       {signIn && <AccountModal onClose={() => setSignIn(false)} />}
     </div>
