@@ -36,6 +36,16 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-10-09-social-tracker-look',
+    date: 'October 9, 2026',
+    title: 'A Social Tracker you can read',
+    changed: [
+      'Posts in the Social Tracker (the side panel) now look like a real timeline: bigger text, the name, handle and time on one line, and replies, reposts, likes and views under each post.',
+      'Every account shows how many followers it has, in a coloured badge.',
+      'The box for writing a post is folded into one line ("Write a post…") so the feed has the room.',
+    ],
+  },
+  {
     id: '2026-10-09-tech-coins',
     flag: 'tech',
     date: 'October 2026',
