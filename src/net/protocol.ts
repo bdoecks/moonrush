@@ -127,6 +127,29 @@ export interface PlayerCard {
   dev?: DevStats
   restarts: number
 }
+/**
+ * Admin only (the admin API, never a room message): every wallet a player has in a room, side and dev wallets too.
+ * Players only ever get each other's `PlayerCard` (the main wallet).
+ */
+export interface AdminWallets {
+  id: string
+  name: string
+  cash: number // the USD bank all their wallets share
+  equity: number
+  startBalance: number
+  wallets: {
+    id: string
+    name: string
+    emoji: string
+    kind: 'main' | 'dev' | 'side'
+    addr: string // the address it trades under
+    balances: Record<string, number> // chain coins
+    value: number // chain coins and bags, in USD
+    devOf: { tokenId: string; ticker: string; vaultUsd: number }[] // coins this wallet deployed
+    bags: { tokenId: string; ticker: string; status: string; qty: number; value: number; cost: number; pct: number; own: boolean }[]
+  }[]
+}
+
 /** One trade on a player's card. */
 export interface CardTrade {
   id: number

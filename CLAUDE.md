@@ -458,6 +458,14 @@ The five stages, as agreed: 2) tracked traders on the chart (a colour each, aver
 of supply, profit, history); 3) trader types that react to stories (narrative trader, contrarian, panic seller, FOMO,
 swing) on top of the real-data brain; 4) the data-source plug with provenance; 5) scale (send each player less).
 
+## The admin sees every wallet
+
+- Admin > Rooms: a player's name (or the 👛 beside it) opens all of that player's wallets in the room: main, side and
+  dev, each with its address, chain coins, bags and the coins it deployed (`components/AdminWallets.tsx`,
+  `Room.adminWallets`, `POST /admin/api/wallets`). Read-only, behind the admin check like every admin route
+  (`health-test`); `cook-test` checks what it shows. **Players never get this**: for them a side or dev wallet is a
+  bare address, and the public card (`sendCard`) stays the main wallet only.
+
 ## Dev wallets and the dev panel
 
 - **Only a dev wallet deploys a coin, and only that wallet is the coin's dev** (2026-10-08, the owner's call). The

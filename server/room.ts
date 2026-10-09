@@ -18,7 +18,7 @@ import { dayKey, worldSeason } from '../src/game/worldSeason'
 import { AUTO_MUTE_MS, coinLook, embeddedImage, moderate, rateCheck, strike, type ChatMeter } from './moderation'
 import { NARRATIVES } from '../src/data/narratives'
 import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
-import { accountOf } from '../src/game/accounts'
+import { accountOf, DEV_EMOJI } from '../src/game/accounts'
 import { nativePrice, setTradeImages } from '../src/game/tradingEngine'
 import { cashbackUsd } from '../src/game/rewardsEngine'
 import { claimGifts } from './persist'
@@ -29,7 +29,7 @@ import { airdropFeePerWallet, BOT_RATES, botTickCost, BUNDLE_WALLET_FEE, flagBun
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, TapeTrade, Timeframe, Trade, VolumeBot } from '../src/types'
-import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, WORLD_START_MAX, WORLD_START_MIN, worldStartOf, type BoardList, type BoardMsg, type BoardRow, type PlayerCard, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
+import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, WORLD_START_MAX, WORLD_START_MIN, worldStartOf, type AdminWallets, type BoardList, type BoardMsg, type BoardRow, type PlayerCard, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
@@ -1816,6 +1816,32 @@ export class Room {
       reports: this.reports.slice(0, 50),
       muted: [...this.members.values()].filter((m) => (m.mutedUntil ?? 0) > Date.now()).map((m) => ({ id: m.info.id, name: m.info.name, until: m.mutedUntil! })),
     }
+  }
+
+  /**
+   * Admin only: every wallet this player has here, side and dev wallets too, with what each holds. (Players get the
+   * public card, `sendCard`: the main wallet and nothing else.) Null: nobody by that id, or no wallet yet.
+   */
+  adminWallets(playerId: string): AdminWallets | null {
+    const m = this.members.get(playerId)
+    const w = m?.wallet
+    if (!m || !w) return null
+    const byId = new Map(this.market.tokens.map((t) => [t.id, t]))
+    const accounts = w.accounts ?? []
+    const mainId = accounts[0]?.id
+    const wallets = accounts.map((a) => {
+      const bags = Object.entries(a.positions).filter(([, p]) => p.qty > 0).map(([tokenId, p]) => {
+        const t = byId.get(tokenId) as NetToken | undefined
+        return { tokenId, ticker: t?.ticker ?? tokenId.split('-')[0], status: t?.status ?? 'gone', qty: p.qty, value: t && live(t) ? p.qty * t.price : 0, cost: p.costBasis, pct: (p.qty / SUPPLY) * 100, own: t?.creatorId === playerId }
+      }).sort((x, y) => y.value - x.value)
+      const coins = (Object.entries(a.balances) as [Chain, number][]).reduce((sum, [c, n]) => sum + n * nativePrice(this.market, c), 0)
+      const devOf = [...this.cooked].filter(([, c]) => c.pid === playerId && c.walletId === a.id).map(([tokenId, c]) => ({ tokenId, ticker: byId.get(tokenId)?.ticker ?? tokenId.split('-')[0], vaultUsd: c.vault * nativePrice(this.market, c.chain) }))
+      return {
+        id: a.id, name: a.name, emoji: a.emoji, kind: a.id === mainId ? ('main' as const) : a.emoji === DEV_EMOJI ? ('dev' as const) : ('side' as const),
+        addr: walletAddress(playerId, a.id, 'sol'), balances: { ...a.balances }, value: coins + bags.reduce((sum, b) => sum + b.value, 0), devOf, bags,
+      }
+    })
+    return round({ id: playerId, name: m.info.name, cash: w.cash, equity: valuePortfolio(w, byId, this.market).equity, startBalance: w.startBalance, wallets }) as AdminWallets
   }
 
   /** Remove a player (they're told why). */

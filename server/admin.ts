@@ -82,6 +82,12 @@ export async function handleAdmin(req: IncomingMessage, res: ServerResponse, pat
   if (req.method === 'GET' && path === '/admin/api/rooms') {
     return json(res, 200, { rooms: [...rooms.values()].map((r) => r.summary()), bannedGuests: bannedGuests.size })
   }
+  // Every wallet of one player in a room, side and dev wallets too (the admin's eyes only).
+  if (req.method === 'POST' && path === '/admin/api/wallets') {
+    const a = ((await readBody(req)) ?? {}) as { room?: string; playerId?: string }
+    const r = rooms.get(String(a.room ?? '').toUpperCase())?.adminWallets(String(a.playerId ?? ''))
+    return json(res, r ? 200 : 404, r ?? { error: 'That player has no wallet in this room' })
+  }
   if (req.method === 'POST' && path === '/admin/api/action') {
     const a = (await readBody(req)) as AdminAction
     if (a.action === 'notice') {

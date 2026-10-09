@@ -15,6 +15,7 @@ import { WORLD_START_BALANCE, WORLD_START_MAX, WORLD_START_MIN } from '../net/pr
 import { EmptyState, Toggle } from '../components/ui'
 import { GiveBox } from '../components/GiveBox'
 import { AdminBugs } from '../components/AdminBugs'
+import { AdminWalletsModal } from '../components/AdminWallets'
 import { openBugCount } from '../net/bugs'
 
 type Tab = 'rooms' | 'market' | 'accounts' | 'bugs' | 'ideas' | 'switches'
@@ -101,6 +102,8 @@ const btn = 'rounded border px-2 py-0.5 text-[11px] font-semibold disabled:opaci
 function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: string) => Promise<boolean> }) {
   const [msg, setMsg] = useState('')
   const [gift, setGift] = useState<Record<string, string>>({})
+  // The player whose wallets (all of them: main, side, dev) the admin is looking at.
+  const [wallets, setWallets] = useState<{ room: string; playerId: string; name: string } | null>(null)
   return (
     <div className="space-y-3">
       <Card title={<><Megaphone size={13} /> Message everyone in a room</>}>
@@ -111,6 +114,7 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
         <p className="mt-1 text-[10px] text-dim">Pops up for everyone in a room right now. For a banner everyone sees (solo too), use Switches → Notice banner.</p>
       </Card>
       <WorldStartCard rooms={rooms} act={act} />
+      {wallets && <AdminWalletsModal {...wallets} onClose={() => setWallets(null)} />}
       <ResetByName act={act} />
       {!rooms.length && <EmptyState icon="🏠" title="No rooms open right now" />}
       {rooms.map((r) => (
@@ -170,7 +174,8 @@ function Rooms({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown, done?: 
                   return (
                     <tr key={p.id} className="border-t border-line/50">
                       <td className="py-1.5">
-                        <span className="mr-1">{p.avatar}</span><span className="font-semibold">{p.name}</span>
+                        <span className="mr-1">{p.avatar}</span><button onClick={() => setWallets({ room: r.code, playerId: p.id, name: p.name })} className="font-semibold hover:text-accent hover:underline" title="See all of this player's wallets (main, side and dev)">{p.name}</button>
+                        <button onClick={() => setWallets({ room: r.code, playerId: p.id, name: p.name })} className="ml-1 rounded border border-line2 px-1 text-[10px] text-muted hover:border-accent/60 hover:text-accent" aria-label={`Wallets of ${p.name}`} title="See all of this player's wallets (main, side and dev)">👛</button>
                         {p.verified && <span className="ml-1 text-[10px] font-bold text-up" title="Signed in">✓</span>}
                         {p.bot && <span className="ml-1 rounded bg-raise px-1 text-[9px] text-muted" title="A World bot (players see no label on its name)">BOT</span>}
                         {p.id === r.hostId && <span className="ml-1 rounded bg-raise px-1 text-[9px] text-muted">HOST</span>}

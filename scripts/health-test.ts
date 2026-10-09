@@ -224,6 +224,11 @@ async function call(method: string, path: string, token: string, body?: unknown,
 const nobody = await call('GET', '/admin/api/health', 'player-token')
 const noLogin = await call('GET', '/admin/api/backups', '')
 ok(nobody.code === 403 && noLogin.code === 403, 'health and backups are for admins only: a player and a visitor get nothing')
+// Every wallet of a player (side and dev too) is the admin's to see and nobody else's.
+const peekPlayer = await call('POST', '/admin/api/wallets', 'player-token', { room: 'WORLD', playerId: 'u-anyone' })
+const peekVisitor = await call('POST', '/admin/api/wallets', '', { room: 'WORLD', playerId: 'u-anyone' })
+ok(peekPlayer.code === 403 && peekVisitor.code === 403, 'a player and a visitor cannot look into another player\'s wallets')
+ok((await call('POST', '/admin/api/wallets', 'admin-token', { room: 'WORLD', playerId: 'u-nobody-at-all' })).code === 404, 'the admin asking about nobody gets a plain "no wallet"')
 const hr = await call('GET', '/admin/api/health', 'admin-token')
 ok(hr.code === 200 && (hr.body.status === 'ok' || hr.body.status === 'degraded') && Array.isArray(hr.body.problems) && hr.body.memoryMb > 0, `the admin sees the health report (${hr.body.status}, ${hr.body.memoryMb} MB)`)
 db.clock += HOUR // the stand-in stamps copies with this clock: make the next one the newest

@@ -51,6 +51,14 @@ ok(!!mine?.sim.flow?.sniped, 'its snipers are in before the coin is shown to any
   w.handle('u-chef', { t: 'order', seq: 13, ref: 13, order: { side: 'buy', tokenId: c.token.id, walletIds: ['w-side'], usdEach: 300 } })
   for (let i = 0; i < 3; i++) w.tick()
   ok(qty('w-side') > 0 && Math.abs(coin().devPct - dev0) < 0.05, `a buy from the side wallet is not the dev buying: the dev's share stays ${coin().devPct.toFixed(2)}%`)
+  // What the admin can see of this player: every wallet, side and dev too (players see the main one only).
+  const seen = world.adminWallets('u-chef')
+  const kinds = seen?.wallets.map((x) => x.kind).join()
+  ok(kinds === 'main,dev,side' && seen!.wallets.every((x) => x.addr.length > 6 && new Set(seen!.wallets.map((y) => y.addr)).size === 3), 'the admin sees all three wallets, each with its own address: main, dev and side')
+  const devW = seen!.wallets[1], sideW = seen!.wallets[2]
+  ok(devW.devOf.some((d) => d.ticker === 'DEVONLY') && devW.bags.some((b) => b.ticker === 'DEVONLY' && b.own && Math.abs(b.pct - dev0) < 0.05), 'the dev wallet shows which coin it deployed and its bag in it')
+  ok(sideW.bags.some((b) => b.ticker === 'DEVONLY' && b.value > 250) && sideW.balances.sol > 0 && Math.abs(seen!.wallets.reduce((n, x) => n + x.value, 0) + seen!.cash - seen!.equity) < 1, 'the side wallet shows its bag and its coins, and the wallets and the bank add up to the net worth')
+  ok(world.adminWallets('u-nobody') === null, 'nobody by that id: nothing')
   const hype0 = coin().hype
   w.handle('u-chef', { t: 'order', seq: 14, ref: 14, order: { side: 'sell', tokenId: c.token.id, legs: [{ walletId: 'w-side', qty: qty('w-side') }] } })
   ok(qty('w-side') === 0 && coin().hype === hype0, 'selling the side wallet out is not a dev sell (the coin loses none of its crowd for it)')
