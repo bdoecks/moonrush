@@ -2,7 +2,7 @@
 // dev's record (coins migrated out of coins launched). Pure: read off the public wallets and the coin's own dev
 // history, the same things the coin page shows in full.
 import { devHistory } from './ledger'
-import type { SimWallet, Token } from '../types'
+import type { Beat, SimWallet, Token } from '../types'
 
 export interface CrowdCount {
   kols: number
@@ -61,3 +61,10 @@ export function devRecord(t: Pick<Token, 'id' | 'status' | 'pad' | 'chain' | 'si
 export const devRecordBad = (r: DevRecord) => r.total >= 4 && r.migrated / r.total < 0.1
 /** …and one worth a nod: at least one migrated, and one in four or better. */
 export const devRecordGood = (r: DevRecord) => r.migrated >= 1 && r.migrated / r.total >= 0.25
+
+// ─── The story leaf ──────────────────────────────────────────────────────────
+const STORY_FRESH_SEC = 600 // a story line this recent means the story is still going
+/** The lines that tell a coin's story (posts, rumours, news, outside trends), newest first: not the market's own facts about its trades. */
+export const storyLines = (t: Pick<Token, 'beats'>, n = 3): Beat[] => (t.beats ?? []).filter((b) => b.src !== 'market').slice(0, n)
+/** Is a story running on this coin right now? (The leaf on its Trenches card is green.) */
+export const storyLive = (t: Pick<Token, 'beats'>, now: number) => (t.beats ?? []).some((b) => b.src !== 'market' && now - b.time < STORY_FRESH_SEC)

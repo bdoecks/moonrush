@@ -31,6 +31,7 @@ export const ROW_ELEMENTS: { group: string; items: { id: string; label: string; 
     { id: 'risk', label: 'Risk', sample: 'MEDIUM' },
     { id: 'tags', label: 'Tags', sample: 'Tax · DEX · HELD' },
     { id: 'age', label: 'Age', sample: '46s' },
+    { id: 'story', label: 'Story (hover the leaf)', sample: '🍃' },
   ] },
   { group: 'Token metrics', items: [
     { id: 'volume', label: 'Volume', sample: 'V $12K' },

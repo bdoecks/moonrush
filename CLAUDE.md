@@ -459,6 +459,15 @@ The five stages, as agreed: 2) tracked traders on the chart (a colour each, aver
 of supply, profit, history); 3) trader types that react to stories (narrative trader, contrarian, panic seller, FOMO,
 swing) on top of the real-data brain; 4) the data-source plug with provenance; 5) scale (send each player less).
 
+## The story leaf on Trenches cards
+
+- A leaf beside a coin's age (`components/discover/StoryLeaf.tsx`, the owner's ask, as on Axiom): hover it, or tap it
+  on a phone, to read what the coin is about without opening it: its theme (marked when it is the meta), its own
+  description, the story arc, and the newest three lines of its story feed with their source tags. Green while a
+  story line is under ten minutes old (`storyLive` / `storyLines` in `game/coinCrowd.ts`, tested in
+  `trench-info-test`). It shows nothing the coin page's Story tab does not; a tap on it never opens the coin. It
+  can be switched off in Display > Row elements (`story`).
+
 ## Tutorials
 
 - Two of them: trading and deving (`src/game/tutorials.ts`: the steps, pure; `components/Tutorial.tsx`: the card, the

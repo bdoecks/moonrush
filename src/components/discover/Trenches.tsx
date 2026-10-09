@@ -20,6 +20,7 @@ import { countActive, EMPTY_FILTER, matchesFilter, presetFor, withDefaults, type
 import { useFilterPresets } from '../../hooks/useFilterPresets'
 import { TrenchFilterButton } from './TrenchFilterPanel'
 import { useTrenchDisplay } from './trenchDisplay'
+import { StoryLeaf } from './StoryLeaf'
 import { fmtAge, fmtCompact, fmtNum } from '../../utils/format'
 import { EmptyState, FlashNum, Pct, Segmented, TokenIcon } from '../ui'
 
@@ -253,6 +254,7 @@ export const Card = memo(function Card({ t, now, preview, col, fresh = true }: {
           </div>
           <div className="mt-1 flex items-center gap-2.5 text-[11px]">
             {show('age') && <span className={clsx('num font-semibold', age < 300 ? 'text-up' : 'text-muted')}>{fmtAge(age)}</span>}
+            {show('story') && <StoryLeaf t={t} now={now} />}
             {show('holders') && <span className="flex items-center gap-0.5 text-muted" title="Holders"><Users size={11} /><span className="num">{fmtNum(t.holders)}</span></span>}
             {show('watchers') && <span className="flex items-center gap-0.5 text-muted" title="Watching (simulated)"><Eye size={11} /><span className="num">{watchers}</span></span>}
             {show('kols') && <span className={clsx('flex items-center gap-0.5', crowd.kols ? 'text-warn' : 'text-dim')} title={`KOLs holding this coin: ${crowd.kols}`}><Megaphone size={11} /><span className="num">{crowd.kols}</span></span>}
