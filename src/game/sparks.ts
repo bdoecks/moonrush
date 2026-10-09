@@ -412,3 +412,14 @@ export function demoAnswer(tool: DemoTool, state: DemoState | undefined, input: 
   if (state === 'canned') return { status: 'ok', out: toolAnswer(tool, TECH_TOOLS[tool].sample) } // (the same answer whatever is typed: a picture of a demo)
   return { status: state === 'soon' ? 'soon' : 'dead' }
 }
+
+// ─── Launching on a post (stage 4) ───────────────────────────────────────────
+/**
+ * What it costs a player to launch a coin on a post, by the size of the account that posted (the size anybody can
+ * read). A coin with the right name on a big account's post is sniped hard and picked often: at the plain launch
+ * fee that paid its maker +$38 a launch on mid-size accounts and +$75 on big ones, launch after launch (creator
+ * fees and the bonding bonus; scripts/cook-post-report.ts). These fees take the best recipe to a little under zero:
+ * a bet on a coin that bonds, not a wage. Measure again before changing them or anything a story coin lives by.
+ */
+export const POST_FEES: [followers: number, usd: number][] = [[20_000_000, 250], [500_000, 150], [20_000, 100], [0, 60]]
+export const postLaunchFee = (followers: number) => POST_FEES.find(([min]) => followers >= min)![1]

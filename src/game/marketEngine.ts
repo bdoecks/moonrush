@@ -778,13 +778,16 @@ function snipe(m: MarketState, t: Token, rng: Rng, share = 1, usd?: number) {
  * (scripts/cook-report.ts). A bot chef's coin passes nothing: it is the simulated market's own.
  */
 export const SNIPE_AHEAD = 4 // % of supply held ahead of the block at which the snipers are down to about a third
-export function launchBlock(prev: MarketState, tokenId: string, rng: Rng, aheadPct = 0): MarketState {
+export function launchBlock(prev: MarketState, tokenId: string, rng: Rng, aheadPct = 0, usd?: number): MarketState {
   const old = prev.tokens.find((t) => t.id === tokenId)
   if (!old?.sim.flow || old.status !== 'bonding' || old.sim.flow.sniped) return prev
   const t: Token = { ...old, sim: { ...old.sim, flow: { ...old.sim.flow } }, change: { ...old.change } }
   const mine = (prev.shillQueue ?? []).filter((q) => q.tokenId === tokenId && q.side !== 'sell')
   const m: MarketState = { ...prev, tokens: prev.tokens.map((x) => (x === old ? t : x)), shillQueue: (prev.shillQueue ?? []).filter((q) => !mine.includes(q)) }
-  snipe(m, t, rng, Math.exp(-Math.max(0, aheadPct) / SNIPE_AHEAD))
+  // (`usd`: a coin launched on a post: its snipers go by the post, see the story market. The dev's bag ahead of them still puts them off.)
+  const share = Math.exp(-Math.max(0, aheadPct) / SNIPE_AHEAD)
+  snipe(m, t, rng, share, usd !== undefined ? usd * share : undefined)
+  if (usd !== undefined) t.sim.flow!.ema = t.price
   for (const q of mine) {
     const usd = t.status === 'bonding' ? fillSim(m, t, 'buy', q.usd, m.time, q.wallet) : 0
     if (!(usd > 0)) continue

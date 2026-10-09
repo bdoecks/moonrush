@@ -717,3 +717,25 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
 - **A post in a tracker does not list or link its coins** (the owner's call, 2026-10-09: "too easy"). `SparkChip` is
   still in `SparkPanel.tsx` but no tracker draws it. The panel of a post's coins is reached only from a coin (its
   leaf, its Story tab). Ask before putting a shortcut from a post to its coins back.
+
+## Story market stage 4: launching on a post (Cooking)
+
+- Built 2026-10-09. In the World, with the story market on and Cooking open (`cooking` switch), the Cooking page
+  offers "Launch on a post" (the posts still open, not a tool's). The launch carries `money.onPost`; the server
+  (`Room.cook`) puts the coin among that post's coins: next place in the rush (`spark.n`), watched while the story
+  is open, the post's snipers by that place (`launchBlock(…, usd)`, still put off by the dev's own bag), and the
+  timeline judges it like any coin: its name as typed (`fitOf`), its risk tag, its stake. Several coins on a post
+  may share a ticker (a ticker is now up to 10 letters). A post settled before the launch arrives: refused, no charge.
+  Solo play and friends rooms ignore it. A misspelled coin is "vamped" simply by a correctly spelled one launching
+  on the same post: the timeline favours that one.
+- **The fee goes by the account's size** (`postLaunchFee` in `sparks.ts`: $60 / $100 / $150 / $250). At the plain $50
+  it was a wage: the exact name with no dev buy made +$38 a launch on accounts of 20K and up and +$74 on 500K and up
+  (it is sniped hard and picked often; creator fees and the bonding bonus). With the fees
+  (`scripts/cook-post-report.ts`, World with bots, 14 chefs launching 2 s after every post, 24 to 40 World hours a
+  recipe): on accounts of 20K and up the exact name with no dev buy -$45 a launch, 1 SOL held to the settle -$55,
+  1 SOL sold on the snipers -$71, 3 SOL dumped on them -$96, a wrong name -$67; on accounts of 500K and up the
+  exact name -$2 (13% of those coins bond) and 1 SOL held -$44. So it is a bet on a coin that bonds, about even at
+  best. Run `cook-post-report` (several runs, `sum`; `MIN=500000` for the big accounts) before and after touching
+  the fees, creator fees, the bonus, the tiers or `gain`.
+- Not done: no Updates entry yet (write one when the owner opens Cooking), the form was not looked at on screen in
+  the World, a player cannot launch on a tech post, and solo play has no launching on posts.

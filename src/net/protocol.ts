@@ -220,6 +220,7 @@ export interface CookMoney {
   marketing: number // USD
   autoSwap?: boolean
   style?: LaunchStyle // the server builds the coin itself from your choices (see Room.cook)
+  onPost?: string // the post (story market) this coin is launched on: it joins that post's coins
 }
 
 // ─── Browser → server ────────────────────────────────────────────────────────

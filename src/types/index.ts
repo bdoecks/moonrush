@@ -592,6 +592,7 @@ export interface CookSpec {
   devWallet?: string // which of your wallets deploys (the dev); defaults to your primary
   sideBuys?: { walletId: string; amount: number }[] // other wallets buying at launch (chain coin each)
   sideDelay?: boolean // spread side buys over the first minute instead of the launch block
+  onPost?: string // the post (story market) this coin is launched on
   vampOf?: string // id of the live coin this launch copies ("vamping" it to ride its hype)
 }
 

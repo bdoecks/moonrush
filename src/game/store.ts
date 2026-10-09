@@ -16,6 +16,7 @@ import { createRivals, tickRivals } from './leaderboardEngine'
 import { freshSeason, isRanked, placementPoints, seasonNumber, tierFor, type SeasonState } from './season'
 import { usePlayerCard } from '../net/playerCard'
 import { tickStories } from './storyEngine'
+import { postLaunchFee } from './sparks'
 import { candleStore, COOK_FEE, cookAllowance, cookToken, COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, SUPPLY, tickMarket, walletName } from './marketEngine'
 import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
@@ -410,13 +411,13 @@ export function notifyCallResult(notify: GameState['notify'], r: CallResult) {
 export function validateCook(spec: CookSpec, tokens: Token[], online = false, world = false): string | null {
   if (spec.name.trim().length < 2 || spec.name.trim().length > 24) return 'Name must be 2–24 characters'
   if (visibleCount(spec.name) < 2) return 'Name needs two letters, digits or emoji'
-  if (!/^[A-Z0-9]{2,8}$/.test(spec.ticker)) return 'Ticker must be 2–8 letters or digits'
+  if (!/^[A-Z0-9]{2,10}$/.test(spec.ticker)) return 'Ticker must be 2–10 letters or digits'
   if (world && hasLink(spec.name)) return 'No links in a World coin’s name'
   if (world && hasLink(spec.description)) return 'No links in a World coin’s description'
   if (online && spec.image && /^https?:\/\//i.test(spec.image)) return 'Online, upload the picture (links are solo only)'
   if (online && spec.image && spec.image.length > COIN_IMAGE_MAX) return 'Picture too big for online (GIF under 45 KB)'
   // Tickers are unique, except a vamp may reuse the exact ticker of the coin it's copying (that's the point of a vamp).
-  if (tokens.some((t) => t.ticker === spec.ticker && t.status !== 'dead' && t.status !== 'rugged' && t.id !== spec.vampOf)) return `$${spec.ticker} already exists`
+  if (!spec.onPost && tokens.some((t) => t.ticker === spec.ticker && t.status !== 'dead' && t.status !== 'rugged' && t.id !== spec.vampOf)) return `$${spec.ticker} already exists`
   if (!(spec.marketing >= 0) || !(spec.devBuy >= 0)) return 'Amounts must be positive'
   const b = spec.bundle
   if (b && (!Number.isInteger(b.wallets) || b.wallets < 0 || b.wallets > BUNDLE_MAX_WALLETS || !(b.perWallet >= 0))) return `Bundle uses 0–${BUNDLE_MAX_WALLETS} wallets`
@@ -1563,7 +1564,10 @@ export const useGame = create<GameState>()((set, get) => {
       const bundleNative = bundle.wallets > 0 ? bundle.wallets * bundle.perWallet : 0
       const bundleUsd = bundleNative * nativePrice(s.market, spec.chain)
       const bundleFees = bundleNative > 0 ? bundle.wallets * BUNDLE_WALLET_FEE + (bundle.stagger ? bundleUsd * STAGGER_FEE : 0) : 0
-      const usdCosts = COOK_FEE + spec.marketing + bundleFees
+      // (On a post, in the World, the launch fee goes by the size of the account that posted: the server charges the same.)
+      const post = spec.onPost && s.online?.round.world ? s.market.sparks?.find((x) => x.id === spec.onPost) : undefined
+      const launchFee = post ? postLaunchFee(post.by.followers) : COOK_FEE
+      const usdCosts = launchFee + spec.marketing + bundleFees
       const devUsd = (spec.devBuy + bundleNative) * nativePrice(s.market, spec.chain)
       // The deployer (dev) wallet pays the dev buy and bundle and earns the creator fees: always one of your dev
       // wallets (your primary only if no dev wallet could be made, at the wallet limit).
@@ -1580,7 +1584,7 @@ export const useGame = create<GameState>()((set, get) => {
       const fresh = s.online ? structuredClone(cooked.token) : null // rooms: the server runs the dev buy / bundle on the fresh coin
       let market = cooked.market
       const devView = viewOf(s.portfolio, devId)
-      let portfolio: Portfolio = { ...devView, cash: devView.cash - COOK_FEE - spec.marketing - bundleFees, feesPaid: devView.feesPaid + COOK_FEE + bundleFees }
+      let portfolio: Portfolio = { ...devView, cash: devView.cash - launchFee - spec.marketing - bundleFees, feesPaid: devView.feesPaid + launchFee + bundleFees }
       const id = cooked.token.id
       if (spec.devBuy > 0) {
         const res = executeBuy(portfolio, market, id, spec.devBuy * nativePrice(market, spec.chain), portfolio.trades.length + 1, { autoSwap: s.settings.autoSwap })
@@ -1622,7 +1626,7 @@ export const useGame = create<GameState>()((set, get) => {
       const t = market.tokens.find((x) => x.id === id)!
       const record: LaunchRecord = {
         tokenId: t.id, ticker: t.ticker, name: t.name, emoji: t.emoji, image: t.image, hue: t.hue, launchedTick: s.market.tick, launchedTime: s.market.time,
-        spent: COOK_FEE + spec.marketing + bundleFees, fees: 0, peakMcap: t.mcap, lastMcap: t.mcap, status: t.status, graduated: false,
+        spent: launchFee + spec.marketing + bundleFees, fees: 0, peakMcap: t.mcap, lastMcap: t.mcap, status: t.status, graduated: false,
         chain: t.chain, devWallet: devId, ...(bundleQty > 0 ? { bundleQty, bundleWallets: bundle.wallets } : {}),
       }
       const cookEvents = bundleEvent ? [bundleEvent, cooked.event] : [cooked.event]
@@ -1640,7 +1644,7 @@ export const useGame = create<GameState>()((set, get) => {
       if (fresh && netHooks.wallet) {
         const ref = netHooks.wallet({
           t: 'cook', token: fresh, candles: candleStore.get(t.id), event: cooked.event,
-          money: { devWallet: devId, devBuy: spec.devBuy, bundle: bundleNative > 0 ? bundle : undefined, marketing: spec.marketing, autoSwap: s.settings.autoSwap, style: spec.style },
+          money: { devWallet: devId, devBuy: spec.devBuy, bundle: bundleNative > 0 ? bundle : undefined, marketing: spec.marketing, autoSwap: s.settings.autoSwap, style: spec.style, ...(spec.onPost ? { onPost: spec.onPost } : {}) },
         })
         const p = get().portfolio
         quietly(() => set({ portfolio: tagRef(p, p.trades.length - s.portfolio.trades.length, ref) }))

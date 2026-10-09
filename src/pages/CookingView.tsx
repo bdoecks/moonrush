@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { AlertTriangle, Bot, Check, ChefHat, ChevronDown, Dices, Flame, Globe, Search, Send, Timer, AtSign } from 'lucide-react'
 import { ChainBadge } from '../components/chain'
 import { load, save } from '../utils/storage'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Card } from '../components/discover/Trenches'
 import { ImagePicker } from '../components/cook/ImagePicker'
 import { AirdropPanel, BundlerSection, SideWalletsSection, VolumeBotPanel } from '../components/cook/DevTools'
@@ -10,6 +10,7 @@ import { useWallets } from '../hooks/useWallets'
 import { BUNDLE_WALLET_FEE, bundleDetectChance, STAGGER_FEE } from '../game/devTools'
 import { EmptyState, Segmented, TokenIcon } from '../components/ui'
 import { COOK_EMOJIS, NARRATIVES, narrativeLabel } from '../data/narratives'
+import { postLaunchFee } from '../game/sparks'
 import { COOK_FEE, cookAllowance, cookQuality, secPerTickOf, SUPPLY, vampBoost } from '../game/marketEngine'
 import { COOK_COOLDOWN_TICKS, GRAD_BONUS, selectSpeed, useGame, validateCook } from '../game/store'
 import { CREATOR_CUT, creatorRate, previewBuy, SWAP_FEE } from '../game/tradingEngine'
@@ -89,6 +90,15 @@ export function CookingView() {
     return { ...randomIdentity(n, tokens), chain, description: '', narrative: n, socials: { x: true, tg: false, web: false }, style: 'fair', marketing: 250, devBuy: CHAINS[chain].quick[1], pad: defaultPad(chain), tax: { buy: 0.03, sell: 0.03 }, bundle: { wallets: 0, perWallet: CHAINS[chain].quick[0], stagger: false } }
   })
   const up = (patch: Partial<CookSpec>) => setSpec((s) => ({ ...s, ...patch }))
+  // Launching on a post (the story market, in the World): the posts the timeline has not settled yet, newest first.
+  // (Not a tool's post: those coins need a site.) A post that settles while the form is open is let go of.
+  const inWorld = useGame((s) => !!s.online?.round.world)
+  const sparks = useGame((s) => s.market.sparks)
+  const openPosts = inWorld ? (sparks ?? []).filter((x) => !x.picked && x.over === undefined && x.kind !== 'tech').slice(0, 12) : []
+  const onPost = spec.onPost ? openPosts.find((x) => x.id === spec.onPost) : undefined
+  useEffect(() => {
+    if (spec.onPost && !onPost) setSpec((s) => ({ ...s, onPost: undefined }))
+  }, [spec.onPost, onPost])
   const chainMeta = CHAINS[spec.chain]
   const px = native?.[spec.chain]?.price ?? chainMeta.basePrice
   const devUsd = spec.devBuy * px
@@ -125,7 +135,8 @@ export function CookingView() {
   const vampOrig = spec.vampOf ? tokens.find((t) => t.id === spec.vampOf) : undefined
   const quality = cookQuality(spec, meta, est.devPct, vampOrig)
   const vampLift = vampBoost(vampOrig)
-  const usdCosts = COOK_FEE + spec.marketing + bundleFees
+  const launchFee = onPost ? postLaunchFee(onPost.by.followers) : COOK_FEE
+  const usdCosts = launchFee + spec.marketing + bundleFees
   // The dev buy and bundle are paid by the deployer wallet.
   const devAcc = wallets.all.find((a) => a.id === spec.devWallet) ?? wallets.primary
   const nativeBal = devAcc?.balances[spec.chain] ?? 0
@@ -236,6 +247,18 @@ export function CookingView() {
                 <Dices size={12} /> Randomize
               </button>
             }>
+              {openPosts.length > 0 && (
+                <div className="mb-3 rounded-md border border-info/40 bg-info/5 px-2.5 py-2 text-[12px]">
+                  <label className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-ink">Launch on a post</span>
+                    <select value={spec.onPost ?? ''} onChange={(e) => up({ onPost: e.target.value || undefined })} className="min-w-0 flex-1 rounded border border-line2 bg-bg px-1.5 py-1 text-[12px] text-ink">
+                      <option value="">No post: a coin of my own</option>
+                      {openPosts.map((x) => <option key={x.id} value={x.id}>@{x.by.handle} ({fmtCompact(x.by.followers, '')}): {x.text.slice(0, 60)}</option>)}
+                    </select>
+                  </label>
+                  {onPost && <p className="mt-1.5 text-muted"><b className="text-ink">@{onPost.by.handle}:</b> {onPost.text}<br /><span className="text-dim">Your coin joins the coins launched on this post. Type the name and ticker yourself: the timeline favours the coin spelled exactly as the post has it, with a clean risk tag. Other coins on the post may carry the same ticker. The launch fee on this post is <b className="text-ink">{fmtUsd(postLaunchFee(onPost.by.followers), 0)}</b>: the bigger the account, the more it costs. If the post is settled before you launch, the launch is refused and costs nothing.</span></p>}
+                </div>
+              )}
               {spec.vampOf && (
                 <div className={clsx('mb-3 flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-2 text-[12px]', vampLift > 0 ? 'border-accent/40 bg-accent/5' : 'border-warn/40 bg-warn/5')}>
                   <span className="text-[16px]">🧛</span>
@@ -265,7 +288,7 @@ export function CookingView() {
                     <Field label="Ticker">
                       <div className="flex items-center rounded-md border border-line2 bg-bg pl-2 focus-within:border-accent/60">
                         <span className="text-dim">$</span>
-                        <input value={spec.ticker} maxLength={8} onChange={(e) => up({ ticker: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} placeholder="PUP" className="num h-8 w-full bg-transparent px-1 text-[13px] font-bold outline-none" />
+                        <input value={spec.ticker} maxLength={10} onChange={(e) => up({ ticker: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} placeholder="PUP" className="num h-8 w-full bg-transparent px-1 text-[13px] font-bold outline-none" />
                       </div>
                     </Field>
                   </div>
@@ -439,7 +462,7 @@ export function CookingView() {
             </div>
 
             <div className="border-t border-line p-3 text-[12px]">
-              <Line label="Launch fee + marketing">{fmtUsd(COOK_FEE + spec.marketing, 0)}</Line>
+              <Line label={onPost ? 'Launch fee (on a post) + marketing' : 'Launch fee + marketing'}>{fmtUsd(launchFee + spec.marketing, 0)}</Line>
               <Line label={`Dev buy · ${est.devPct.toFixed(1)}%`}>{fmtNative(spec.devBuy, spec.chain)} <span className="text-dim">≈{fmtUsd(devUsd, 0)}</span></Line>
               {bundleOn && <Line label={`Bundle ×${spec.bundle.wallets} · ${est.bundlePct.toFixed(1)}%`}>{fmtNative(bundleNative, spec.chain)} <span className="text-dim">+{fmtUsd(bundleFees, 0)} fees</span></Line>}
               {sideNative > 0 && <Line label={`Side buys · ${sideCount} wallet${sideCount > 1 ? 's' : ''}${spec.sideDelay ? ' (over 1 min)' : ''}`}>{fmtNative(sideNative, spec.chain)} <span className="text-dim">≈{fmtUsd(sideNative * px, 0)}</span></Line>}

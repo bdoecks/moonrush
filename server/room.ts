@@ -3,7 +3,7 @@
 // cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
 import { createHash } from 'node:crypto'
-import { demoAnswer } from '../src/game/sparks'
+import { blockUsd, demoAnswer, postLaunchFee, SPARK, watchOf } from '../src/game/sparks'
 import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, launchBlock, secPerTickOf, setCandleLog, setClock, SUPPLY, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
 import { BOT_BUST_USD, BOT_BY_ID, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, inVoice, mirrorWallet, pickCoin, STYLE, type BotBrain, type BotSpec } from './bots'
 import { tickStories } from '../src/game/storyEngine'
@@ -917,22 +917,29 @@ export class Room {
     const look = coinLook(msg.token, { noLinks: this.world })
     if (typeof look === 'string') return fail(look)
     if (!NARRATIVES.some((n) => n.id === msg.token.narrative)) return fail('Unknown narrative')
+    // Launched on a post (the story market, World only): the coin joins that post's coins. The post must still be open,
+    // and not a tool's (a player's coin has no site). Several coins on a post may carry one ticker: that is the game.
+    const openPost = this.world && Room.storyMarket && typeof money.onPost === 'string' ? this.market.sparkSim?.[money.onPost] : undefined
+    const onPost = openPost && !openPost.tool ? (money.onPost as string) : undefined
+    if (typeof money.onPost === 'string' && money.onPost && !onPost) return fail('That post is over: the timeline has moved on')
     // Tickers are unique among live coins, except a vamp may reuse the ticker of the coin it copies.
-    if (this.market.tokens.some((x) => x.ticker === look.ticker && x.status !== 'dead' && x.status !== 'rugged' && x.id !== msg.token.vampOf?.id)) return fail(`$${look.ticker} already exists`)
+    if (!onPost && this.market.tokens.some((x) => x.ticker === look.ticker && x.status !== 'dead' && x.status !== 'rugged' && x.id !== msg.token.vampOf?.id)) return fail(`$${look.ticker} already exists`)
     const px = nativePrice(this.market, chain)
     const devWallet = typeof money.devWallet === 'string' && accountOf(w, money.devWallet) ? money.devWallet : w.accounts?.[0]?.id ?? 'w-main'
     const b = money.bundle && money.bundle.wallets > 0 ? { wallets: Math.min(50, Math.round(money.bundle.wallets)), perWallet: Math.max(0, Number(money.bundle.perWallet) || 0), stagger: !!money.bundle.stagger } : null
     const bundleUsd = b ? b.wallets * b.perWallet * px : 0
     const bundleFees = bundleUsd > 0 ? b!.wallets * BUNDLE_WALLET_FEE + (b!.stagger ? bundleUsd * STAGGER_FEE : 0) : 0
     const marketing = Math.max(0, Number(money.marketing) || 0)
-    const usdCosts = COOK_FEE + marketing + bundleFees
+    // (On a post the launch fee goes by the size of the account that posted: see postLaunchFee.)
+    const launchFee = onPost ? postLaunchFee(this.market.sparks?.find((x) => x.id === onPost)?.by.followers ?? 0) : COOK_FEE
+    const usdCosts = launchFee + marketing + bundleFees
     if (usdCosts > w.cash + 1e-9) return fail('Not enough USD for the launch fees')
 
     me.cooks = (me.cooks ?? 0) + 1
     me.lastCookTick = this.market.tick
     this.devStat(me, 'cooked', 1)
     if (this.world) me.cookTicks = [...(me.cookTicks ?? []).filter((t) => this.market.tick - t < 3600 / secPerTickOf(this.market)), this.market.tick]
-    me.wallet = { ...w, cash: w.cash - usdCosts, feesPaid: w.feesPaid + COOK_FEE + bundleFees }
+    me.wallet = { ...w, cash: w.cash - usdCosts, feesPaid: w.feesPaid + launchFee + bundleFees }
     // The server builds the coin itself, the same way the game does, from the player's choices. Only the look comes
     // from the message: a coin sent whole could carry any price, liquidity or hidden "always pump, never rug" sim.
     const c0 = msg.token
@@ -949,7 +956,22 @@ export class Room {
     // TOPS in the market engine): left out of them, a well-made launch bonded half the time and paid its dev
     // hundreds of dollars in fees, launch after launch (scripts/cook-report.ts).
     const fairSim = this.world && built.sim.flow ? { ...built.sim, flow: { ...built.sim.flow, botDev: true } } : built.sim
-    const token: NetToken = { ...built, sim: fairSim, id, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, devAddr: walletAddress(me.info.id, devWallet, 'sol'), status: 'bonding', creatorFees: 0 }
+    // On a post: its place in the rush, the post's theme, watched like the others while the story is open, and no pull
+    // of its own yet (what it is called and how clean it reads is for the timeline to judge when it settles).
+    let postBlock: number | undefined
+    let story: Partial<NetToken> = {}
+    let storySim = fairSim
+    if (onPost && fairSim.flow) {
+      const ps = this.market.sparkSim![onPost]
+      const n = ps.n + 1
+      this.market = { ...this.market, sparkSim: { ...this.market.sparkSim, [onPost]: { ...ps, n } } }
+      const watch = watchOf(ps.tier, n)
+      const theme = this.market.sparks?.find((x) => x.id === onPost)?.theme
+      story = { spark: { id: onPost, n }, ...(theme ? { narrative: theme } : {}) }
+      storySim = { ...fairSim, watch, flow: { ...fairSim.flow, q: SPARK.preQ, att: Math.max(fairSim.flow.att, watch), botDev: true } }
+      postBlock = blockUsd(ps.tier, n, new Rng((Math.random() * 2 ** 32) >>> 0), ps.larp)
+    }
+    const token: NetToken = { ...built, ...story, sim: storySim, id, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, devAddr: walletAddress(me.info.id, devWallet, 'sol'), status: 'bonding', creatorFees: 0 }
     this.market = { ...this.market, tokens: [token, ...this.market.tokens] }
     // cookToken drew the coin's first candle under its own id; move it to the id the game knows the coin by.
     const firstCandles = candleStore.get(built.id)
@@ -987,7 +1009,7 @@ export class Room {
     this.earn(me, fills)
     // Its snipers are in before the coin is shown to anybody, as on every coin of the simulated market (see launchBlock).
     // (The more of the supply the dev took in the launch itself, the fewer of them: that bag is ahead of the block.)
-    if (this.world) this.market = launchBlock(this.market, token.id, new Rng((Math.random() * 2 ** 32) >>> 0), ((me.wallet.positions[token.id]?.qty ?? 0) / SUPPLY) * 100)
+    if (this.world) this.market = launchBlock(this.market, token.id, new Rng((Math.random() * 2 ** 32) >>> 0), ((me.wallet.positions[token.id]?.qty ?? 0) / SUPPLY) * 100, postBlock)
     const c = this.cooked.get(token.id)!
     c.feeMark = this.market.tokens.find((x) => x.id === token.id)?.creatorFees ?? 0
     this.playerEvents.push({ by: me.info.id, id: this.market.tick * 100 + 97, tick: this.market.tick, time: this.market.time, kind: 'cook', tokenId: token.id, ticker: token.ticker, text: `${me.info.avatar} ${me.info.name} cooked $${token.ticker}`, icon: '🍳', tone: 'info' })

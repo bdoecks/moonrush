@@ -116,7 +116,7 @@ export function coinLook(c: { name?: unknown; ticker?: unknown; description?: un
   if (name.length < 2 || name.length > 24) return 'Name must be 2–24 characters'
   if (visibleCount(name) < 2) return 'Name needs at least two letters, digits or emoji'
   const ticker = text(c.ticker)
-  if (!/^[A-Z0-9]{2,8}$/.test(ticker)) return 'Ticker must be 2–8 letters or digits'
+  if (!/^[A-Z0-9]{2,10}$/.test(ticker)) return 'Ticker must be 2–10 letters or digits'
   if (nameBlocked(name) || nameBlocked(ticker)) return 'That coin name isn’t allowed.'
   if (opts.noLinks && hasLink(name)) return 'Links aren’t allowed in a World coin’s name.'
   let description = cut(tidyText(text(c.description)), 140).trim()

@@ -10,7 +10,8 @@ import { Room } from '../server/room'
 import { moderate, nameBlocked } from '../server/moderation'
 import { anonAccount, NEVER_SPELL, SPARK_ACCOUNTS, SPARK_NAMES, SPARK_TITLES, SUBJECTS, VARIANT_POST, VARIANT_PRE } from '../src/data/sparkPosts'
 import { SAFE_THEMES } from '../src/data/themeWords'
-import { computeRisk, createMarket, FLOW, setClock, tickMarket } from '../src/game/marketEngine'
+import { computeRisk, cookToken, createMarket, FLOW, setClock, tickMarket } from '../src/game/marketEngine'
+import { postLaunchFee } from '../src/game/sparks'
 import { demoAnswer, toolAnswer } from '../src/game/sparks'
 import { SPARK_TECH, TECH_NAMES, TECH_TOOLS } from '../src/data/sparkPosts'
 import { auditOf, coinFor, devFor, fitOf, keptSparks, makeSpark, mergeSparks, pickWeights, SPARK, sparkLine, sparkRate, stakeOf, tickerOf, typo, type Candidate, type CoinFit } from '../src/game/sparks'
@@ -421,6 +422,31 @@ function run(seed: number, ticks: number, dials: Partial<typeof SPARK> = {}): Ru
   ok(differs === 0, 'the list a browser builds from them is the server\'s own list, post for post')
   ok(feed > 10, `the posts reach the trackers with who made them (${feed} in ten minutes)`)
   ok(sparkBytes / bytes < 0.03, `the story market is ${pct(sparkBytes / bytes, 2)} of what a player is sent`)
+  // A player launches a coin ON a post (stage 4).
+  {
+    Room.playersCook = true
+    const r = world as unknown as { handle(pid: string, m: unknown): void; members: Map<string, { wallet: { cash: number } }>; cooked: Map<string, unknown> }
+    world.grant('u-reader', 5000, 'usd')
+    for (let i = 0; i < 40; i++) w.tick() // (past the kitchen's cool-down)
+    let post = (w.market.sparks ?? []).find((s) => w.market.sparkSim?.[s.id] && !w.market.sparkSim[s.id].tool)
+    for (let i = 0; i < 120 && !post; i++) { w.tick(); post = (w.market.sparks ?? []).find((s) => w.market.sparkSim?.[s.id] && !w.market.sparkSim[s.id].tool) }
+    const sim = w.market.sparkSim![post!.id]
+    const spec = { name: sim.name, ticker: sim.ticker, emoji: sim.emoji, hue: 10, description: 'on the post', chain: 'sol', pad: 'pump', tax: { buy: 0, sell: 0 }, devBuy: 0, marketing: 0, narrative: w.market.meta ?? 'dogs', socials: { x: true, tg: false, web: false }, style: 'fair', bundle: { wallets: 0, perWallet: 0, stagger: false } }
+    const coin = cookToken(w.market, new Rng(5), spec as never).token
+    const cash0 = r.members.get('u-reader')!.wallet.cash
+    const before = sim.n
+    r.handle('u-reader', { t: 'cook', seq: 1, ref: 1, token: coin, money: { devWallet: 'w-main', devBuy: 0, marketing: 0, style: 'fair', onPost: post!.id } })
+    const mine = w.market.tokens.find((x) => x.id === coin.id)
+    const paid = cash0 - r.members.get('u-reader')!.wallet.cash
+    ok(!!mine && mine.spark?.id === post!.id && mine.spark.n === before + 1 && w.market.sparkSim![post!.id].n === before + 1 && mine.sim.watch !== undefined, `a player's launch on a post joins that post's coins, next in the order of launch (#${mine?.spark?.n})`)
+    ok(Math.abs(paid - postLaunchFee(post!.by.followers)) < 0.01 && postLaunchFee(50_000_000) > postLaunchFee(1_000_000) && postLaunchFee(1_000_000) > postLaunchFee(50_000) && postLaunchFee(50_000) > postLaunchFee(100), `it costs the fee for an account of that size ($${paid.toFixed(0)}), and a bigger account's post costs more`)
+    const old = (w.market.sparks ?? []).find((s) => s.picked || s.over !== undefined)!
+    const coin2 = cookToken(w.market, new Rng(6), { ...spec, name: 'Late One', ticker: 'LATEONE' } as never).token
+    for (let i = 0; i < 35; i++) w.tick()
+    const cash1 = r.members.get('u-reader')!.wallet.cash
+    r.handle('u-reader', { t: 'cook', seq: 2, ref: 2, token: coin2, money: { devWallet: 'w-main', devBuy: 0, marketing: 0, style: 'fair', onPost: old.id } })
+    ok(!w.market.tokens.some((x) => x.id === coin2.id) && r.members.get('u-reader')!.wallet.cash === cash1, 'a launch on a post the timeline has already settled is refused and costs nothing')
+  }
   Room.storyMarket = false
   for (let i = 0; i < 3; i++) w.tick()
   ok(Object.keys(w.market.sparkSim ?? {}).length === 0, 'the owner\'s switch turned off reaches the World on its next tick')
