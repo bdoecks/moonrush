@@ -47,6 +47,7 @@ npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Ligh
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/cook-test.ts                # cooking in the World: a player's launch is under the fair-market rules, snipers pass on a big dev bag
 npx tsx scripts/cook-report.ts 3            # what cooking pays, recipe by recipe (not pass/fail): read before and after touching launches or creator fees
+npx tsx scripts/rank-test.ts                # World ranks: the title a season profit earns, scaled to the starting balance
 npx tsx scripts/trench-info-test.ts         # the Trenches card: KOLs and smart money in a coin, the dev's migrated / launched
 npx tsx scripts/reset-test.ts               # the admin's World starting balance, and starting every World player over
 npx tsx scripts/bugs-test.ts                # bug reports and ideas: what the game sends is clean and small, and only admins can read the table
@@ -457,6 +458,15 @@ Also open after stage 1:
 The five stages, as agreed: 2) tracked traders on the chart (a colour each, average-entry line, position, share
 of supply, profit, history); 3) trader types that react to stories (narrative trader, contrarian, panic seller, FOMO,
 swing) on top of the real-data brain; 4) the data-source plug with provenance; 5) scale (send each player less).
+
+## World board: the podium and ranks
+
+- The World leaderboards open with a podium (1st, 2nd, 3rd of the list shown; an empty step says "Open spot", so a
+  young season does not look broken) and every player wears a rank (`src/game/worldRank.ts`: Plankton, Shrimp, Crab,
+  Fish, Dolphin, Shark, Whale). A rank is season profit measured against what a World wallet starts with
+  (`worldStartOf(round)`), so the ladder keeps its meaning when the owner changes the starting balance. The banner
+  shows your rank, what is left to the next, and the whole ladder. Browser only: nothing new from the server, a rank
+  pays nothing. Test: `npx tsx scripts/rank-test.ts`.
 
 ## The admin sees every wallet
 
