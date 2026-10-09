@@ -11,7 +11,7 @@ import { STYLE_META } from '../data/wallets'
 import { tokenMapOf, useTokenMap } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { ACCOUNTS } from '../game/socialEngine'
-import { SparkChip, VerifiedMark } from '../components/SparkPanel'
+import { VerifiedMark } from '../components/SparkPanel'
 import { alertText, useGame } from '../game/store'
 import { useFriends } from '../net/friends'
 import { walletStats } from '../game/walletEngine'
@@ -415,7 +415,6 @@ function PostCard({ p }: { p: SocialPost }) {
       <p className="mt-1.5 whitespace-pre-line text-[12px] leading-snug text-ink/90">
         {parts.map((part, i) => (/^\$[A-Z0-9]+$/.test(part) ? <span key={i} className="font-semibold text-info">{part}</span> : <span key={i}>{part}</span>))}
       </p>
-      {p.sparkId && <div className="mt-2"><SparkChip id={p.sparkId} wide /></div>}
       {p.tokenId && (
         <div className="mt-2 flex items-center gap-2 rounded-md border border-line bg-bg px-2 py-1.5">
           <button disabled={!t} onClick={() => t && select(t.id)} className="flex min-w-0 items-center gap-1.5 hover:text-accent">

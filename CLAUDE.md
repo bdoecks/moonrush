@@ -714,3 +714,6 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   demo works and whose tag is LOW +1.4% (+4.2% on accounts of 500K and up); buying the first LOW coin without
   trying anything -1.3%. Not yet run with it on: UI bots, soak, `fair-test`.
 
+- **A post in a tracker does not list or link its coins** (the owner's call, 2026-10-09: "too easy"). `SparkChip` is
+  still in `SparkPanel.tsx` but no tracker draws it. The panel of a post's coins is reached only from a coin (its
+  leaf, its Story tab). Ask before putting a shortcut from a post to its coins back.

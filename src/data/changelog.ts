@@ -76,7 +76,7 @@ export const UPDATES: Update[] = [
     title: 'Coins now come from stories',
     added: [
       'Posts and news come in on the Social Tracker all day, from made-up accounts of every size. Within seconds devs launch coins on them. Most new coins now come from a post.',
-      'Under a post, "coins launched on this" opens every coin that was launched on it, in the order they came, each with its risk tag.',
+      'A post does not tell you which coins were launched on it. Find them yourself in Trenches: the new coins with its name on them.',
       'The leaf on a Trenches card and the Story tab on a coin show the post that coin was launched on.',
       'Read the post, then the coins. Some have the name exactly right, some are misspelled, some are somebody\'s own version. After a while the timeline settles on ONE coin and the crowd leaves the others for it, or it moves on and no coin is picked.',
       'A big account\'s post brings more coins and moves far more money than a small one\'s. Most posts go nowhere.',

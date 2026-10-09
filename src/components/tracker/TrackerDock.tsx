@@ -13,7 +13,7 @@ import { fmtAge, fmtCompact, fmtUsd } from '../../utils/format'
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
 import { Composer, postAccount } from '../SocialTracker'
-import { SparkChip, VerifiedMark } from '../SparkPanel'
+import { VerifiedMark } from '../SparkPanel'
 import { openRow, useFriendRows, type TrackerRow } from './friendRows'
 import { useOpenPlayer } from '../PlayerCard'
 import { GroupMenu, NewGroupButton } from './groups'
@@ -430,7 +430,6 @@ function PostRow({ p }: { p: SocialPost }) {
             {t && <span className="ml-auto"><QuickBuyButton t={t} className="h-6 px-2 text-[10px]" /></span>}
           </div>
         )}
-        {p.sparkId && <div className="mt-2"><SparkChip id={p.sparkId} wide /></div>}
         <div className="num mt-2 flex items-center justify-between pr-6 text-[12px] text-dim">
           <span className="flex items-center gap-1"><MessageCircle size={14} /> {cnt(n.replies)}</span>
           <span className="flex items-center gap-1"><Repeat2 size={15} /> {cnt(n.reposts)}</span>

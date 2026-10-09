@@ -8,7 +8,7 @@ import { playerAuthor, socialNow, useGame } from '../game/store'
 import type { SocialPost } from '../types'
 import { fmtAge, fmtCompact } from '../utils/format'
 import { EmptyState, Pct, TokenIcon } from './ui'
-import { SparkChip, VerifiedMark } from './SparkPanel'
+import { VerifiedMark } from './SparkPanel'
 
 const byId = new Map(ACCOUNTS.map((a) => [a.id, a]))
 
@@ -178,7 +178,6 @@ function Row({ p }: { p: SocialPost }) {
         <p className="truncate text-[11px] text-ink/90" title={p.text}>{p.text.replace(/\n/g, ' ')}</p>
         <Engagement p={p} />
       </div>
-      {p.sparkId && <span className="shrink-0 self-center"><SparkChip id={p.sparkId} /></span>}
       {p.tokenId && (
         <button disabled={!t} onClick={() => t && select(t.id)} className="flex shrink-0 items-center gap-1.5 self-center rounded-md border border-line bg-bg px-1.5 py-1 text-[11px] hover:border-accent/50">
           {t ? <TokenIcon token={t} size={16} /> : <span>❔</span>}
