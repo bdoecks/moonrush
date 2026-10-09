@@ -8,7 +8,7 @@ import { useTokenMap, useValuation } from '../hooks/useDerived'
 import { chainView } from '../game/chainPnl'
 import { levelFromXp, MODES, titleFor } from '../game/progression'
 import { LAB_VIEWS } from '../game/flags'
-import { useLabs } from '../hooks/useLabs'
+import { useCooking, useLabs } from '../hooks/useLabs'
 import { selectSpeed, useGame, type View } from '../game/store'
 import { fmtClock, fmtUsd, toneClass } from '../utils/format'
 import { FlashNum } from './ui'
@@ -130,6 +130,7 @@ function DockToggle() {
 
 export function TopBar() {
   const labs = useLabs() // CopyTrade, Sniper and Monitor: hidden unless the switch is on (or you are an admin)
+  const cooking = useCooking() // the Cooking page: the same, by its own switch
   const v = useValuation()
   const view = useGame((s) => s.view)
   const backView = useGame((s) => s.backView)
@@ -210,7 +211,7 @@ export function TopBar() {
     </div>
       {/* Tabs get their own row so the stats above can never squeeze them out of view. */}
       <nav className="no-scrollbar hidden items-center gap-0.5 overflow-x-auto border-t border-line px-2 py-1 md:flex">
-        {NAV.filter((n) => labs || !LAB_VIEWS.includes(n.id)).map((n) => (
+        {NAV.filter((n) => (labs || !LAB_VIEWS.includes(n.id)) && (cooking || n.id !== 'cooking')).map((n) => (
           <button
             key={n.id}
             onClick={() => setView(n.id)}

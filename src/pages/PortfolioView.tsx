@@ -1,3 +1,4 @@
+import { cookingVisible } from '../game/flags'
 import clsx from 'clsx'
 import { Check as CheckIcon, Coins, Copy, Search, Share2, X } from 'lucide-react'
 import { FundWalletsModal } from '../components/FundWallets'
@@ -861,7 +862,7 @@ function Deployed() {
   const setView = useGame((s) => s.setView)
   const select = useGame((s) => s.select)
   const map = useTokenMap()
-  if (!launches.length) return <EmptyState icon="🍳" title="You haven't deployed any tokens this round" hint={<button onClick={() => setView('cooking')} className="text-accent underline">Cook one →</button>} />
+  if (!launches.length) return <EmptyState icon="🍳" title="You haven't deployed any tokens this round" hint={cookingVisible() ? <button onClick={() => setView('cooking')} className="text-accent underline">Cook one →</button> : 'Cooking is closed for now while it is being reworked.'} />
   return (
     <table className="w-full min-w-[720px] text-[12px]">
       <thead className="sticky top-0 z-[1] bg-panel">

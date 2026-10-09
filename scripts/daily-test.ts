@@ -13,7 +13,7 @@ const fill = (side: 'buy' | 'sell', tokenId: string, value: number, pnl?: number
 
 // The picks.
 const days = Array.from({ length: 140 }, (_, i) => dayKey(new Date(2026, 9, 3 + i)))
-const picks = days.map(dailyChallenges)
+const picks = days.map((day) => dailyChallenges(day))
 ok(picks.every((p) => p.length === 3 && p[0].tier === 'easy' && p[1].tier === 'medium' && p[2].tier === 'hard'), 'every day has one easy, one medium and one hard challenge')
 ok(picks.every((p, i) => i === 0 || p.every((d, k) => d.id !== picks[i - 1][k].id)), 'no challenge repeats two days running')
 ok(new Set(picks.map((p) => p.map((d) => d.id).join())).size === 140, 'the same trio does not come back within 140 days')
@@ -21,6 +21,10 @@ ok(dailyChallenges('2026-10-03').map((d) => d.id).join() === dailyChallenges('20
 
 // Progress and pay-outs on a fixed day.
 const noon = new Date(2026, 9, 3, 12)
+// While the Cooking page is closed, no day asks for a launch.
+const year = Array.from({ length: 365 }, (_, i) => new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10))
+ok(year.some((day) => dailyChallenges(day).some((x) => x.id === 'cook1')) && !year.some((day) => dailyChallenges(day, true).some((x) => x.id === 'cook1')), 'with cooking closed, "Cook a coin" is never one of the three (its days get the next goal)')
+ok(year.every((day) => new Set(dailyChallenges(day, true).map((x) => x.id)).size === 3 && dailyChallenges(day, true).filter((x, i) => x.id !== dailyChallenges(day)[i].id).length <= 1), '…and nothing else about a day changes')
 const [easy, medium, hard] = dailyChallenges(dayKey(noon))
 console.log(`     2026-10-03: ${easy.title} · ${medium.title} · ${hard.title}`)
 let st: DailyState | undefined

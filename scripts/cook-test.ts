@@ -70,6 +70,23 @@ const theirs = cook(r, room, 'p1', 'ROOMA', 0, 2)
 ok(!!theirs?.sim.flow && !theirs.sim.flow.botDev, 'a launch in a friends room is left as it was')
 room.dispose()
 
+// ── The owner's `cooking` switch ─────────────────────────────────────────────
+{
+  const shut = new Room('SHUTT')
+  const sr = shut as unknown as R
+  clearInterval(sr.timer)
+  shut.join(sock(), { t: 'hello', name: 'Host', avatar: '🐸', level: 5, playerId: 'p1' })
+  sr.handle('p1', { t: 'start', mode: 'practice', durationTicks: null, engine: 'realistic' })
+  const cash = () => (shut as unknown as { members: Map<string, { wallet: { cash: number } }> }).members.get('p1')!.wallet.cash
+  const before = cash()
+  Room.playersCook = false
+  const refused = cook(sr, shut, 'p1', 'SHUTA', 0, 2)
+  ok(!refused && cash() === before, 'with the cooking switch off the server refuses a launch, and charges nothing')
+  Room.playersCook = true
+  ok(!!cook(sr, shut, 'p1', 'SHUTB', 0, 3), 'with it on again the same launch goes through')
+  shut.dispose()
+}
+
 // ── Snipers pass on a coin whose dev took a big bag ──────────────────────────
 const sniped = (aheadPct: number) => {
   let n = 0, usd = 0

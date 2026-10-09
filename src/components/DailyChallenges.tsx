@@ -1,3 +1,4 @@
+import { useCooking } from '../hooks/useLabs'
 import clsx from 'clsx'
 import { Check } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -28,7 +29,8 @@ export function DailyChallenges() {
     return () => clearInterval(id)
   }, [])
   const state: DailyState = dailyFor(saved, now)
-  const defs = dailyChallenges(state.date)
+  const cooking = useCooking()
+  const defs = dailyChallenges(state.date, !cooking)
   const done = defs.filter((d) => state.done.includes(d.id)).length
 
   return (

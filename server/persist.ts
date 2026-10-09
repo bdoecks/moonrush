@@ -77,6 +77,22 @@ export async function pingDb(timeoutMs = 10_000): Promise<{ ok: boolean; ms: num
   }
 }
 
+/**
+ * One of the owner's game switches (`app_flags`, see src/game/flags.ts). Null when it cannot be read (no database
+ * here, or it did not answer): the caller keeps what it knew.
+ */
+export async function readFlag(key: string, timeoutMs = 10_000): Promise<boolean | null> {
+  if (!persistOn) return null
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/app_flags?key=eq.${encodeURIComponent(key)}&select=value`, { headers: headers(), signal: AbortSignal.timeout(timeoutMs) })
+    if (!res.ok) return null
+    const rows = (await res.json()) as { value: unknown }[]
+    return rows.length ? rows[0].value === true : false // (never set: off, as in the game)
+  } catch {
+    return null
+  }
+}
+
 export async function deleteRoom(code: string) {
   if (!persistOn) return
   try {

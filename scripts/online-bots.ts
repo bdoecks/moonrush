@@ -205,7 +205,7 @@ async function session(browser: Browser) {
   const alice = await mk('Alice'), bob = await mk('Bob')
 
   await step('Both players open the game', 'Two separate browsers load the game and show the "Pick your arena" screen.', async () => {
-    for (const p of [alice, bob]) { act(p.name, 'Open the game'); await p.page.goto(URL); await p.page.getByText('Pick your arena').waitFor({ timeout: 30_000 }) }
+    for (const p of [alice, bob]) { act(p.name, 'Open the game'); await p.page.goto(URL); await p.page.getByText('Pick your arena').waitFor({ timeout: 30_000 }); await p.page.evaluate(() => (window as any).__flags.setState({ labsDev: true })) } // (pages hidden from players for now are switched on for the test: see the labs and cooking switches)
   })
 
   let code = ''

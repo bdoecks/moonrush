@@ -10,7 +10,7 @@ import { Logo } from './TopBar'
 import { Kbd, Modal, Segmented, Toggle } from './ui'
 import { LobbyModal, WorldCard } from './Multiplayer'
 import { BugReportModal, IdeaModal } from './BugReport'
-import { labsVisible } from '../game/flags'
+import { cookingVisible, labsVisible } from '../game/flags'
 import { useFlags } from '../game/flags'
 import { useAccount } from '../net/account'
 import { INVITE_MINUTES, INVITE_REWARD, useInvites } from '../net/invites'
@@ -307,7 +307,7 @@ function HelpModal() {
     ['/', 'Search token / CA / wallet'], ['N', 'Sniper'], ['↑ ↓ ↵', 'Move through table / open token'], ['B', 'Buy panel'], ['S', 'Sell panel'], ['↵', 'Confirm trade (in amount box)'],
     ['F', 'Star / unstar token'], ['I', 'Instant trade panel'], ['W', 'Watchlist panel'], ['D', 'Discover'], ['C', 'Cooking (launch a token)'], ['Y', 'CopyTrade'], ['O', 'Monitor (smart money flows)'], ['K', 'Track (wallets, calls, alerts, X/TG)'], ['R', 'Rewards (cashback, check-in)'], ['T', 'Trenches'], ['P', 'Portfolio'], ['M', 'Missions'], ['L', 'Leaderboard'],
     ['Space', 'Pause market'], ['Esc', 'Close / back'], ['?', 'This help'],
-  ].filter(([k]) => labsVisible() || !['N', 'Y', 'O'].includes(k)) as [string, string][] // (the Sniper, CopyTrade and Monitor pages are hidden for now: see the labs switch)
+  ].filter(([k]) => (labsVisible() || !['N', 'Y', 'O'].includes(k)) && (cookingVisible() || k !== 'C')) as [string, string][] // (pages hidden for now are left out: see the labs and cooking switches)
   return (
     <Modal title="How to play" onClose={() => setModal(null)} wide>
       <div className="grid gap-4 md:grid-cols-2">
