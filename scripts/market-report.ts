@@ -11,6 +11,9 @@ import { WORLD_CODE } from '../src/net/protocol'
 import { Rng } from '../src/utils/rng'
 import type { CookSpec, MarketState, Token } from '../src/types'
 
+// (STORY_MARKET=1: the same with the story market on, as it is once the owner's switch is.)
+if (process.env.STORY_MARKET === '1') Room.storyMarket = true
+
 const hours = Number(process.argv[2] ?? 2)
 const warm = Number(process.argv[3] ?? 1)
 const q = (a: number[], p: number) => (a.length ? [...a].sort((x, y) => x - y)[Math.min(a.length - 1, Math.floor(a.length * p))] : NaN)

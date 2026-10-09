@@ -2,12 +2,13 @@ import { CHAIN_IDS, CHAINS } from '../data/chains'
 import { EVENT_TEMPLATES } from '../data/events'
 import { NARRATIVES } from '../data/narratives'
 import { generatedLaunch, INITIAL_TOKENS, LAUNCH_POOL, WALLET_PREFIXES, WALLET_SUFFIXES } from '../data/tokens'
-import type { Archetype, Candle, Chain, CookSpec, DevTrade, NativeQuote, MarketEngine, MarketEvent, MarketState, PadId, Regime, RiskLevel, TapeTrade, Timeframe, Token, TokenSim } from '../types'
+import type { Archetype, Candle, Chain, CookSpec, DevTrade, NativeQuote, MarketEngine, MarketEvent, MarketState, PadId, Regime, RiskLevel, TapeTrade, Timeframe, Token, TokenSim, Spark, SparkSim } from '../types'
 import { TF_SECONDS, TIMEFRAMES } from '../types'
 import { clamp, Rng } from '../utils/rng'
 import { LAUNCHPADS, padFromId, padsFor } from '../data/launchpads'
 import { addWin, getWin, setWinClock, stepWin } from './windows'
 import { creatorRate, tradeFee } from './tradingEngine'
+import { auditOf, blockUsd, coinFor, devFor, fitOf, keptSparks, makeSpark, pickCoin, SPARK, sparkRate, stakeOf, watchOf, type SparkDev } from './sparks'
 import { curveAt, curveK, curveLiquidityUsd, gradMcapUsd, gradPriceNative, launchMcapUsd, migratedLiquidityUsd, migrationPriceNative, startPriceNative } from './curve'
 
 // ─── Clock ───────────────────────────────────────────────────────────────────
@@ -700,14 +701,22 @@ const DEV_ICON = EVENT_TEMPLATES.find((e) => e.kind === 'devsell')?.icon ?? '�
 const lognormal = (rng: Rng, median: number, sigma: number) => median * Math.exp(sigma * rng.gauss())
 
 /** A realistic launch on any launchpad: starts at the bottom of its curve, plus whatever the dev bought in the launch block. */
-function launchFlowToken(rng: Rng, m: MarketState, base: { ticker: string; name: string; emoji: string }): Token {
+function launchFlowToken(rng: Rng, m: MarketState, base: { ticker: string; name: string; emoji: string }, as?: { q: number; archetype: Archetype; devPct: number; top10Pct: number; insidersPct: number }): Token {
   const chain = pickChain(rng)
   const pad = pickPad(rng, chain)
-  const q = Math.exp(rng.gauss() * 1.25 - 2.6) // median ≈ 0.07; top 1% ≈ 1.4
-  const archetype: Archetype = q > 1.2 ? rng.weighted<Archetype>({ runner: 5, chaotic: 3, grinder: 1 }) : rng.weighted<Archetype>({ chaotic: 3, rugger: 3, bleeder: 3, runner: 1 })
+  // (`as`: a coin launched on a post gets its pull, its kind of dev and that dev's bag from the story market, see sparks.ts.)
+  const q = as?.q ?? Math.exp(rng.gauss() * 1.25 - 2.6) // median ≈ 0.07; top 1% ≈ 1.4
+  const archetype: Archetype = as?.archetype ?? (q > 1.2 ? rng.weighted<Archetype>({ runner: 5, chaotic: 3, grinder: 1 }) : rng.weighted<Archetype>({ chaotic: 3, rugger: 3, bleeder: 3, runner: 1 }))
   const t = makeToken(rng, { ...base, archetype, chain, pad }, m.time, true, m.native)
   const nu = nativeUsdOf(m.native, chain)
   const p = LAUNCHPADS[pad]
+  if (as) {
+    t.devPct = as.devPct
+    t.top10Pct = as.top10Pct
+    t.insidersPct = as.insidersPct
+    t.devTrades = undefined
+    if (t.devPct > 0.3) logDev(t, { time: t.createdAt, side: 'buy', usd: (t.devPct / 100) * launchMcapUsd(pad, nu) * 1.15 })
+  }
   // Dev buy on the curve: price after `sold` tokens leave it is k / (vTokens − sold)².
   const sold = Math.min(p.curveTokens * 0.3, (t.devPct / 100) * SUPPLY)
   const y = p.vTokens - sold
@@ -738,12 +747,14 @@ function outsideNet(t: Token, from: number) {
   return net
 }
 
+const SNIPE_MEAN = 55 * Math.exp((0.9 * 0.9) / 2) // what one sniper puts in on average (the lognormal below)
 /** A launch's snipers in the simulated market: they buy in the launch block, before the coin has been shown to anybody. */
-function snipe(m: MarketState, t: Token, rng: Rng, share = 1) {
+function snipe(m: MarketState, t: Token, rng: Rng, share = 1, usd?: number) {
   const f = t.sim.flow
   if (!f) return
   f.sniped = true
-  const n = rng.poisson((2.4 + 9 * f.q) * share)
+  // (`usd`: about that much money in all, for a coin launched on a post: its snipers go by the post, not by the coin.)
+  const n = rng.poisson(usd !== undefined ? usd / SNIPE_MEAN : (2.4 + 9 * f.q) * share)
   t.snipers += n
   for (let k = 0; k < n && t.status === 'bonding'; k++) {
     const usd = fillSim(m, t, 'buy', Math.min(FLOW.maxTrade, lognormal(rng, 55, 0.9)), m.time, walletName(rng), 'sniper')
@@ -834,6 +845,12 @@ function migrate(t: Token, m: MarketState, nu: number, emit: (e: Omit<MarketEven
 /** One real second of trading on a coin that is still on its curve. */
 function stepFlow(t: Token, m: MarketState, rng: Rng, native: MarketState['native'], emit: (e: Omit<MarketEvent, 'id' | 'tick' | 'time'>) => void) {
   const f = t.sim.flow!
+  // A coin on a post the timeline has not settled yet is being watched: it keeps that much attention, and it is not
+  // written off, until the story is settled one way or the other (see sparks.ts).
+  if (t.sim.watch) {
+    f.att = Math.max(f.att, t.sim.watch)
+    f.lastTrade = m.time
+  }
   const nu = nativeUsdOf(native, t.chain)
   const age = m.time - t.createdAt
   const p0 = t.price
@@ -1088,6 +1105,7 @@ export interface TickOptions {
   rugMult: number
   protectedIds: Set<string> // held or watched tokens are never delisted
   held?: Map<string, number> // coins in real wallets (players, bots), by coin id: the simulated crowd can't sell those
+  sparks?: boolean // the story market is on: most launches come from posts on the timeline (real-time engine only, see sparks.ts)
 }
 
 /** Advance the market one tick. Returns a new MarketState (tokens are fresh copies) and emitted events. */
@@ -1495,6 +1513,12 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
     }
   }
 
+  // 8c. The story market: posts appear, devs launch coins on them, and the timeline settles on one coin or moves on.
+  // (Switched off with stories still open: they are dropped, and their coins fade like any coin.)
+  const storyMarket = realistic && !!opts.sparks
+  if (storyMarket) stepSparks(m, tokens, native, emit)
+  else if (m.sparks?.length || (m.sparkSim && Object.keys(m.sparkSim).length)) dropSparks(m, tokens)
+
   // 9. New launches keep the trenches fresh.
   // Hand-written names first, then generated memecoin names; a clash with a live ticker gets a "2"/"3"… suffix.
   const nextName = () => {
@@ -1505,7 +1529,8 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
     return tokens.some((t) => t.ticker === ticker) ? null : { ...base, ticker }
   }
   const liveFlow = realistic ? tokens.filter((t) => t.sim.flow && t.status === 'bonding').length : 0
-  if (realistic && liveFlow < FLOW.maxLive && rng.chance(FLOW.launchPerSec)) {
+  // (With the story market on, most launches come from posts: what is left here is the noise every market has.)
+  if (realistic && liveFlow < FLOW.maxLive && rng.chance(FLOW.launchPerSec * (storyMarket ? 1 - SPARK.share : 1))) {
     // Realistic: launches arrive at the real pace, on every launchpad; most will be dead within a minute.
     const base = nextName()
     if (base) {
@@ -1531,6 +1556,170 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
   m.tokens = tokens
   m.seed = rng.s
   return { market: m, events }
+}
+
+// ─── The story market (see sparks.ts for what it is and why it is fair) ───────
+// The kind of coin each kind of dev makes (what it does once it has a pool: a greedy dev's insiders dump into it).
+const SPARK_KINDS: Record<SparkDev, Archetype> = { clean: 'runner', plain: 'chaotic', greedy: 'rugger' }
+const SPARK_LAUNCHES_A_TICK = 4
+
+/** One second of the story market: settle the stories that are due, launch the coins that are due, maybe a new post. */
+function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native'], emit: (e: Omit<MarketEvent, 'id' | 'tick' | 'time'>) => void) {
+  // Its own dice (the market's seed and the tick), so the rest of the market draws the same numbers with it on or off.
+  const rng = new Rng(((m.seed ^ 0x51ed270b) + Math.imul(m.tick, 0x9e3779b1)) >>> 0)
+  const sims: Record<string, SparkSim> = { ...(m.sparkSim ?? {}) }
+  let sparks = m.sparks ?? []
+  const change = (id: string, patch: Partial<Spark>) => {
+    m.sparkSeq = (m.sparkSeq ?? 0) + 1
+    sparks = sparks.map((x) => (x.id === id ? { ...x, ...patch, seq: m.sparkSeq! } : x))
+  }
+
+  // (A coin is watched only while its story is open. One whose story is gone, from a save put together some other
+  // way, would never be written off.)
+  for (const t of tokens) if (t.sim.watch !== undefined && !(t.spark && sims[t.spark.id])) t.sim.watch = undefined
+
+  // 1. The timeline settles on a coin, or moves on.
+  for (const [id, sim] of Object.entries(sims)) {
+    if (m.time < sim.decideAt) continue
+    delete sims[id]
+    const spark = sparks.find((x) => x.id === id)
+    const picked = settleSpark(m, tokens, id, sim, rng, native, emit)
+    if (!spark) continue
+    if (picked) {
+      change(id, { picked })
+      emit({ kind: 'sparkpick', tokenId: picked.tokenId, ticker: picked.ticker, sparkId: id, text: `The timeline has settled on $${picked.ticker} for @${spark.by.handle}'s post`, icon: '🎯', tone: 'up' })
+    } else {
+      change(id, { over: m.time })
+      if (sim.n > 0) emit({ kind: 'sparkpick', sparkId: id, text: `The timeline moved on from @${spark.by.handle}'s post: no coin was picked`, icon: '💤', tone: 'info' })
+    }
+  }
+
+  // 2. Devs launch the coins that are due (never past what the market holds at once: those wait a second).
+  let live = tokens.filter((t) => t.sim.flow && t.status === 'bonding').length
+  for (const [id, old] of Object.entries(sims)) {
+    if (!old.due.length || old.due[0] > m.time) continue
+    const sim = (sims[id] = { ...old, due: [...old.due] })
+    const spark = sparks.find((x) => x.id === id)
+    for (let k = 0; sim.due.length && sim.due[0] <= m.time; k++) {
+      if (live >= FLOW.maxLive || k >= SPARK_LAUNCHES_A_TICK) {
+        sim.due = sim.due.map((at) => Math.max(at, m.time + 1))
+        break
+      }
+      sim.due.shift()
+      sim.n++
+      const base = coinFor(sim, rng)
+      const dev = devFor(rng)
+      const t = launchFlowToken(rng, m, base, { q: SPARK.preQ, archetype: SPARK_KINDS[dev.kind], devPct: dev.devPct, top10Pct: dev.top10Pct, insidersPct: dev.insidersPct })
+      if (tokens.some((x) => x.id === t.id)) t.id = `${t.ticker}-${Math.floor(rng.next() * 1e9).toString(36)}` // (several coins on a post share a ticker: never an id)
+      t.spark = { id, n: sim.n }
+      if (spark?.theme) t.narrative = spark.theme
+      t.sim.watch = watchOf(sim.tier, sim.n)
+      // (Its risk tag as it will read from now on: the timeline goes by it, and so does anybody reading the card.)
+      const risk = computeRisk(t, m.time)
+      t.riskScore = risk.score
+      t.riskLevel = risk.level
+      t.sim.flow!.att = Math.max(t.sim.flow!.att, t.sim.watch)
+      pushCandles(t, m.time, t.price, 0)
+      // Its snipers go by the post and by how early the coin is, not by what it is called.
+      snipe(m, t, rng, 1, blockUsd(sim.tier, sim.n, rng))
+      t.sim.flow!.ema = t.price // (they are in for the story: nobody takes profit on the launch block itself)
+      tokens.unshift(t)
+      live++
+      emit({ kind: 'launch', tokenId: t.id, ticker: t.ticker, sparkId: id, text: `$${t.ticker} just launched on ${LAUNCHPADS[t.pad].name}`, icon: '🆕', tone: 'info' })
+    }
+  }
+
+  // 3. Somebody posts.
+  if (rng.chance(sparkRate(FLOW.launchPerSec))) {
+    const n = (m.nextSparkId = (m.nextSparkId ?? 0) + 1)
+    m.sparkSeq = (m.sparkSeq ?? 0) + 1
+    const { spark, sim } = makeSpark(m, rng, `s${n}`, m.sparkSeq, new Set(Object.values(sims).map((x) => x.ticker)))
+    sparks = [spark, ...sparks]
+    sims[spark.id] = sim
+    emit({ kind: 'spark', sparkId: spark.id, text: `@${spark.by.handle}: ${spark.text}`, icon: spark.kind === 'news' ? '📰' : '📣', tone: 'info' })
+  }
+
+  // 4. Old posts leave the list (never one that is still open, or has a coin alive).
+  const alive = new Set<string>()
+  for (const t of tokens) if (t.spark && (t.status === 'bonding' || t.status === 'graduated')) alive.add(t.spark.id)
+  m.sparks = keptSparks(sparks, new Set(Object.keys(sims)), alive, m.time)
+  m.sparkSim = sims
+}
+
+/** The story market is off: stories still open are closed with no coin picked, and old posts leave the list as they would. */
+function dropSparks(m: MarketState, tokens: Token[]) {
+  for (const t of tokens) if (t.sim.watch) t.sim.watch = undefined
+  const sparks = (m.sparks ?? []).map((s) => (s.picked || s.over !== undefined ? s : { ...s, over: m.time, seq: (m.sparkSeq = (m.sparkSeq ?? 0) + 1) }))
+  const alive = new Set<string>()
+  for (const t of tokens) if (t.spark && (t.status === 'bonding' || t.status === 'graduated')) alive.add(t.spark.id)
+  m.sparks = keptSparks(sparks, new Set(), alive, m.time)
+  m.sparkSim = {}
+}
+
+/**
+ * The timeline settles a story. Its coins stop being watched as a group. If the story went nowhere that is all (they
+ * fade like any coin). If it ran, the timeline picks ONE coin, the crowd sells what it holds of the others, and what
+ * the picked coin gains is what those lost. All of it is trades, in this one second: by the time anybody reads that
+ * a coin was picked, the move is done. Returns the picked coin, or null.
+ */
+function settleSpark(m: MarketState, tokens: Token[], id: string, sim: SparkSim, rng: Rng, native: MarketState['native'], emit: (e: Omit<MarketEvent, 'id' | 'tick' | 'time'>) => void): Spark['picked'] | null {
+  const coins = tokens.filter((t) => t.spark?.id === id && t.status === 'bonding' && !!t.sim.flow && !curveDone(t)).sort((a, b) => a.spark!.n - b.spark!.n)
+  for (const t of tokens) if (t.spark?.id === id && t.sim.watch) t.sim.watch = undefined
+  if (!sim.runs || !coins.length) return null
+  // The crowd's own coins in each (never the ones in real wallets, nor a crowd dev's bag): see `bag` in stepFlow.
+  const bagOf = (t: Token) => Math.max(0, LAUNCHPADS[t.pad].vTokens - t.liquidity / 2 / t.price - (t.sim.held ?? 0) - (t.creator === 'you' ? 0 : (t.devPct / 100) * SUPPLY))
+  // A coin's stake: the share of its price it loses if the crowd sells what it would (see `SPARK.dump` below).
+  const win = coins[pickCoin(coins.map((t) => ({ fit: fitOf(t, sim), audit: auditOf(t), stake: stakeOf(t.liquidity / 2 / t.price, bagOf(t) * SPARK.dump) })), rng)]
+  const count = (t: Token, usd: number, side: 'buy' | 'sell') => {
+    t.volume += usd
+    if (side === 'buy') t.buys += 1
+    else t.sells += 1
+    t.win = addWin(getWin(t, m.time), usd, side === 'buy' ? 1 : 0, side === 'sell' ? 1 : 0)
+    t.holders = Math.max(1, t.holders + (side === 'buy' ? 1 : -1))
+  }
+  // The crowd leaves the others…
+  let lost = 0 // the shares of their prices the others lost, added up
+  let out = 0 // …and the money that came out of them
+  for (const t of coins) {
+    if (t === win) continue
+    const before = t.price
+    let qty = bagOf(t) * SPARK.dump
+    for (let k = rng.int(2, 4); k > 0 && qty > 0; k--) {
+      const part = k === 1 ? qty : qty * rng.range(0.35, 0.65)
+      qty -= part
+      const want = quoteSell(t, part).usdOut
+      if (want < FLOW.minTrade) continue
+      const usd = fillSim(m, t, 'sell', want, m.time, walletName(rng))
+      if (!(usd > 0)) continue
+      out += usd
+      count(t, usd, 'sell')
+    }
+    lost += Math.max(0, 1 - t.price / before)
+    t.sim.flow!.att *= 0.05
+    t.hype = Math.max(0, t.hype - 25)
+    refreshChanges(t, m.time)
+  }
+  // …for the one it picked: enough buying to lift it by what they fell, and never more money than came out of them.
+  const nu = nativeUsdOf(native, win.chain)
+  let inflow = Math.min(Math.max(1, win.liquidity / 2) * (Math.sqrt(1 + SPARK.gain * lost) - 1), SPARK.keep * out)
+  for (let k = clamp(Math.round(3 + inflow / 250), 3, 16); k > 0 && inflow >= FLOW.minTrade; k--) {
+    const part = k === 1 ? inflow : Math.min(inflow, (inflow / k) * rng.range(0.6, 1.4))
+    inflow -= part
+    // (A coin that sells out its curve on the way migrates, and the rest of the buying lands in its pool.)
+    if (win.status === 'bonding' && curveDone(win)) migrate(win, m, nu, emit)
+    const usd = fillSim(m, win, 'buy', part, m.time, walletName(rng))
+    if (!(usd > 0)) continue
+    count(win, usd, 'buy')
+    if (win.status === 'bonding' && syncCurve(win, nu)) migrate(win, m, nu, emit)
+  }
+  const f = win.sim.flow!
+  f.q = SPARK.tiers[sim.tier].q * sim.power // it is the coin now: the crowd it has from here is the story's
+  f.att += 2 + f.q
+  f.lastTrade = m.time
+  f.ema = win.price // (the crowd that came for it has only just bought: the run it may take profit on starts here)
+  win.hype = clamp(win.hype + 30, 0, 100)
+  refreshChanges(win, m.time)
+  return { tokenId: win.id, ticker: win.ticker, time: m.time }
 }
 
 // ─── Constant-product pool math (used by the trading engine) ─────────────────

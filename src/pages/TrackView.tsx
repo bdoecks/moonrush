@@ -11,6 +11,7 @@ import { STYLE_META } from '../data/wallets'
 import { tokenMapOf, useTokenMap } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { ACCOUNTS } from '../game/socialEngine'
+import { SparkChip, VerifiedMark } from '../components/SparkPanel'
 import { alertText, useGame } from '../game/store'
 import { useFriends } from '../net/friends'
 import { walletStats } from '../game/walletEngine'
@@ -20,6 +21,8 @@ import { fmtAge, fmtCompact, toneClass } from '../utils/format'
 
 type Sub = 'wallet' | 'track' | 'callout' | 'alerts' | 'social'
 const accById = new Map(ACCOUNTS.map((a) => [a.id, a]))
+/** Who made a post: a simulated account, or one of the story market's (who it is travels with its post). */
+const accOf = (p: SocialPost) => accById.get(p.accountId) ?? (p.by ? { ...p.by, platform: 'x' as const, kind: 'poster' as const, walletId: undefined as string | undefined } : undefined)
 
 export function TrackView() {
   const [sub, setSub] = useState<Sub>('track')
@@ -348,7 +351,7 @@ function SocialPanel() {
   const [q, setQ] = useState('')
   const needle = q.trim().toLowerCase().replace('$', '').replace('@', '')
   const posts = feed.filter((p) => {
-    const acc = accById.get(p.accountId)
+    const acc = accOf(p)
     if (!acc || acc.platform !== platform) return false
     if (scope === 'mine' && !followed.includes(acc.id)) return false
     if (scope === 'featured' && acc.followers < 50_000) return false
@@ -386,7 +389,7 @@ function SocialPanel() {
 }
 
 function PostCard({ p }: { p: SocialPost }) {
-  const acc = accById.get(p.accountId)!
+  const acc = accOf(p)!
   const tick = useGame((s) => s.market.tick)
   const followed = useGame((s) => s.followedAccounts.includes(acc.id))
   const toggleFollow = useGame((s) => s.toggleFollowAccount)
@@ -402,6 +405,7 @@ function PostCard({ p }: { p: SocialPost }) {
         <div className="min-w-0 flex-1 leading-tight">
           <div className="flex items-center gap-1 text-[12px] font-bold">
             <span className="truncate">{acc.name}</span>
+            {p.by?.verified && <VerifiedMark size={12} />}
             {acc.walletId && <button onClick={() => openWallet(acc.walletId!)} title="This account's wallet" className="rounded bg-info/15 px-1 text-[9px] font-semibold text-info">wallet</button>}
           </div>
           <div className="num text-[10px] text-dim">@{acc.handle} · {fmtCompact(acc.followers, '')} · {fmtAge((tick - p.tick) * SIM_SEC_PER_TICK)}</div>
@@ -411,6 +415,7 @@ function PostCard({ p }: { p: SocialPost }) {
       <p className="mt-1.5 whitespace-pre-line text-[12px] leading-snug text-ink/90">
         {parts.map((part, i) => (/^\$[A-Z0-9]+$/.test(part) ? <span key={i} className="font-semibold text-info">{part}</span> : <span key={i}>{part}</span>))}
       </p>
+      {p.sparkId && <div className="mt-2"><SparkChip id={p.sparkId} wide /></div>}
       {p.tokenId && (
         <div className="mt-2 flex items-center gap-2 rounded-md border border-line bg-bg px-2 py-1.5">
           <button disabled={!t} onClick={() => t && select(t.id)} className="flex min-w-0 items-center gap-1.5 hover:text-accent">

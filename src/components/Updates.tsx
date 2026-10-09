@@ -2,7 +2,7 @@
 // Opened from the scroll button in the top bar (a dot shows until the newest update has been opened), Help and
 // Settings.
 import { useEffect, useSyncExternalStore } from 'react'
-import { CLOSED, UPDATES, WORKING_ON, type Update } from '../data/changelog'
+import { CLOSED, shownUpdates, shownWork, type Update } from '../data/changelog'
 import { useFlags } from '../game/flags'
 import { useGame } from '../game/store'
 import { load, save } from '../utils/storage'
@@ -11,15 +11,16 @@ import { Modal } from './ui'
 // Whether the newest update has been opened, kept so the top bar's dot goes out the moment the window opens.
 const listeners = new Set<() => void>()
 const seenNow = () => load<string>('updatesSeen') ?? ''
-const markSeen = () => {
-  if (!UPDATES.length || seenNow() === UPDATES[0].id) return
-  save('updatesSeen', UPDATES[0].id)
+const markSeen = (newest?: string) => {
+  if (!newest || seenNow() === newest) return
+  save('updatesSeen', newest)
   listeners.forEach((f) => f())
 }
 /** Is there an update this player has not opened yet? */
 export function useUnseenUpdate() {
   const seen = useSyncExternalStore((f) => (listeners.add(f), () => listeners.delete(f)), seenNow)
-  return UPDATES.length > 0 && seen !== UPDATES[0].id
+  const newest = useFlags((s) => shownUpdates(s)[0]?.id)
+  return !!newest && seen !== newest
 }
 
 const PART: { key: 'fixed' | 'added' | 'changed'; label: string; cls: string }[] = [
@@ -52,7 +53,9 @@ function Entry({ u }: { u: Update }) {
 export function UpdatesModal() {
   const setModal = useGame((s) => s.setModal)
   const flags = useFlags()
-  useEffect(markSeen, [])
+  const updates = shownUpdates(flags)
+  const newest = updates[0]?.id
+  useEffect(() => markSeen(newest), [newest])
   const closed = CLOSED.filter((c) => !flags[c.flag])
   return (
     <Modal title="📜 Updates" onClose={() => setModal(null)} wide>
@@ -69,10 +72,10 @@ export function UpdatesModal() {
         <div className="rounded-lg border border-accent/40 bg-accent/5 p-3">
           <div className="text-[11px] font-bold uppercase tracking-wider text-accent">🛠 Working on now</div>
           <ul className="mt-1.5 space-y-2">
-            {WORKING_ON.map((w, i) => <li key={i}><b className="text-ink">{w.what}.</b>{w.why && <span className="text-muted"> {w.why}</span>}</li>)}
+            {shownWork(flags).map((w, i) => <li key={i}><b className="text-ink">{w.what}.</b>{w.why && <span className="text-muted"> {w.why}</span>}</li>)}
           </ul>
         </div>
-        {UPDATES.map((u) => <Entry key={u.id} u={u} />)}
+        {updates.map((u) => <Entry key={u.id} u={u} />)}
       </div>
     </Modal>
   )

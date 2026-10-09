@@ -101,6 +101,49 @@ export interface StoryState {
 }
 export type StoryArc = 'meme' | 'caller' | 'community' | 'builder' | 'whale'
 
+// ─── The story market: posts that coins get launched on (src/game/sparks.ts) ──
+/** How big the account behind a post is. It decides how many coins get launched on it and how far it can go. */
+export type SparkTier = 'anon' | 'small' | 'mid' | 'big' | 'mega'
+/** Who posted: an invented account. `verified` is the check mark next to its name. */
+export interface SparkBy {
+  id: string // what a player follows it by
+  name: string
+  handle: string
+  avatar: string
+  followers: number
+  verified: boolean
+}
+/**
+ * A spark: a post or a news item (invented) that devs launch coins on. This is the PUBLIC part, what anybody reading
+ * the timeline sees. Which name is the right one, whether the story goes anywhere and which coin the timeline will
+ * settle on are not in it (`SparkSim`, which never leaves the server).
+ */
+export interface Spark {
+  id: string
+  seq: number // bumped when it changes (rooms send sparks by this, like beats)
+  tick: number
+  time: number // market time it was posted
+  kind: 'meme' | 'news'
+  by: SparkBy
+  text: string
+  theme?: Narrative
+  picked?: { tokenId: string; ticker: string; time: number } // the coin the timeline settled on, said once it has happened
+  over?: number // market time the timeline moved on without settling on any coin
+}
+/** A spark's hidden side: what the simulation knows and a player has to work out. Never sent to a browser. */
+export interface SparkSim {
+  tier: SparkTier
+  name: string // the right name…
+  ticker: string // …and ticker, as the post has them
+  word: string // what the post is about ("horse"): a lazy dev names a coin after that instead
+  emoji: string
+  runs: boolean // does the timeline pick it up? Most posts go nowhere
+  power: number // luck: how far it goes if it does (1 = typical for an account this size)
+  decideAt: number // market time the timeline settles on one coin (or drops the story)
+  due: number[] // market times of the launches still to come
+  n: number // coins launched on it so far
+}
+
 /** Themes that are hot outside the game, and where that knowledge comes from (never presented as a live feed unless it is one). */
 export interface TrendFeed {
   // recorded = real launches the owner recorded (scripts/market-recorder); sample = a list shipped with the game;
@@ -205,6 +248,8 @@ export interface SocialPost {
   mcapAtPost?: number
   peakMcap?: number
   isCall: boolean
+  by?: SparkBy // a post by one of the story market's accounts (not in ACCOUNTS: who it is travels with the post)
+  sparkId?: string // …and the spark it is: coins were launched on this post
 }
 
 export interface WalletLabel {
@@ -420,6 +465,7 @@ export interface TokenSim {
   held?: number // coins in real wallets (players and bots), as of the last tick: the simulated crowd can't sell those
   baseTurnover: number
   flow?: FlowState // realistic engine only
+  watch?: number // a coin on a post the timeline has not settled yet: people keep an eye on it (the least attention it has, see sparks.ts)
 }
 
 export interface Token {
@@ -429,6 +475,7 @@ export interface Token {
   tax?: Tax // buy/sell tax (tax pads only)
   devTrades?: DevTrade[] // dev wallet buys/sells, newest first
   beats?: Beat[] // the coin's story feed and chart markers, newest first (see storyEngine)
+  spark?: { id: string; n: number } // the post it was launched on, and its place in the order of launches on that post (1 = first)
   win?: WinStats // rolling 1m / 5m / 24h volume and txns
   name: string
   ticker: string
@@ -601,6 +648,11 @@ export interface MarketState {
   trends?: TrendFeed // themes hot outside the game right now, with where they come from
   /** Events whose push on a coin is under way: they are announced at `at` (market time), when it has mostly played out. */
   lateEvents?: { at: number; e: Omit<MarketEvent, 'id' | 'tick' | 'time'> }[]
+  // The story market (see src/game/sparks.ts): recent posts that coins were launched on, newest first, and their hidden side.
+  sparks?: Spark[]
+  sparkSim?: Record<string, SparkSim> // never sent to a browser
+  nextSparkId?: number
+  sparkSeq?: number // sparks are numbered as they change, like beats
 }
 
 export type MarketEngine = 'classic' | 'realistic'
@@ -608,6 +660,7 @@ export type MarketEngine = 'classic' | 'realistic'
 export type EventKind =
   | 'trending' | 'whale' | 'momentum' | 'liquidity' | 'panic' | 'viral' | 'volatility'
   | 'smartmoney' | 'devsell' | 'kol' | 'graduation' | 'rug' | 'launch' | 'marketup' | 'marketdown' | 'meta' | 'cook' | 'bundle' | 'wash' | 'airdrop'
+  | 'spark' | 'sparkpick' // the story market: a post that coins get launched on, and the timeline settling on one of them
 
 export interface MarketEvent {
   id: number
@@ -621,6 +674,7 @@ export interface MarketEvent {
   tone: 'up' | 'down' | 'warn' | 'info'
   by?: string // multiplayer: the player whose action this was (their own browser already showed it)
   mcap?: number // the coin's market cap when it happened
+  sparkId?: string // the story market: the post this is about (a post, a coin launched on it, the timeline settling on one)
 }
 
 export interface Position {

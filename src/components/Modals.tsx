@@ -12,7 +12,7 @@ import { LobbyModal, WorldCard } from './Multiplayer'
 import { BugReportModal, IdeaModal } from './BugReport'
 import { UpdatesModal } from './Updates'
 import { TutorialButtons } from './Tutorial'
-import { cookingVisible, labsVisible } from '../game/flags'
+import { cookingVisible, labsVisible, sparksVisible } from '../game/flags'
 import { useFlags } from '../game/flags'
 import { useAccount } from '../net/account'
 import { INVITE_MINUTES, INVITE_REWARD, useInvites } from '../net/invites'
@@ -340,6 +340,7 @@ function HelpModal() {
           <DataSources />
           <p><span className="font-semibold text-ink">Trader types.</span> Besides its style, a wallet has a way of reacting to what a coin's feed says: narrative traders buy a story that is heating up and leave when it turns, FOMO buyers chase what already ran and give up fast, contrarians buy the fear and sell into hype, panic sellers dump on any bad news, swing traders buy dips in deep pools. A wallet's profile says which it is, and its trades say what they acted on. They read the same feed you do, a moment after you could.</p>
           <p><span className="font-semibold text-ink">Stories.</span> A coin's Story tab (and the pins on its chart) show what happened on it and what the price did in the minute after. Each line says where it comes from: <span className="text-info">MARKET</span> lines are facts read off the trades; <span className="text-[#8fd14f]">STORY</span> lines are generated, and every account, outlet and brand in them is invented; <span className="text-warn">OUTSIDE DATA</span> is a theme from real launches the game recorded, with its date. A post reaches you a few seconds after it was made, when the fastest wallets have already reacted, so it is not a signal to buy on. Most posts go nowhere, and a story can turn sour without notice.</p>
+          {sparksVisible() && <p><span className="font-semibold text-ink">Posts and their coins.</span> Posts and news from made-up accounts come in on the Social Tracker all day, and within seconds devs launch coins on them: some with the name exactly as the post has it, some misspelled, some somebody's own version. "Coins launched on this" under a post lists them in the order they came; the leaf on a card shows the post a coin came from. After a while the timeline settles on ONE of those coins and the crowd leaves the others for it, or it moves on and no coin is picked. Most posts go nowhere, and a big account's go much further than a small one's. Buying the first coin, the biggest or all of them does not pay. The right name with a clean risk tag is the better bet, and it still misses more often than it hits.</p>}
           <p><span className="font-semibold text-ink">Progress.</span> Earn XP from profitable trades, early discoveries, missions and milestones. Levels unlock themes and Hardcore mode.</p>
         </div>
         <div>

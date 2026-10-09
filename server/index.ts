@@ -141,6 +141,12 @@ if (persistOn) {
   const askCooking = () => void readFlag('cooking').then((on) => { if (on !== null) Room.playersCook = on })
   askCooking()
   setInterval(askCooking, 60_000).unref()
+  // The `sparks` switch the same way: the story market in the World and in rooms. (`STORY_MARKET=1` is for a test
+  // copy on a PC with no database to ask. Never set it on Render: the switch is the owner's.)
+  if (process.env.STORY_MARKET === '1') Room.storyMarket = true
+  const askStories = () => void readFlag('sparks').then((on) => { if (on !== null) Room.storyMarket = on })
+  askStories()
+  setInterval(askStories, 60_000).unref()
   // Backups are daily. Whether one is due is asked two minutes after the World has loaded and every ten minutes
   // after that, not on a long timer: on Render's free plan the server rarely stays awake a whole hour. Skipped while
   // the database is struggling: a backup is a big write.

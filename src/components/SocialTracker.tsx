@@ -8,16 +8,21 @@ import { playerAuthor, socialNow, useGame } from '../game/store'
 import type { SocialPost } from '../types'
 import { fmtAge, fmtCompact } from '../utils/format'
 import { EmptyState, Pct, TokenIcon } from './ui'
+import { SparkChip, VerifiedMark } from './SparkPanel'
 
 const byId = new Map(ACCOUNTS.map((a) => [a.id, a]))
 
-/** Who wrote a post: one of the simulated accounts, or a real player (you or someone in your room). */
+/**
+ * Who wrote a post: one of the simulated accounts, a real player (you or someone in your room), or an account of the
+ * story market (invented like the rest; who it is travels with its post, and `verified` is its check mark).
+ */
 export function postAccount(p: SocialPost) {
   if (p.accountId === 'player' && p.author) {
-    return { id: `player:${p.author.pid ?? p.author.handle}`, platform: 'x' as const, name: p.author.name, handle: p.author.handle, avatar: p.author.avatar, followers: p.author.followers, player: true, kol: p.author.followers >= KOL_FOLLOWERS }
+    return { id: `player:${p.author.pid ?? p.author.handle}`, platform: 'x' as const, name: p.author.name, handle: p.author.handle, avatar: p.author.avatar, followers: p.author.followers, player: true, kol: p.author.followers >= KOL_FOLLOWERS, verified: false }
   }
+  if (p.by) return { id: p.by.id, platform: 'x' as const, name: p.by.name, handle: p.by.handle, avatar: p.by.avatar, followers: p.by.followers, player: false, kol: false, verified: p.by.verified }
   const a = byId.get(p.accountId)
-  return a ? { ...a, player: false, kol: a.kind === 'kol' } : undefined
+  return a ? { ...a, player: false, kol: a.kind === 'kol', verified: false } : undefined
 }
 
 /** Likes, retweets, how many aped, and a couple of replies (player posts). */
@@ -162,6 +167,7 @@ function Row({ p }: { p: SocialPost }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-[11px]">
           <span className="font-bold">{acc.name}</span>
+          {acc.verified && <VerifiedMark />}
           {you && <span className="rounded bg-accent/15 px-1 text-[9px] font-bold text-accent">YOU</span>}
           {acc.player && !you && <span className="rounded bg-info/15 px-1 text-[9px] font-bold text-info">PLAYER</span>}
           <span className="text-dim">@{acc.handle}</span>
@@ -172,6 +178,7 @@ function Row({ p }: { p: SocialPost }) {
         <p className="truncate text-[11px] text-ink/90" title={p.text}>{p.text.replace(/\n/g, ' ')}</p>
         <Engagement p={p} />
       </div>
+      {p.sparkId && <span className="shrink-0 self-center"><SparkChip id={p.sparkId} /></span>}
       {p.tokenId && (
         <button disabled={!t} onClick={() => t && select(t.id)} className="flex shrink-0 items-center gap-1.5 self-center rounded-md border border-line bg-bg px-1.5 py-1 text-[11px] hover:border-accent/50">
           {t ? <TokenIcon token={t} size={16} /> : <span>❔</span>}

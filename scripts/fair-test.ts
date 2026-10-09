@@ -3,6 +3,7 @@
 //   npx tsx scripts/fair-test.ts sum a.json b.json …                               several runs added up
 //   npx tsx scripts/fair-test.ts classic [ticks=12000] [seed=4242]                 the classic engine (solo play's default) on its own
 //   FAIR_REPO=<another copy of the game> npx tsx scripts/fair-test.ts …            measure that copy instead (read only)
+//   STORY_MARKET=1 npx tsx scripts/fair-test.ts …                                  the same rules with the story market on (most launches come from posts)
 // A paper trader puts $100 (fees included, at what the curve / pool really gives) on simple rules anybody could
 // follow with no skill: a coin crossing a line on its curve, a coin whose price is running (on a curve or in a pool),
 // a KOL's call, a "trending" event, a coin that has just bonded, a coin that has just crashed, a bot chef's launch. For each rule: how often the coin went on to bond next to the odds its price
@@ -19,6 +20,9 @@ import type { MarketState, Token } from '../src/types'
 const REPO = process.env.FAIR_REPO ?? resolve(import.meta.dirname, '..')
 const load = (p: string) => import(pathToFileURL(join(REPO, p)).href)
 const { Room } = (await load('server/room.ts')) as typeof import('../server/room')
+// The story market is the owner's switch (off until he turns it on): the rules are measured with it on by asking.
+// What reading a post earns has its own test with real orders (scripts/post-test.ts).
+if (process.env.STORY_MARKET === '1' && 'storyMarket' in Room) Room.storyMarket = true
 const { gradPriceNative, startPriceNative } = (await load('src/game/curve.ts')) as typeof import('../src/game/curve')
 const { LAUNCHPADS } = (await load('src/data/launchpads.ts')) as typeof import('../src/data/launchpads')
 const { quoteBuy, quoteSell, createMarket, setClock, secPerTickOf, tickMarket } = (await load('src/game/marketEngine.ts')) as typeof import('../src/game/marketEngine')

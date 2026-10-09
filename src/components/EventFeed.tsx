@@ -35,6 +35,8 @@ const KIND: Record<EventKind, { label: string; cat: Category; color: string }> =
   airdrop: { label: 'Airdrop', cat: 'launch', color: '#b36bff' },
   kol: { label: 'KOL', cat: 'social', color: '#4da3ff' },
   meta: { label: 'Meta', cat: 'social', color: '#8b93a1' },
+  spark: { label: 'Post', cat: 'social', color: '#4da3ff' },
+  sparkpick: { label: 'Picked', cat: 'social', color: '#c6ff3d' },
 }
 const CATS: { id: 'all' | 'mine' | Category; label: string }[] = [
   { id: 'all', label: 'All' },

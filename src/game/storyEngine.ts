@@ -129,6 +129,10 @@ export function tickStories(m: MarketState, input: StoryInput): NewBeat[] {
     return by
   }
   const eventsOf = group(input.events)
+  // The story market (see sparks.ts): posts the timeline settled this tick, one way or the other.
+  const settled = new Map<string, MarketEvent>()
+  for (const e of input.events) if (e.kind === 'sparkpick' && e.sparkId) settled.set(e.sparkId, e)
+  const sparkOf = new Map((m.sparks ?? []).map((x) => [x.id, x]))
   const actionsOf = group(input.actions)
   const postsOf = group(input.posts)
   // Trades are read once: everything on the tapes since the last tick (a player's or a bot's order between ticks too).
@@ -220,6 +224,15 @@ export function tickStories(m: MarketState, input: StoryInput): NewBeat[] {
           push(t, { kind: 'milestone', tone: 'up', src: 'market', text: `Crossed ${fmtCompact(MILESTONES[reached])} market cap`, ...why(t) })
         }
       }
+      // A coin launched on a post: what the timeline did with that post, as a fact of this market (the crowd's trades).
+      const end = t.spark ? settled.get(t.spark.id) : undefined
+      if (end && live(t)) {
+        const who = sparkOf.get(t.spark!.id)?.by.handle
+        const post = who ? `@${who}'s post` : 'the post it was launched on'
+        if (end.tokenId === t.id) push(t, { kind: 'milestone', tone: 'up', src: 'market', text: `The timeline settled on this coin for ${post}: the crowd left the other coins on it` })
+        else if (end.tokenId) push(t, { kind: 'fade', tone: 'down', src: 'market', text: `The timeline went with $${end.ticker} for ${post}: the crowd left this coin` })
+        else push(t, { kind: 'fade', tone: 'info', src: 'market', text: `The timeline moved on from ${post} without settling on a coin` })
+      }
       for (const e of eventsOf.get(t.id) ?? []) {
         if (e.kind === 'graduation') push(t, { kind: 'milestone', tone: 'up', src: 'market', text: `Bonded: migrated to ${LAUNCHPADS[t.pad].dex} at ${fmtCompact(t.mcap)}` })
         else if (e.kind === 'devsell' && due(t, 'dev')) push(t, { kind: 'dev', tone: 'down', src: 'market', text: e.text.replace(`$${t.ticker} `, '').replace(/^dev /, 'The dev '), by: { name: 'Dev wallet', avatar: DEV } })
@@ -244,7 +257,9 @@ export function tickStories(m: MarketState, input: StoryInput): NewBeat[] {
         // What the market does from here is traced back to it (and the next development looks at how it was taken).
         if (t.sim.story && p.label) t.sim.story = { ...t.sim.story, last: { time: p.time, price: p.price, label: p.label } }
       }
-      if (!waiting.has(t.id)) stepStory(t, m, rng, later, queue, sec)
+      // (A coin on a post has that post for a story. One of its own can start once the timeline has settled on it.)
+      const onPost = t.spark ? t.sim.watch !== undefined || sparkOf.get(t.spark.id)?.picked?.tokenId !== t.id : false
+      if (!waiting.has(t.id) && !onPost) stepStory(t, m, rng, later, queue, sec)
     }
 
     // ─── What the price did next ───────────────────────────────────────────

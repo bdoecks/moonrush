@@ -12,6 +12,7 @@ import { fmtAge, fmtCompact, fmtUsd } from '../../utils/format'
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
 import { Composer, Engagement, postAccount } from '../SocialTracker'
+import { SparkChip, VerifiedMark } from '../SparkPanel'
 import { openRow, useFriendRows, type TrackerRow } from './friendRows'
 import { useOpenPlayer } from '../PlayerCard'
 import { GroupMenu, NewGroupButton } from './groups'
@@ -309,18 +310,24 @@ function WalletRow({ w, tr, friend, groupable }: { w: SimWallet; tr: WalletTrade
 // ─── Social tracker ──────────────────────────────────────────────────────────
 
 type SocialScope = 'x' | 'tg' | 'following' | 'live'
+const BIG_ACCOUNT = 500_000 // followers: the "Big accounts only" filter
 
 function SocialSection() {
   const feed = useGame((s) => s.socialFeed)
   const followed = useGame((s) => s.followedAccounts)
   const [scope, setScope] = useState<SocialScope>('x')
   const [onlyCA, setOnlyCA] = useState(false)
+  const [onlyBig, setOnlyBig] = useState(false)
+  // (The huge accounts are the story market's: without its posts there is nothing that big to filter for.)
+  const stories = feed.some((p) => !!p.sparkId)
   const liveFeed = useLiveFeed()
   const posts = scope === 'live' ? [] : feed.filter((p) => {
     const acc = postAccount(p)
     if (!acc) return false
     if (scope === 'following' ? !followed.includes(acc.id) && !acc.player : acc.platform !== scope) return false
-    return !onlyCA || !!p.tokenId
+    if (stories && onlyBig && acc.followers < BIG_ACCOUNT && !acc.player) return false
+    // (A post that coins were launched on is a post with coins.)
+    return !onlyCA || !!p.tokenId || !!p.sparkId
   })
   return (
     <>
@@ -331,9 +338,10 @@ function SocialSection() {
         { value: 'live', label: <><Radio size={10} className={liveFeed.status === 'live' ? 'text-up' : undefined} /> Live X</> },
       ]} />
       {scope !== 'live' && (
-        <label className="flex shrink-0 cursor-pointer items-center gap-1 border-b border-line/40 px-2 py-1 text-[10px] text-dim">
-          <input type="checkbox" checked={onlyCA} onChange={(e) => setOnlyCA(e.target.checked)} className="accent-[var(--accent)]" /> Only posts with a coin
-        </label>
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 border-b border-line/40 px-2 py-1 text-[10px] text-dim">
+          <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={onlyCA} onChange={(e) => setOnlyCA(e.target.checked)} className="accent-[var(--accent)]" /> Only posts with a coin</label>
+          {stories && <label className="flex cursor-pointer items-center gap-1" title="Only accounts with 500K followers or more: a big account's post moves far more than a small one's"><input type="checkbox" checked={onlyBig} onChange={(e) => setOnlyBig(e.target.checked)} className="accent-[var(--accent)]" /> Big accounts only</label>}
+        </div>
       )}
       {scope !== 'live' && scope !== 'tg' && <Composer />}
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -361,6 +369,7 @@ function PostRow({ p }: { p: SocialPost }) {
         <div className="min-w-0 flex-1 leading-tight">
           <div className="flex items-center gap-1 truncate text-[11px] font-bold">
             {acc.name}
+            {acc.verified && <VerifiedMark />}
             {you && <span className="rounded bg-accent/15 px-1 text-[9px] text-accent">YOU</span>}
             {acc.player && !you && <span className="rounded bg-info/15 px-1 text-[9px] text-info">PLAYER</span>}
             {acc.player && acc.kol && <span className="rounded bg-warn/15 px-1 text-[9px] text-warn">KOL</span>}
@@ -383,6 +392,7 @@ function PostRow({ p }: { p: SocialPost }) {
           {t && <span className="ml-auto"><QuickBuyButton t={t} className="h-5 px-1.5 text-[10px]" /></span>}
         </div>
       )}
+      {p.sparkId && <div className="mt-1.5"><SparkChip id={p.sparkId} wide /></div>}
       <Engagement p={p} />
     </div>
   )

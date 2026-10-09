@@ -3,6 +3,9 @@ import { Room } from '../server/room'
 import { candleStore } from '../src/game/marketEngine'
 import { WORLD_CODE } from '../src/net/protocol'
 
+// (STORY_MARKET=1: the same with the story market on, as it is once the owner's switch is.)
+if (process.env.STORY_MARKET === '1') Room.storyMarket = true
+
 const hours = Number(process.argv[2] ?? 6)
 const world = new Room(WORLD_CODE, true)
 const w = world as unknown as { tick(): void; market: { tokens: { status: string; mcap: number; ticker: string }[] } }

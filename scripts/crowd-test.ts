@@ -10,6 +10,9 @@ import { valuePortfolio } from '../src/game/portfolioEngine'
 import { SAFE_THEMES } from '../server/trendThemes'
 import { nameBlocked } from '../server/moderation'
 
+// (STORY_MARKET=1: the same with the story market on, as it is once the owner's switch is.)
+if (process.env.STORY_MARKET === '1') Room.storyMarket = true
+
 const hours = Number(process.argv[2] ?? 3)
 const ok = (cond: boolean, what: string) => console.log(`${cond ? 'PASS' : 'FAIL'} ${what}`)
 type W = { cash: number; startBalance: number; trades: { side: string; tokenId: string; time: number; value: number }[]; accounts?: { balances: Record<string, number>; positions: Record<string, { qty: number }> }[] }

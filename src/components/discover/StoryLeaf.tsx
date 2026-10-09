@@ -1,6 +1,7 @@
 // The leaf on a Trenches card: hover it (tap it on a phone) to read what a coin is about before opening it. Its
 // theme, what it says about itself, and the latest lines of its story feed, each marked with where it comes from, as
 // on the coin page's Story tab. Green while the coin has a story running, grey when nobody is talking about it.
+// A coin that was launched on a post (the story market, see game/sparks.ts) shows that post first.
 import clsx from 'clsx'
 import { Leaf } from 'lucide-react'
 import { useState, type MouseEvent } from 'react'
@@ -11,17 +12,24 @@ import { useGame } from '../../game/store'
 import type { Token } from '../../types'
 import { fmtAge } from '../../utils/format'
 import { ARC_LABEL, BEAT_ICON, SRC_META } from '../token/beatMeta'
+import { SparkSource } from '../SparkPanel'
 
 const W = 280
 export function StoryLeaf({ t, now }: { t: Token; now: number }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null)
   const meta = useGame((s) => s.market.meta)
-  const live = storyLive(t, now)
+  const openSpark = useGame((s) => s.openSpark)
+  // (With a mouse the leaf is read by hovering, so a click is free to do more: it opens the post's coins. On a
+  // touch screen a tap is the only way to read it.)
+  const mouse = typeof window !== 'undefined' && !!window.matchMedia?.('(hover: hover)').matches
+  // (A coin launched on a post in the last ten minutes: that post is its story.)
+  const live = storyLive(t, now) || (!!t.spark && now - t.createdAt < 600)
+  const tall = t.spark ? 360 : 220
   const open = (e: MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
     // Beside the leaf, kept on screen: below it when there is room, above it when there is not.
     const x = Math.min(Math.max(8, r.left - 12), window.innerWidth - W - 8)
-    setAt({ x, y: r.bottom + 6 > window.innerHeight - 220 ? Math.max(8, r.top - 226) : r.bottom + 6 })
+    setAt({ x, y: r.bottom + 6 > window.innerHeight - tall ? Math.max(8, r.top - tall - 6) : r.bottom + 6 })
   }
   const theme = NARRATIVES.find((n) => n.id === t.narrative)
   const lines = at ? storyLines(t) : []
@@ -31,7 +39,14 @@ export function StoryLeaf({ t, now }: { t: Token; now: number }) {
       <button
         type="button" aria-label={`What $${t.ticker} is about`} aria-expanded={!!at}
         onMouseEnter={open} onMouseLeave={() => setAt(null)} onBlur={() => setAt(null)}
-        onClick={(e) => { e.stopPropagation(); if (at) setAt(null); else open(e) }}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (t.spark && mouse) {
+            setAt(null)
+            openSpark(t.spark.id)
+          } else if (at) setAt(null)
+          else open(e)
+        }}
         className={clsx('flex shrink-0 items-center', live ? 'text-[#8fd14f]' : 'text-dim hover:text-muted')}
       >
         <Leaf size={11} />
@@ -43,6 +58,7 @@ export function StoryLeaf({ t, now }: { t: Token; now: number }) {
             <span className="min-w-0 truncate text-dim">{t.name}</span>
             {theme && <span className={clsx('ml-auto shrink-0 rounded border px-1 text-[10px] font-semibold', t.narrative === meta ? 'border-warn/50 text-warn' : 'border-line2 text-muted')}>{theme.icon} {theme.label}{t.narrative === meta ? ' · the meta' : ''}</span>}
           </div>
+          {t.spark && <div className="mt-1.5"><SparkSource t={t} now={now} /></div>}
           {t.description && <p className="mt-1.5 text-muted">“{t.description}”</p>}
           {arc && <div className="mt-1.5 font-semibold text-[#8fd14f]">{ARC_LABEL[arc]}</div>}
           {lines.length ? (
@@ -57,8 +73,9 @@ export function StoryLeaf({ t, now }: { t: Token; now: number }) {
               ))}
             </ul>
           ) : (
-            <p className="mt-1.5 text-dim">No story yet: nobody is talking about this coin.</p>
+            !t.spark && <p className="mt-1.5 text-dim">No story yet: nobody is talking about this coin.</p>
           )}
+          {t.spark && mouse && <p className="mt-1.5 text-[10px] font-semibold text-info">Click the leaf to see every coin launched on this post.</p>}
           <p className="mt-1.5 border-t border-line pt-1 text-[9px] text-dim">Story lines are generated and their accounts are invented. A line shows a few seconds after it was posted: its fastest readers are already in.</p>
         </div>,
         document.body,

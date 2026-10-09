@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { SocialProfile, CashbackState, SniperTask, Trade, VolumeBot, Chain, Challenge, CookSpec, CopyConfig, GameMode, LaunchRecord, MarketEvent, MarketState, Player, Portfolio, Profile, RunStatus, Settings, PriceAlert, RewardClaim, RewardsState, SimWallet, SocialPost, Toast, Token, TrackerSettings, WalletAction, WalletActionKind, WalletLabel } from '../types'
 import { clamp, Rng } from '../utils/rng'
-import { cookingVisible, labsVisible, useFlags } from './flags'
+import { cookingVisible, labsVisible, sparksVisible, useFlags } from './flags'
 import { restoreCharts, saveCharts } from './chartSave'
 import { fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { fakeAddress } from '../utils/address'
@@ -255,6 +255,7 @@ export interface GameState {
   sheetOpen: boolean
   instantOpen: boolean
   walletDrawer: string | null
+  sparkOpen: string | null // the story market: the post whose panel is open (its coins, in the order they were launched)
   chainFilter: 'all' | Chain
   swapOpen: boolean
   walletsOpen: boolean
@@ -308,6 +309,7 @@ export interface GameState {
   /** Give part of your dev bag away to `wallets` recipients (existing holders or fresh wallets). */
   airdrop: (tokenId: string, pct: number, wallets: number, target: AirdropTarget) => boolean
   openWallet: (walletId: string | null) => void
+  openSpark: (sparkId: string | null) => void
   toggleFollowAccount: (accountId: string) => void
   setWalletLabel: (walletId: string, patch: Partial<WalletLabel>) => void
   updateTracker: (patch: Partial<TrackerSettings>) => void
@@ -944,7 +946,7 @@ export const useGame = create<GameState>()((set, get) => {
     // it bought itself (see sellRoom in the market engine).
     const mine = new Map(Object.entries(s.portfolio.positions).map(([id, p]) => [id, p.qty]))
     for (const w of s.wallets) for (const [id, p] of Object.entries(w.positions)) mine.set(id, (mine.get(id) ?? 0) + p.qty)
-    const { market, events: e1 } = tickMarket(s.market, rng, { rugMult: MODES[s.mode].rugMult, protectedIds, held: mine })
+    const { market, events: e1 } = tickMarket(s.market, rng, { rugMult: MODES[s.mode].rugMult, protectedIds, held: mine, sparks: sparksVisible() ?? Object.keys(s.market.sparkSim ?? {}).length > 0 }) // (switches not read yet: a story market that was running goes on)
     const e2 = rollEvents(market, rng)
     const wr = tickWallets(s.wallets, market, rng)
     const newPosts = tickSocial(market, rng, wr.actions, [...e1, ...e2])
@@ -1049,6 +1051,7 @@ export const useGame = create<GameState>()((set, get) => {
     sheetOpen: false,
     instantOpen: load<boolean>('instantOpen') ?? false,
     walletDrawer: null,
+    sparkOpen: null,
     chainFilter: load<'all' | Chain>('chainFilter') ?? 'all',
     swapOpen: false,
     walletsOpen: false,
@@ -1193,11 +1196,11 @@ export const useGame = create<GameState>()((set, get) => {
       const followedPost = newPosts.find((p) => s.followedAccounts.includes(callerKey(p)) && !(p.accountId === 'player' && p.author?.pid === s.online?.you))
       if (followedPost) {
         const acc = ACCOUNTS.find((x) => x.id === followedPost.accountId)
-        const handle = acc?.handle ?? followedPost.author?.handle ?? 'player'
+        const handle = acc?.handle ?? followedPost.by?.handle ?? followedPost.author?.handle ?? 'player'
         if (followedPost.isCall && followedPost.tokenId) {
           // Callout Tracker alert: a caller you follow just called a coin (with quick-buy on the toast).
           s.notify({ title: 'CALLOUT', body: `@${handle} called $${followedPost.ticker} at ${fmtCompact(followedPost.mcapAtPost ?? 0)} MC`, tone: 'info', icon: acc?.avatar ?? followedPost.author?.avatar ?? '📣', tokenId: followedPost.tokenId }, 'alert')
-        } else s.notify({ title: acc?.platform === 'tg' ? 'TG POST' : 'NEW POST', body: `@${handle}: ${followedPost.text.split('\n')[0]}`, tone: 'info', icon: acc?.avatar ?? '📣' }, 'alert')
+        } else s.notify({ title: acc?.platform === 'tg' ? 'TG POST' : 'NEW POST', body: `@${handle}: ${followedPost.text.split('\n')[0]}`, tone: 'info', icon: acc?.avatar ?? followedPost.by?.avatar ?? '📣' }, 'alert')
       }
       // Price alerts (one-shot).
       const fired: PriceAlert[] = []
@@ -2169,8 +2172,9 @@ export const useGame = create<GameState>()((set, get) => {
       const s = get()
       const on = !s.followedAccounts.includes(accountId)
       set({ followedAccounts: on ? [...s.followedAccounts, accountId] : s.followedAccounts.filter((x) => x !== accountId) })
-      const acc = ACCOUNTS.find((a) => a.id === accountId)
-      s.notify({ title: on ? 'FOLLOWING' : 'UNFOLLOWED', body: `@${acc?.handle}${on ? ' · their posts show in Mine and ping you' : ''}`, tone: 'info', icon: acc?.avatar ?? '📣' }, 'click')
+      // (An account of the story market is known by the posts it made: see `SocialPost.by`.)
+      const acc = ACCOUNTS.find((a) => a.id === accountId) ?? s.socialFeed.find((p) => p.by?.id === accountId)?.by
+      s.notify({ title: on ? 'FOLLOWING' : 'UNFOLLOWED', body: `${acc ? `@${acc.handle}` : 'That account'}${on ? ' · their posts show under Following and ping you' : ''}`, tone: 'info', icon: acc?.avatar ?? '📣' }, 'click')
       persist()
     },
     setWalletLabel: (walletId, patch) => {
@@ -2198,6 +2202,7 @@ export const useGame = create<GameState>()((set, get) => {
       persist()
     },
     openWallet: (walletId) => set(walletId ? { walletDrawer: walletId, view: 'copytrade' } : { walletDrawer: null }),
+    openSpark: (sparkId) => set({ sparkOpen: sparkId }),
     toggleTrackWallet: (walletId) => {
       const s = get()
       const on = !s.trackedWallets.includes(walletId)

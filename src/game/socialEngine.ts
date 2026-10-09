@@ -2,6 +2,7 @@ import { CHAINS } from '../data/chains'
 import { WALLET_SEEDS } from '../data/wallets'
 import type { MarketEvent, MarketState, SocialAccount, SocialPost, SocialProfile, Token, WalletAction } from '../types'
 import { walletName } from './marketEngine'
+import { sparkLine } from './sparks'
 import { fakeAddress } from '../utils/address'
 import { fmtCompact } from '../utils/format'
 import { type Rng } from '../utils/rng'
@@ -260,6 +261,14 @@ export function tickSocial(m: MarketState, rng: Rng, actions: WalletAction[], ev
 
   // News accounts cover notable events.
   for (const e of events) {
+    // The story market (see sparks.ts): a post that coins get launched on is on the timeline as itself, from the
+    // account that made it. (No dice here: with the story market off the market's random numbers are untouched.)
+    if (e.kind === 'spark') {
+      const s = m.sparks?.find((x) => x.id === e.sparkId)
+      if (s) posts.push({ id: m.tick * 1000 + 700 + posts.length, tick: m.tick, time: m.time, ...sparkLine(s) })
+      continue
+    }
+    if (e.kind === 'sparkpick') continue
     const t = e.tokenId ? byId.get(e.tokenId) : undefined
     if (!rng.chance(e.kind === 'rug' || e.kind === 'graduation' ? 0.8 : 0.35)) continue
     switch (e.kind) {

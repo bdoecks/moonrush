@@ -194,6 +194,7 @@ export class Room {
   private lastBotChat = -999 // tick of the last bot chat line (the crowd doesn't all talk at once)
   private botActions: WalletAction[] = [] // the bots' trades of the last tick (for the story engine)
   private lastBeatSeq = 0 // beats already sent to browsers (see tickMarketDiff)
+  private lastSparkSeq = 0 // …and the story market's posts (new ones and changed ones go out, by `seq`)
   private freshTape = new Map<string, TapeTrade[]>() // World: this tick's new trades per coin, for the players who have that coin open
   private sentTrends: unknown = null // the trend list browsers have (it goes out again only when the source hands over a new one)
   private botReply: { at: number; text: string } | null = null // a bot's answer to a real player, a few seconds later
@@ -243,6 +244,11 @@ export class Room {
   static onTick: ((room: Room, ms: number, error?: unknown) => void) | null = null
   /** The owner's `cooking` switch as the server last read it (see server/index.ts). Without a database: on. */
   static playersCook = true
+  /**
+   * The owner's `sparks` switch as the server last read it: the story market (posts that coins get launched on, see
+   * src/game/sparks.ts) in every room on the real-time engine, the World first of all. Without a database: off.
+   */
+  static storyMarket = false
 
   dispose() {
     Room.all.delete(this)
@@ -1045,7 +1051,7 @@ export class Room {
     const held = new Map<string, number>()
     for (const m of this.members.values()) for (const [id, p] of Object.entries(m.wallet?.positions ?? {})) held.set(id, (held.get(id) ?? 0) + p.qty)
     for (const w of this.wallets) if (!w.bot) for (const [id, p] of Object.entries(w.positions)) held.set(id, (held.get(id) ?? 0) + p.qty) // (a bot's public wallet mirrors its own)
-    const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds, held })
+    const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds, held, sparks: Room.storyMarket })
     // The crowd talks about what just happened: a coin that bonded, a dev that dumped.
     for (const e of e1) {
       if (e.kind === 'graduation' && e.ticker) this.react('grad', e.ticker, 0.45, [2, 8])
@@ -1232,8 +1238,9 @@ export class Room {
     let max = this.lastTapeId
     for (const t of this.market.tokens) for (const e of t.tape) if (e.id > max) max = e.id
     // (Not the engine's queues: orders and story beats that have not happened yet are nobody's to read.)
-    const { shillQueue: _q, beatQueue: _b, beatTape: _t, lateEvents: _l, ...all } = this.market
-    void _q, void _b, void _t, void _l
+    // (Nor the story market's hidden side, in any room: which posts will run and which name is the right one.)
+    const { shillQueue: _q, beatQueue: _b, beatTape: _t, lateEvents: _l, sparkSim: _s, ...all } = this.market
+    void _q, void _b, void _t, void _l, void _s
     // (World: nor a coin's hidden state, nor the dice.)
     const open = this.world ? { ...all, seed: 0, tokens: all.tokens.map((t) => ({ ...t, sim: WIRE_SIM })) } : all
     return round(open) as NetMarket
@@ -1299,12 +1306,15 @@ export class Room {
     this.lastBeatSeq = this.market.nextBeatId ?? 0
     // The market's own header goes out every tick: not the queues, and not the trend list (it is in the welcome, and
     // again only when the data source hands over a new one: a provider refreshed, or went out of date).
-    const { tokens: _all, shillQueue: _q, beatQueue: _b, beatTape: _t, trends: _tr, lateEvents: _l, ...rest } = this.market
-    void _all, void _q, void _b, void _t, void _l
+    // The story market's posts go out like beats: the new ones and the changed ones. Their hidden side never does.
+    const { tokens: _all, shillQueue: _q, beatQueue: _b, beatTape: _t, trends: _tr, lateEvents: _l, sparks: _sp, sparkSim: _ss, ...rest } = this.market
+    void _all, void _q, void _b, void _t, void _l, void _ss
+    const sparks = _sp?.filter((s) => s.seq > this.lastSparkSeq)
+    this.lastSparkSeq = this.market.sparkSeq ?? 0
     const fresh = _tr && this.sentTrends !== null && _tr !== this.sentTrends ? { trends: _tr } : {}
     this.sentTrends = _tr ?? this.sentTrends ?? null
     // (World: the market's dice stay on the server too.)
-    return { ...(round(rest) as Omit<NetMarket, 'tokens'>), ...(this.world ? { seed: 0 } : {}), ...fresh, tokens }
+    return { ...(round(rest) as Omit<NetMarket, 'tokens'>), ...(this.world ? { seed: 0 } : {}), ...fresh, ...(sparks?.length ? { sparks } : {}), tokens }
   }
 
   /** Only wallets that changed (a trade, a position) go out; `trades` carries just the new ones. */

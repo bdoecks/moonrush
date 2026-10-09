@@ -6,6 +6,9 @@ import { candleStore, rebuildCandles, SUPPLY } from '../src/game/marketEngine'
 import { WORLD_CODE, type ServerMsg } from '../src/net/protocol'
 import type { MarketState, TapeTrade } from '../src/types'
 
+// (STORY_MARKET=1: the same with the story market on, as it is once the owner's switch is.)
+if (process.env.STORY_MARKET === '1') Room.storyMarket = true
+
 const minutes = Number(process.argv[2] ?? 10)
 const warm = Number(process.argv[3] ?? 30)
 let failed = 0
@@ -24,7 +27,7 @@ const b: Box = { msgs: [], bytes: 0 }
 world.join(sock(a), { t: 'hello', name: 'Looker', avatar: '🐸', level: 1, playerId: 'u-look', verified: true })
 world.join(sock(b), { t: 'hello', name: 'Idler', avatar: '🦉', level: 1, playerId: 'u-idle', verified: true })
 const welcome = a.msgs.find((m) => m.t === 'welcome') as Extract<ServerMsg, { t: 'welcome' }>
-ok(!!welcome && welcome.market.seed === 0 && welcome.market.tokens.every((t) => JSON.stringify(t.sim) === '{"archetype":"chaotic"}'), "the welcome carries no coin's hidden state (every coin shows the same stand-in) and not the market's dice")
+ok(!!welcome && welcome.market.seed === 0 && !('sparkSim' in welcome.market) && welcome.market.tokens.every((t) => JSON.stringify(t.sim) === '{"archetype":"chaotic"}'), "the welcome carries no coin's hidden state (every coin shows the same stand-in), not the market's dice, and no post's hidden side")
 
 // A joining browser sketches every coin's chart from the welcome until the real one is fetched: with the hidden state
 // held back that sketch must still work. (Stripping it bare once crashed the join.)
@@ -63,7 +66,7 @@ for (let i = 0; i < n; i++) {
     } else if (m.t === 'tick') {
       ticks++
       points += Object.keys(m.points).length
-      if ('seed' in m.market && (m.market as { seed?: number }).seed) hidden++
+      if (('seed' in m.market && (m.market as { seed?: number }).seed) || 'sparkSim' in m.market) hidden++
       for (const d of m.market.tokens) {
         anon += (d.tape ?? []).filter((e) => !e.pid && !e.addr).length
         if (d.sim && JSON.stringify(d.sim) !== '{"archetype":"chaotic"}') simSent++

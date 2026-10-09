@@ -4,9 +4,12 @@
 // HOW TO KEEP IT: every push a player could notice adds an entry at the TOP of `UPDATES`, in plain words a player
 // would use (no code names). Say what was wrong and that it is fixed; do not explain how a money bug was done.
 // `id` must be new each time (the game shows a dot until a player has opened the newest one).
+// Something behind one of the owner's switches is news only once that switch is on: give its entry the switch's
+// name as `flag` (and the same as `until` on its "working on" line, which then leaves that list).
 
 export interface Update {
   id: string
+  flag?: 'sparks' // told only while this switch is on (see the top of the file)
   date: string // as shown, e.g. "October 8, 2026"
   title: string
   fixed?: string[]
@@ -15,7 +18,8 @@ export interface Update {
 }
 
 /** What is being worked on now, newest plans first. */
-export const WORKING_ON: { what: string; why?: string }[] = [
+export const WORKING_ON: { what: string; why?: string; until?: 'sparks' }[] = [
+  { until: 'sparks', what: 'Coins that come from a story', why: 'A post or a news item appears on the timeline, devs rush to launch coins on it, and you work out which coin is the real one. It is being tested before it opens to everyone.' },
   { what: 'Cooking (launching your own coin)', why: 'It is being rebuilt so that launching a coin is a real bet, not a way to print money.' },
   { what: 'CopyTrade, Sniper and Monitor', why: 'They work, but not well enough yet. They come back when they are worth using.' },
   { what: 'Real pictures for coins', why: 'So the market looks less like emoji and more like the real thing.' },
@@ -29,6 +33,22 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 
 /** Newest first. */
 export const UPDATES: Update[] = [
+  {
+    id: '2026-10-09-story-market',
+    flag: 'sparks',
+    date: 'October 2026',
+    title: 'Coins now come from stories',
+    added: [
+      'Posts and news come in on the Social Tracker all day, from made-up accounts of every size. Within seconds devs launch coins on them. Most new coins now come from a post.',
+      'Under a post, "coins launched on this" opens every coin that was launched on it, in the order they came, each with its risk tag.',
+      'The leaf on a Trenches card and the Story tab on a coin show the post that coin was launched on.',
+      'Read the post, then the coins. Some have the name exactly right, some are misspelled, some are somebody\'s own version. After a while the timeline settles on ONE coin and the crowd leaves the others for it, or it moves on and no coin is picked.',
+      'A big account\'s post brings more coins and moves far more money than a small one\'s. Most posts go nowhere.',
+    ],
+    changed: [
+      'Buying the first coin, the biggest coin or every coin on a post does not pay. The right name with a clean risk tag is the better bet, and even that one misses more often than it hits.',
+    ],
+  },
   {
     id: '2026-10-08-floating-trackers',
     date: 'October 8, 2026',
@@ -77,3 +97,9 @@ export const UPDATES: Update[] = [
     ],
   },
 ]
+
+type Switches = Partial<Record<'sparks', boolean>>
+/** The updates a player is told about right now (an update behind a switch that is off is not news yet). */
+export const shownUpdates = (flags: Switches) => UPDATES.filter((u) => !u.flag || !!flags[u.flag])
+/** …and what is being worked on (a thing that has opened is not being worked on any more). */
+export const shownWork = (flags: Switches) => WORKING_ON.filter((w) => !w.until || !flags[w.until])

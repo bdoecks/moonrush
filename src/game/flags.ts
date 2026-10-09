@@ -11,12 +11,14 @@ export interface GameFlags {
   notice: string // banner at the top for everyone ('' = none)
   labs: boolean // CopyTrade, Sniper and Monitor (off: only admins see them, while they are being worked on)
   cooking: boolean // the Cooking page and launching coins (off: only admins see it, and the server refuses players' launches)
+  sparks: boolean // the story market: posts that coins get launched on (off: only admins get it, in solo play on the real-time engine)
 }
 
-export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false, cooking: false }
+export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false, cooking: false, sparks: false }
 
-// (`labsDev`: test copies only, so the UI bots can open the hidden pages. Never set by the live game.)
-export const useFlags = create<GameFlags & { loaded: boolean; labsDev?: boolean }>(() => ({ ...DEFAULT_FLAGS, loaded: false }))
+// (`labsDev`, `sparksDev`: test copies only, so the UI bots can open the hidden pages and play the story market.
+// Never set by the live game.)
+export const useFlags = create<GameFlags & { loaded: boolean; labsDev?: boolean; sparksDev?: boolean }>(() => ({ ...DEFAULT_FLAGS, loaded: false }))
 
 /** The pages behind the `labs` switch. */
 export const LAB_VIEWS: readonly string[] = ['copytrade', 'sniper', 'monitor']
@@ -32,6 +34,15 @@ let cookingNow = false
 export const cookingVisible = () => cookingNow
 export const setCookingVisible = (v: boolean) => {
   cookingNow = v
+}
+// And for the story market (the `sparks` switch; `useSparks` in hooks/useLabs.ts): does this player's own game run it?
+// (Solo play only. In a room and in the World the server decides, and a browser shows whatever posts it is sent.)
+// `null` = not known yet: the switches are read a moment after the game starts, and a story market that was running
+// in a saved game must not be closed in between (see the solo tick in store.ts).
+let sparksNow: boolean | null = null
+export const sparksVisible = () => sparksNow
+export const setSparksVisible = (v: boolean | null) => {
+  sparksNow = v
 }
 
 export async function loadFlags() {

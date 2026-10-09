@@ -766,6 +766,72 @@ async function checklistBot(page: Page) {
     if (t1 <= t0) throw new Error('clicked quick buy but no trade happened')
   })
 
+  await step(page, 'Story market', 'With the story market switched on (a round on the real-time engine), posts come in on the Social Tracker, the button under a post opens the coins launched on it, and a coin opened from there shows that post on its Story tab.', async () => {
+    act('Switch the story market on (test copies only) and start a round on the real-time engine')
+    await page.evaluate(() => {
+      ;(window as any).__flags.setState({ sparksDev: true })
+      const g = (window as any).__game.getState()
+      g.updateSettings({ engine: 'realistic', trackerDock: { open: true, side: 'left', width: 320, split: 0.3, wallet: true, social: true } })
+      g.startRun('practice', { silent: true })
+    })
+    // A post with at least two coins on it: at the real pace that is a matter of seconds, a minute at the outside.
+    let found = ''
+    for (let i = 0; i < 90 && !found; i++) {
+      await page.waitForTimeout(1000)
+      found = await page.evaluate(() => {
+        const m = (window as any).__game.getState().market
+        for (const s of m.sparks ?? []) if (m.tokens.filter((t: any) => t.spark?.id === s.id && t.status === 'bonding').length >= 2) return s.id as string
+        return ''
+      })
+    }
+    const back = async () => {
+      await page.evaluate(() => {
+        ;(window as any).__flags.setState({ sparksDev: false })
+        const g = (window as any).__game.getState()
+        g.openSpark(null)
+        g.updateSettings({ engine: 'classic' })
+        g.startRun('practice', { silent: true })
+      })
+      await page.waitForTimeout(500)
+    }
+    if (!found) { await back(); throw new Error('no post with two coins on it showed up in 90 seconds') }
+    const hidden = await page.evaluate(() => JSON.stringify((window as any).__game.getState().market.sparks).match(/decideAt|"runs"|"power"/)?.[0] ?? '')
+    if (hidden) { await back(); throw new Error(`a post on screen carries its hidden side (${hidden})`) }
+    const chip = page.locator('button[title="See the coins launched on this post"]').first()
+    if (await chip.count()) {
+      act('Click "coins launched on this" under a post in the Social Tracker')
+      await chip.click()
+    } else {
+      // (The side dock is not drawn at this screen size: the same panel, opened as the button would.)
+      await page.evaluate((id) => (window as any).__game.getState().openSpark(id), found)
+    }
+    const panel = page.getByRole('dialog', { name: 'Coins launched on this post' })
+    await panel.waitFor({ timeout: 3000 })
+    // (Whichever post was clicked: make it the one known to have coins, so the list is not empty by bad luck.)
+    await page.evaluate((id) => (window as any).__game.getState().openSpark(id), found)
+    await page.waitForTimeout(400)
+    const text = await panel.innerText()
+    if (!/followers/.test(text) || !/STORY/.test(text)) { await back(); throw new Error('the panel does not show the post with who made it and its STORY tag') }
+    const rows = panel.locator('button[title="Open this coin"]')
+    const n = await rows.count()
+    if (n < 2) { await back(); throw new Error(`the panel lists ${n} coins for a post with at least two`) }
+    if (!/#1/.test(text) || !/risk/.test(text) || !/after the post/.test(text)) { await back(); throw new Error('a coin row is missing its place, its risk tag or when it was launched') }
+    await shot(page, 'story-market-panel')
+    act('Click the first coin in the list')
+    await rows.first().click()
+    await page.waitForTimeout(600)
+    if (await panel.count()) { await back(); throw new Error('the panel stayed open after a coin was chosen') }
+    if ((await state(page)).view !== 'token') { await back(); throw new Error('choosing a coin did not open its page') }
+    act('Click the "Story" tab under the chart')
+    await page.locator('main button.relative', { hasText: /^Story/ }).first().click()
+    await page.waitForTimeout(400)
+    const story = await page.locator('main').innerText()
+    await shot(page, 'story-market-coin')
+    await back()
+    if (!/after this post/.test(story) || !/coin on it/.test(story)) throw new Error('the Story tab of a coin launched on a post does not show that post')
+    return `a post with ${n} coins: the panel lists them in order, and a coin opened from it shows the post it came from`
+  })
+
   await step(page, 'Other game modes', 'From the mode menu, Challenge and Arena should each start a fresh round with $10,000 and a timer, and Hardcore should stay locked for a new player (it needs level 5).', async () => {
     for (const [label, mode] of [['Challenge', 'challenge'], ['Arena', 'arena']] as const) {
       act('Open the mode menu'); await page.evaluate(() => (window as any).__game.getState().setModal('mode'))

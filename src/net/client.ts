@@ -2,6 +2,7 @@
 // store, and sends your orders / status. The server runs your wallets (it's the judge); this shows results instantly.
 import { chartReplaced } from '../game/chartRev'
 import { applyCandlePoints, candleStore, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SUPPLY, type CandlePoint } from '../game/marketEngine'
+import { mergeSparks } from '../game/sparks'
 import { newPortfolio, portfolioStats, valuePortfolio } from '../game/portfolioEngine'
 import { levelFromXp } from '../game/progression'
 import { seasonNumber } from '../game/season'
@@ -573,7 +574,8 @@ function onTick(msg: TickMsg) {
     const seen = new Set(prev?.tape.map((e) => e.id))
     for (const e of d.tape ?? []) if (!seen.has(e.id) && e.tag !== 'you' && (e.pid || e.addr) && e.pid !== me && !(e.addr && myAddrs.has(e.addr))) others.push({ t, e })
   }
-  const market: MarketState = { ...msg.market, tokens, trends: msg.market.trends ?? s.market.trends } // (the trend list comes once, in the welcome)
+  // (The trend list comes once, in the welcome. The story market's posts come as the new and the changed ones.)
+  const market: MarketState = { ...msg.market, tokens, trends: msg.market.trends ?? s.market.trends, sparks: mergeSparks(s.market.sparks, msg.market.sparks, tokens, msg.market.time) }
   // Other players' trades: logged for their leaderboard profile; ones you follow alert you.
   for (const { trade, watch } of recordPlayerTrades(others).slice(0, 3)) {
     s.notify({ title: watch.label, body: `${trade.side === 'buy' ? 'Bought' : 'Sold'} ${fmtUsd(trade.usd, trade.usd < 10 ? 2 : 0)} of $${trade.ticker} @ ${fmtCompact(trade.mcap)} MC`, tone: trade.side === 'buy' ? 'up' : 'down', icon: '👁', tokenId: trade.tokenId })

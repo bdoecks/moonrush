@@ -8,6 +8,7 @@ import type { Beat, BeatSource, Token } from '../../types'
 import { fmtAge, fmtCompact, fmtTime } from '../../utils/format'
 import { EmptyState } from '../ui'
 import { ARC_LABEL, BEAT_ICON, BEAT_LABEL, movePct, SRC_META } from './beatMeta'
+import { SparkSource } from '../SparkPanel'
 
 type Filter = 'all' | BeatSource
 const FILTERS: { id: Filter; label: string }[] = [
@@ -19,6 +20,7 @@ const FILTERS: { id: Filter; label: string }[] = [
 
 export function StoryTab({ token }: { token: Token }) {
   const now = useGame((s) => s.market.time)
+  const openSpark = useGame((s) => s.openSpark)
   const [filter, setFilter] = useState<Filter>('all')
   const beats = useMemo(() => [...(token.beats ?? [])].sort((a, b) => b.time - a.time || b.id - a.id), [token.beats])
   const shown = filter === 'all' ? beats : beats.filter((b) => b.src === filter)
@@ -56,6 +58,8 @@ export function StoryTab({ token }: { token: Token }) {
           <Info size={11} /> How to read this
         </span>
       </div>
+      {/* The post this coin was launched on (the story market): where its story starts. */}
+      {token.spark && filter !== 'market' && filter !== 'trend' && <div className="sticky left-0 max-w-[520px] border-b border-line/40 p-3"><SparkSource t={token} now={now} onOpen={() => openSpark(token.spark!.id)} /></div>}
       {shown.length === 0 ? (
         <EmptyState
           icon="🍃"
