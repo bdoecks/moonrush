@@ -30,6 +30,20 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-10-08-missions',
+    date: 'October 8, 2026',
+    title: 'A bigger Missions tab',
+    added: [
+      'Weekly missions: four bigger goals every Monday, with a bonus for finishing all four.',
+      'A career ladder: nine things to get good at (trades, volume, wins, your best trade, streaks and more), each with five badges from Bronze to Diamond. They never reset.',
+      'A streak counter: trade every day to keep it alive.',
+    ],
+    changed: [
+      'The Missions tab is split into Daily, Weekly, Career and This round, and on a phone the missions now come first.',
+      'Missions pay XP, as before. They never pay money.',
+    ],
+  },
+  {
     id: '2026-10-08-fair-play',
     date: 'October 8, 2026',
     title: 'Fair play, tutorials and a better board',

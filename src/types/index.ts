@@ -282,6 +282,8 @@ export interface RewardsState {
   cashback?: CashbackState
   checkIn: { lastDate: string; streak: number }
   dailies?: import('../game/dailyChallenges').DailyState // today's daily-challenge numbers
+  weekly?: import('../game/missions').WeeklyState // this week's mission numbers
+  career?: import('../game/missions').CareerState // the career ladders (never reset)
   history: RewardClaim[]
 }
 

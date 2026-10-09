@@ -7,6 +7,7 @@ import { fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { fakeAddress } from '../utils/address'
 import { playSfx, type Sfx } from '../utils/sound'
 import { load, remove, save } from '../utils/storage'
+import { foldMissions } from './missions'
 import { createChallenges, evaluateChallenges, type ChallengeContext } from './challengeEngine'
 import { DAILY_SWEEP_XP, foldDailies } from './dailyChallenges'
 import { newTrades } from './daily'
@@ -2153,12 +2154,16 @@ export const useGame = create<GameState>()((set, get) => {
       const { state, completed, swept } = foldDailies(s.rewards.dailies, fills, cooked, undefined, !cookingVisible())
       const paid: [string, number][] = completed.map((c) => [c.title, c.xp])
       if (swept) paid.push(['All three daily challenges', DAILY_SWEEP_XP])
+      // The same fills count toward this week's missions and the career ladders (see game/missions.ts).
+      const more = foldMissions(s.rewards.weekly, s.rewards.career, fills, swept)
+      for (const p of more.paid) paid.push([p.title, p.xp])
       const claims: RewardClaim[] = paid.map(([, xp], i) => ({ id: `d${Date.now()}${i}`, time: Date.now(), kind: 'challenge', amount: xp, paidAs: 'xp' }))
-      set({ rewards: { ...s.rewards, dailies: state, history: claims.length ? [...claims, ...s.rewards.history].slice(0, 50) : s.rewards.history } })
+      set({ rewards: { ...s.rewards, dailies: state, weekly: more.weekly, career: more.career, history: claims.length ? [...claims, ...s.rewards.history].slice(0, 50) : s.rewards.history } })
       for (const c of completed) s.notify({ title: 'DAILY CHALLENGE DONE', body: `${c.title} · +${c.xp} XP`, tone: 'xp', icon: c.icon }, 'achievement')
       if (swept) s.notify({ title: 'DAILY SWEEP', body: `All three done · +${DAILY_SWEEP_XP} XP bonus`, tone: 'xp', icon: '🧹' }, 'achievement')
+      for (const p of more.paid) s.notify({ title: p.kind === 'career' ? 'CAREER BADGE' : p.kind === 'weeklySweep' ? 'WEEKLY SWEEP' : 'WEEKLY MISSION DONE', body: `${p.title} · +${p.xp} XP`, tone: 'xp', icon: p.icon }, 'achievement')
       for (const [title, xp] of paid) gainXp(xp, title, true)
-      if (paid.length) persist()
+      if (paid.length || fills.length) persist()
     },
     toggleFollowAccount: (accountId) => {
       const s = get()

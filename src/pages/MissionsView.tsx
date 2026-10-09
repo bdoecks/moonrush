@@ -6,6 +6,11 @@ import { ACCENTS, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS } from '../
 import { selectSpeed, useGame } from '../game/store'
 import { fmtClock, fmtCompact, fmtPct } from '../utils/format'
 import { DailyChallenges } from '../components/DailyChallenges'
+import { CareerMissions, MissionSummary, WeeklyMissions } from '../components/Missions'
+import { badgeCount, weeklyFor } from '../game/missions'
+import { dailyFor } from '../game/dailyChallenges'
+import { load, save } from '../utils/storage'
+import { useState } from 'react'
 
 export function MissionsView() {
   const profile = useGame((s) => s.profile)
@@ -25,11 +30,25 @@ export function MissionsView() {
   const l = levelFromXp(profile.xp)
   const cfg = MODES[mode]
   const done = challenges.filter((c) => c.done).length
+  // Four kinds of mission, a tab each (the page opens on the one you last looked at).
+  type Tab = 'daily' | 'weekly' | 'career' | 'round'
+  const [tab, setTab0] = useState<Tab>(() => load<Tab>('missionsTab') ?? 'daily')
+  const setTab = (t: Tab) => (setTab0(t), save('missionsTab', t))
+  // (Counted for today and this week: yesterday's finished goals are not today's.)
+  const dailyDone = useGame((s) => dailyFor(s.rewards.dailies).done.length)
+  const weeklyDone = useGame((s) => weeklyFor(s.rewards.weekly).done.length)
+  const badges = useGame((s) => badgeCount(s.rewards.career))
+  const tabs: { id: Tab; label: string; note: string }[] = [
+    { id: 'daily', label: '📅 Daily', note: `${dailyDone}/3` },
+    { id: 'weekly', label: '🗓 Weekly', note: `${weeklyDone}/4` },
+    { id: 'career', label: '🏅 Career', note: String(badges) },
+    { id: 'round', label: '🎮 This round', note: `${done}/${challenges.length}` },
+  ]
 
   return (
     <div className="h-full overflow-y-auto">
       <div className="grid gap-3 p-3 lg:grid-cols-[340px_1fr]">
-        <div className="space-y-3">
+        <div className="order-2 space-y-3 lg:order-1">
           <div className="rounded-md border border-line bg-panel p-4">
             <div className="flex items-center gap-3">
               <div className="grid size-14 place-items-center rounded-lg bg-accent font-display text-[24px] font-bold text-accent-ink glow-accent">{l.level}</div>
@@ -84,7 +103,7 @@ export function MissionsView() {
           </div>
 
           <div className="rounded-md border border-line bg-panel p-3 text-[11px]">
-            <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted">Career</div>
+            <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted">Lifetime</div>
             <div className="grid grid-cols-3 gap-2">
               <div><div className="text-[9px] text-dim">Rounds</div><div className="num">{profile.runsPlayed}</div></div>
               <div><div className="text-[9px] text-dim">Best return</div><div className="num text-up">{fmtPct(profile.bestReturnPct)}</div></div>
@@ -93,7 +112,7 @@ export function MissionsView() {
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="order-1 space-y-3 lg:order-2">
           <div className="rounded-md border border-accent/30 bg-accent/5 p-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-ink">{cfg.name.toUpperCase()}</span>
@@ -115,9 +134,20 @@ export function MissionsView() {
             )}
           </div>
 
-          <DailyChallenges />
+          <MissionSummary />
+          <div className="no-scrollbar flex gap-1 overflow-x-auto" role="tablist" aria-label="Kinds of mission">
+            {tabs.map((t) => (
+              <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)} className={clsx('flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12px] font-bold', tab === t.id ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')}>
+                {t.label} <span className="num rounded bg-raise px-1 text-[10px] font-semibold text-muted">{t.note}</span>
+              </button>
+            ))}
+          </div>
 
-          <div className="rounded-md border border-line bg-panel">
+          {tab === 'daily' && <DailyChallenges />}
+          {tab === 'weekly' && <WeeklyMissions />}
+          {tab === 'career' && <CareerMissions />}
+
+          {tab === 'round' && <div className="rounded-md border border-line bg-panel">
             <div className="flex items-center justify-between border-b border-line px-3 py-2">
               <div className="text-[12px] font-bold">Round missions</div>
               <div className="num text-[11px] text-muted">{done}/{challenges.length} complete</div>
@@ -147,7 +177,8 @@ export function MissionsView() {
                 )
               })}
             </ul>
-          </div>
+            <p className="border-t border-line/60 px-3 py-2 text-[10px] text-dim">These belong to the round you are playing: a new round starts them again. (In the World, which never ends, each can be done once.)</p>
+          </div>}
         </div>
       </div>
     </div>

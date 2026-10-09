@@ -44,6 +44,7 @@ npx tsx scripts/minds-test.ts 1 0.25        # trader types: each mind acts only 
 npx tsx scripts/source-test.ts              # the data-source plug: outside data cleaned, dated, honest about its source; stale lists dropped
 npx tsx scripts/scale-test.ts               # what a World player is sent: only the open coin's chart and tape, no hidden state, under budget (6 min)
 npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Lighthouse vs what really traded
+npx tsx scripts/missions-test.ts            # weekly missions and career ladders: counted from fills, each paid once, weeks roll over
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/cook-test.ts                # cooking in the World: a player's launch is under the fair-market rules, snipers pass on a big dev bag
 npx tsx scripts/cook-report.ts 3            # what cooking pays, recipe by recipe (not pass/fail): read before and after touching launches or creator fees
@@ -491,6 +492,17 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   Keep `WORKING_ON` true. `CLOSED` entries are tied to the switch that brings the thing back and drop out of the list
   by themselves when it is on. Say that a money bug is fixed, never how it was done. `tutorial-test` checks the list
   is readable and carries no code names.
+
+## Missions: daily, weekly, career
+
+- The Missions page has four tabs. Daily (`game/dailyChallenges.ts`, three a day) and This round
+  (`game/challengeEngine.ts`) were there; **weekly missions and the career ladders** are `game/missions.ts`
+  (`components/Missions.tsx`): four goals a week from Monday, and nine ladders of five tiers (Bronze to Diamond)
+  that never reset, plus a days-in-a-row streak. All are counted from the player's own fills in `trackDaily`
+  (`foldMissions`), saved in `rewards.weekly` / `rewards.career` (so they follow the account), and **pay XP only**:
+  XP is never money, which is why none of it runs on the server. Do not add a mission that pays coins or cash.
+- A save from before a number was added must still count (`foldMissions` spreads over fresh numbers): keep that
+  when adding a field. Test: `npx tsx scripts/missions-test.ts` (24 checks).
 
 ## Tutorials
 
