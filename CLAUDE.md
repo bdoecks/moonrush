@@ -47,6 +47,7 @@ npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Ligh
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/cook-test.ts                # cooking in the World: a player's launch is under the fair-market rules, snipers pass on a big dev bag
 npx tsx scripts/cook-report.ts 3            # what cooking pays, recipe by recipe (not pass/fail): read before and after touching launches or creator fees
+npx tsx scripts/spam-test.ts 30             # spamming buys must not make money (a World with bots, orders sent with real trade settings; 4 min)
 npx tsx scripts/trench-info-test.ts         # the Trenches card: KOLs and smart money in a coin, the dev's migrated / launched
 npx tsx scripts/reset-test.ts               # the admin's World starting balance, and starting every World player over
 npx tsx scripts/bugs-test.ts                # bug reports and ideas: what the game sends is clean and small, and only admins can read the table
@@ -236,6 +237,13 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
    behind a player's own bag stays in the curve / pool until that player sells. Whoever ticks a market passes
    `held` (the room and the solo store both do); without it a made-up whale can empty a curve under a dev who was
    first in.
+   **Whoever lands ahead of a player's order flips straight after it** (`executeBuy` / `executeSell` in
+   `tradingEngine.ts`): the "somebody got in first" trade (lag) and the sandwich bot both undo their trade once the
+   order has filled. The lag trade used to stay in, and it moves the price by the same share whatever the order's
+   size, so a hundred $5 buys pumped a coin with money that was nobody's and one sell took it: +29% a go on curves,
+   +15% in pools (found by the owner, 2026-10-08; it had been there since before V2, and `fair-test` could not see it
+   because its paper trader sends no trade settings). `scripts/spam-test.ts` holds it: **any test of what a player
+   can earn must send orders with a `setting`, as the game does.**
 8. **On the real-time engine (the World) every coin on a curve lives by order flow** (`stepFlow`), on every
    launchpad, whoever launched it: the crowd's own launches, the bot chefs' and a player's. A cooked coin's pull on
    the crowd (`flow.q`) comes from its launch score (`COOK_FLOW`); a big dev bag puts buyers off; what the classic
