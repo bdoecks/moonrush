@@ -80,7 +80,7 @@ export const SPARK = {
   // its price, `gain` times the sum of the shares the others lost (1 = every coin was a fair bet, see the top), and
   // never more money goes in than `keep` times what came out of the others.
   dump: 0.9,
-  gain: 0.8,
+  gain: 0.7,
   keep: 1,
   kept: 600, // seconds a post stays on the list after its last coin has gone
   max: 90, // posts kept at the most (the ones with a live coin are never dropped)

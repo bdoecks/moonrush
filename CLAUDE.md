@@ -38,6 +38,9 @@ npx tsx scripts/kol-test.ts                 # KOL copy traders: followers copy a
 npx tsx scripts/social-test.ts              # followers are the server's count: the World ignores claims, calls judged on the server
 npx tsx scripts/charts-test.ts 30           # charts across a restart: short timeframes rebuilt from the real 1m candles
 npx tsx scripts/story-test.ts 1 0.25 3      # a coin's story feed, what stories do to trading, that copying them is not free money (8 min)
+npx tsx scripts/spark-test.ts               # the story market: invented and clean content, the sums that keep it fair, the hidden side never sent (3 min)
+npx tsx scripts/post-test.ts 12 careful     # what reading a post earns, real orders in the World (not pass/fail: several runs and rules, added up with `sum`)
+npx tsx scripts/same-market.ts ../live-copy # work behind a switch: with the switch off, the market is tick for tick the live game's (the file says how to make the copy)
 npx tsx scripts/fair-test.ts 4              # no simple rule makes money in the World (run 4 to 6 side by side with --json, then `sum`; after ANY market change)
 npx tsx scripts/fair-test.ts classic        # the same on the classic engine (solo play's default)
 npx tsx scripts/minds-test.ts 1 0.25        # trader types: each mind acts only on what it says, on lines a player could have read
@@ -165,6 +168,7 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
 | `src/game/marketEngine.ts` | The market: coins, price moves, launches, bonding curves, rugs, candles. Shared by game and server. |
 | `src/game/tradingEngine.ts` | One buy / sell / swap on one wallet (fees, slippage, MEV). |
 | `src/game/storyEngine.ts`, `traderMinds.ts`, `traderView.ts`, `dataSources.ts` | V2: a coin's story feed, trader types, a tracked trader on a coin, the door for outside data. |
+| `src/game/sparks.ts`, `src/data/sparkPosts.ts` | The story market: posts that coins get launched on (behind the `sparks` switch). |
 | `src/game/orders.ts` | **Shared pure money functions** (`runBuy`, `runSell`, `runSwap`, `runTransfer`, `runGiveAway`, `payNative`, wallet state). The game and the server both call these. |
 | `src/game/store.ts` | The game's state (Zustand): solo ticks, actions, optimistic results in rooms. |
 | `src/net/protocol.ts` | Every message between game and server. Change both sides together. |
@@ -473,6 +477,82 @@ Also open after stage 1:
 The five stages, as agreed: 2) tracked traders on the chart (a colour each, average-entry line, position, share
 of supply, profit, history); 3) trader types that react to stories (narrative trader, contrarian, panic seller, FOMO,
 swing) on top of the real-data brain; 4) the data-source plug with provenance; 5) scale (send each player less).
+
+## The story market: posts that coins get launched on (the `sparks` switch)
+
+- **What it is** (stage 1 of four, the owner's design, 2026-10-09). A post or a news item from a made-up account
+  appears on the Social Tracker; within seconds devs launch coins on it (some with the post's exact name and ticker,
+  some misspelled, some "their own version", some that only borrow the subject); about 45 seconds later the timeline
+  either settles on ONE of those coins or moves on. With the switch on, 80% of launches come from a post.
+  `src/game/sparks.ts` (pure: the dials in `SPARK`, how a post is made, what devs call their coins, the timeline's
+  choice) and `src/data/sparkPosts.ts` (accounts, subjects, names, texts) are all of it besides `stepSparks` /
+  `settleSpark` in `marketEngine.ts`, which launch the coins and trade the settle.
+- **The switch** (`sparks` in `app_flags`, default off; Admin > Switches). Off: only an admin's own solo game on the
+  real-time engine ("Realistic pump.fun" in the mode menu) has it. On: everybody, the World included (the server
+  reads the switch once a minute: `Room.storyMarket`). Switching it off closes the open stories with no coin picked;
+  coins already launched keep trading. `STORY_MARKET=1` turns it on for a test copy of the server and for the World
+  tests (`fair-test`, `world-soak`, `scale-test`, `crowd-test`, `market-report`); never set it on Render. To play it
+  locally: `node scripts/world-dev.mjs stories` (the World with its bots and the story market) next to `npm run dev`.
+  **With the switch off the market is tick for tick the live game's**: the story market has its own dice.
+  `scripts/same-market.ts` checks it against a copy of `main` (both engines, market, wallets, posts and stories).
+  Run it before any push that touches the market while a switch is meant to keep it as it was.
+- **What is hidden.** A post's `SparkSim` (the right name, whether the story runs, when it settles) never leaves the
+  server, in any room (`netMarket`, `tickMarketDiff`; `spark-test` and `scale-test` check). Posts travel like beats:
+  all of them in the welcome, then only the new and the changed ones (`seq`; `mergeSparks` in the browser). In solo
+  play the hidden side is in the player's own browser, like the rest of a solo market.
+- **Everything in it is invented** (`sparkPosts.ts`): never a real person, outlet, brand, place, famous animal or
+  character, and no parody of one. `spark-test` holds a list of famous names that must not appear: add to it. What
+  a post is about is always an approved theme word. A misspelled name can spell something crude ("duck" is one
+  letter away), so every name a dev comes up with is checked against `NEVER_SPELL`. On screen a post carries the
+  STORY tag (generated narrative), as beats do; the coins and their trades are the market's own.
+- **Why it is fair** (read the top of `sparks.ts` first). When a story settles the crowd sells `dump` of what it
+  holds in every coin but the picked one, and the picked coin gains `gain` times what the others lost (as shares of
+  their prices), never more money than came out of them. A coin's chance of being picked is its **stake** (the share
+  of its price it would lose) times what it IS, to the power `care`: its name against the post's (`fitOf`) and its
+  risk tag (`auditOf`). With `care` 0 and `gain` 1 every coin is exactly a fair bet (`spark-test` works the sums
+  out). The snipers who load a coin's launch block go by the post and the coin's place in the rush, never by its
+  name, and what devs call their coins does not depend on their place either: so "the first coin", "the biggest
+  coin" and "every coin" are fair bets at best, and with `gain` under 1 they lose. Reading is what is not priced:
+  the exact name, the clean tag. Three kinds of dev launch on a post (`SPARK.devs`), set so the risk tag on the
+  card reads LOW, MEDIUM or HIGH: what a player reads is exactly what counts. (The dev share shown on a card is
+  the Holders book's and is scaled down on a young curve; the risk tag is not.)
+- **Measured** (`post-test`: the World with its bots, real orders with the game's own trade settings, 48 World hours
+  a rule, 2026-10-09; `care` 2, `gain` 0.7). Careful reading (the first coin with the post's exact name and a LOW
+  tag, bought as it appears, sold when the post settles) at $100 a trade: -0.2% over all posts, about -1% on
+  accounts under 500K followers, **+4.1%** on accounts of 500K to 20M (13 such trades an hour), **+13.5%** on
+  accounts over 20M (2 an hour). At a person's pace (bought 5 s later, sold 2 s after the settle) the same: +4.8%
+  and +16.8%. The exact name whatever the tag: -2.4% (+1.8% on big accounts), so the tag matters: a greedy dev
+  dumps. **Every rule that does not read loses**: the first coin -4.3% (-11% on big accounts), the coin with the
+  highest market cap -4.4% (-11%), every third coin -3.9%, the first wrongly named coin -4.5% (-12%, and -26% on
+  the huge accounts), the picked coin bought on the news -6.7%. **Money does not scale it**: at $1,000 a trade
+  (sent with no slippage limit, or the game refuses the order) careful reading makes -6.0% overall and +0.5% on big
+  accounts, the first coin -10%. So a script that never misses makes about $75 an hour at $100 a trade, and bigger
+  trades make less. One 12-hour run is good to about 5 points either way on the big accounts and 12 on the huge
+  ones (a few picked coins decide it): add runs up before quoting. How the same rule moved with `gain` (careful,
+  $100, big / huge accounts): 0.6 gave +1.5% / +7.5%, 0.7 +4.1% / +13.5%, 0.8 +6.6% / +20.7% (and at 0.8 a $1,000
+  trade still made +3.6% / +16.6%, which is why it is not 0.8). When a right-named coin is among several on a post
+  that settles, the timeline settles on a right-named one about 7 times in 10 (engine alone). The old rules of
+  `fair-test` with the story market on: all still lose or are flat (12 h). The World with it on: New column 38 coins
+  (29 off), Final Stretch 10 (8), about 20 bonded an hour either way, 72 trades a second (61), a tick 0.4 ms
+  longer, a 30-hour soak steady at 110 to 180 coins and a 4.5 MB save, and its posts are 0.3% of what a player is
+  sent.
+- **A coin that has gone dead can still be sold** back to its curve (only buying is refused), and the coins left
+  behind when a story settles are dead about half a minute later. A test that sells only "live" coins counts those
+  bags as total losses: `post-test` made that mistake once (buying the news read -62% on small posts; it is -12%).
+- **Dials** (`SPARK`): `care` (how often the right name wins), `gain` (what reading pays; under 1 every lazy rule
+  loses), the tiers (how often each size of account posts, how many coins, how often it runs, the snipers' money),
+  `share`. After touching one: `spark-test`, then `post-test` for careful / sure / first at $100 and $1000, several
+  12-hour runs each added up with `sum` (one run is a few lucky coins), `STORY_MARKET=1` on `fair-test` and
+  `world-soak`. A new kind of post or a new thing a player can read needs its rule in `post-test`.
+- **On screen**: posts in every tracker with the account's size and check mark, and "Big accounts only" on the
+  Social Tracker; "N coins launched on this" opens the post's panel (`components/SparkPanel.tsx`: its coins in the
+  order they came with their risk tags, never which one is "right"); the leaf and the Story tab show the post a
+  coin came from, and a click on the leaf opens the post's coins; the timeline's verdict is a line on each coin's
+  feed and a pin on its chart. The Updates entry and the Help paragraph show only while the switch is on.
+- **Next stages**, each on the owner's word: 2 real or larp (impersonators, fake screenshots, hacked accounts: the
+  check mark and the handle start to matter), 3 tech coins (a site with a demo that works or does not), 4 Cooking
+  reopens as launching on posts (a misspelled launch can be vamped by a correctly spelled one). Pictures: they
+  belong to the story, not the coin; how the library gets made is the owner's call and still open.
 
 ## The story leaf on Trenches cards
 

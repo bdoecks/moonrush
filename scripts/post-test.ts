@@ -1,7 +1,7 @@
 // What reading a post earns (the story market, src/game/sparks.ts). A player in the World, with its bots, follows ONE
 // rule on every post for some hours: real orders, sent with the trade settings the game sends, fees and other
 // people's trades landing first included. What they end up with, by the size of the account that posted.
-//   npx tsx scripts/post-test.ts [hours=3] [rule=careful] [stake=100] [--json]
+//   npx tsx scripts/post-test.ts [hours=3] [rule=careful] [stake=100] [--json] [--loose]
 //   npx tsx scripts/post-test.ts sum a.json b.json …        (several runs added up: one run is a few lucky coins)
 // The rules (a rule is something a player, or a script, could do):
 //   careful   the first coin on a post with the post's exact name AND a LOW risk tag, bought as it appears
@@ -15,6 +15,9 @@
 //   any       every third coin launched on a post
 //   news      the coin the timeline settled on, bought the second after, sold 30 s later
 // Every position is sold when its post settles (a coin was picked, or the timeline moved on), or after 4 minutes.
+// Orders go out with the game's first trade preset (20% slippage at the most): a big order into a small curve is
+// refused by it, as it is in the game. `--loose` uses the preset with no slippage limit, which is how a big buyer
+// would have to trade: use it for stakes of $500 and up.
 // (The reader's part, knowing the right name, is taken from the server's hidden side: this test stands in for
 // somebody who reads the post correctly. Nothing else it uses is hidden.)
 // Not pass/fail: read it before and after touching a dial in SPARK, several runs added up.
@@ -58,6 +61,7 @@ const hours = Number(process.argv[2] ?? 3)
 const rule = process.argv[3] ?? 'careful'
 const stake = Number(process.argv[4] ?? 100)
 const json = process.argv.includes('--json')
+const preset = process.argv.includes('--loose') ? 2 : 0
 if (!['careful', 'slow', 'sure', 'right', 'wrong', 'first', 'rich', 'any', 'news'].includes(rule)) throw new Error(`no rule "${rule}"`)
 
 type Pos = { qty: number }
@@ -82,17 +86,18 @@ let seq = 1
 const live = (t?: Token) => !!t && (t.status === 'bonding' || t.status === 'graduated')
 const buy = (t: Token) => {
   const before = money()
-  r.handle(ME, { t: 'order', seq: seq++, ref: seq, order: { side: 'buy', tokenId: t.id, walletIds: ['w-main'], usdEach: stake, setting: DEFAULT_TRADE_SETTINGS[t.chain].buy[0] } })
+  r.handle(ME, { t: 'order', seq: seq++, ref: seq, order: { side: 'buy', tokenId: t.id, walletIds: ['w-main'], usdEach: stake, setting: DEFAULT_TRADE_SETTINGS[t.chain].buy[preset] } })
   return before - money()
 }
 const sell = (id: string) => {
   const before = money()
   const t = r.market.tokens.find((x) => x.id === id)
   const q = me().wallet.positions[id]?.qty ?? 0
-  if (q > 0 && live(t)) r.handle(ME, { t: 'order', seq: seq++, ref: seq, order: { side: 'sell', tokenId: id, legs: [{ walletId: 'w-main', qty: q }], setting: DEFAULT_TRADE_SETTINGS[t!.chain].sell[0] } })
+  // (A coin that has gone dead can still be sold back to its curve: only buying it is refused.)
+  if (q > 0 && t) r.handle(ME, { t: 'order', seq: seq++, ref: seq, order: { side: 'sell', tokenId: id, legs: [{ walletId: 'w-main', qty: q }], setting: DEFAULT_TRADE_SETTINGS[t.chain].sell[preset] } })
   const left = me().wallet.positions[id]?.qty ?? 0
   // (Refused for slippage: sold plainly, as a player would on the second try.)
-  if (left > 0 && live(t)) r.handle(ME, { t: 'order', seq: seq++, ref: seq, order: { side: 'sell', tokenId: id, legs: [{ walletId: 'w-main', qty: left }] } })
+  if (left > 0 && t) r.handle(ME, { t: 'order', seq: seq++, ref: seq, order: { side: 'sell', tokenId: id, legs: [{ walletId: 'w-main', qty: left }] } })
   return money() - before
 }
 
@@ -186,6 +191,6 @@ for (let i = 0; i < ticks; i++) {
 }
 for (const h of held) close(h)
 world.dispose()
-if (json) console.log(JSON.stringify({ rule, stake, hours, rows }))
-else show(rule, stake, hours, rows)
+if (json) console.log(JSON.stringify({ rule: preset ? `${rule}, no slippage limit` : rule, stake, hours, rows }))
+else show(preset ? `${rule}, no slippage limit` : rule, stake, hours, rows)
 process.exit(0)

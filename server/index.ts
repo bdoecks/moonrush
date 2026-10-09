@@ -132,6 +132,9 @@ async function takeBackup(note?: string) {
     backingUp = false
   }
 }
+// The story market on a test copy with no database to ask (`node scripts/world-dev.mjs stories`). Never set this on
+// Render: there the owner's `sparks` switch decides, and its answer replaces this within seconds.
+if (process.env.STORY_MARKET === '1') Room.storyMarket = true
 if (persistOn) {
   // Once a minute: does the database answer.
   setInterval(() => void pingDb().then((r) => noteDb(r.ok, r.ms)), 60_000).unref()
@@ -141,9 +144,7 @@ if (persistOn) {
   const askCooking = () => void readFlag('cooking').then((on) => { if (on !== null) Room.playersCook = on })
   askCooking()
   setInterval(askCooking, 60_000).unref()
-  // The `sparks` switch the same way: the story market in the World and in rooms. (`STORY_MARKET=1` is for a test
-  // copy on a PC with no database to ask. Never set it on Render: the switch is the owner's.)
-  if (process.env.STORY_MARKET === '1') Room.storyMarket = true
+  // The `sparks` switch the same way: the story market in the World and in rooms.
   const askStories = () => void readFlag('sparks').then((on) => { if (on !== null) Room.storyMarket = on })
   askStories()
   setInterval(askStories, 60_000).unref()
