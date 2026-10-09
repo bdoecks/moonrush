@@ -9,7 +9,7 @@ import { MP_PATH, WORLD_CODE, type ClientMsg, type ServerMsg } from '../src/net/
 import { Room, type RoomSnapshot } from './room'
 import { isBanned, nameTaken, verifyToken } from './auth'
 import { bannedGuests, handleAdmin } from './admin'
-import { deleteRoom, loadRoom, loadWorld, persistOn, pingDb, saveRoom } from './persist'
+import { deleteRoom, loadRoom, loadWorld, persistOn, pingDb, readFlag, saveRoom } from './persist'
 import { health, noteDb, noteError, noteSave, noteTick, noteTickError, report, watchLoop } from './health'
 import { backupNow, checkBackups, isRestoring, listBackups, loadBackup, restoreWorldFrom, type WorldCopy } from './backup'
 import { nameBlocked } from './moderation'
@@ -136,6 +136,11 @@ if (persistOn) {
   // Once a minute: does the database answer.
   setInterval(() => void pingDb().then((r) => noteDb(r.ok, r.ms)), 60_000).unref()
   void pingDb().then((r) => noteDb(r.ok, r.ms))
+  // The owner's `cooking` switch: while it is off the rooms refuse players' launches (the game hides the page; this
+  // is for a browser that does not). Asked once a minute; an answer that does not come changes nothing.
+  const askCooking = () => void readFlag('cooking').then((on) => { if (on !== null) Room.playersCook = on })
+  askCooking()
+  setInterval(askCooking, 60_000).unref()
   // Backups are daily. Whether one is due is asked two minutes after the World has loaded and every ten minutes
   // after that, not on a long timer: on Render's free plan the server rarely stays awake a whole hour. Skipped while
   // the database is struggling: a backup is a big write.

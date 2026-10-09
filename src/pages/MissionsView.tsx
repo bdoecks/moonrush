@@ -1,3 +1,4 @@
+import { useCooking } from '../hooks/useLabs'
 import clsx from 'clsx'
 import { Check, Lock, X } from 'lucide-react'
 import { useValuation } from '../hooks/useDerived'
@@ -8,7 +9,10 @@ import { DailyChallenges } from '../components/DailyChallenges'
 
 export function MissionsView() {
   const profile = useGame((s) => s.profile)
-  const challenges = useGame((s) => s.challenges)
+  // (While the Cooking page is closed, the missions that need it are left out.)
+  const cooking = useCooking()
+  const allChallenges = useGame((s) => s.challenges)
+  const challenges = cooking ? allChallenges : allChallenges.filter((c) => c.id !== 'cook' && c.id !== 'cookgrad')
   const mode = useGame((s) => s.mode)
   const runTicks = useGame((s) => s.runTicks)
   const runDuration = useGame((s) => s.runDuration)

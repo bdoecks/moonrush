@@ -490,6 +490,14 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
 - The UI bots check the tabs are hidden, then switch them on for themselves (`__flags.setState({ labsDev: true })`,
   test copies only) and test the pages as before.
 
+- **Cooking is closed too, by its own switch** (`cooking`, default off; 2026-10-08, the owner: "way too easy to make
+  money with it", to be reworked). Off: no Cooking tab, the C key and Help line are gone, `cook` in the store refuses,
+  missions that need a launch are left out (`MissionsView`; a day whose daily goal is "Cook a coin" gets the next one:
+  `dailyChallenges(date, noCooking)`), and **the server refuses players' launches** (`Room.playersCook`, read from
+  `app_flags` once a minute by `readFlag`; without a database, as in tests, it is on). An admin sees the page but
+  the server refuses an admin's launch as well: turn the switch on to launch. Bot chefs still launch (they are the
+  market), and coins players already launched keep trading and paying fees.
+
 ## Ideas (Share an idea)
 
 - The ideas form is the bug-report form under other words (`BugReport.tsx`, modal `idea`): a row of `bug_reports` with

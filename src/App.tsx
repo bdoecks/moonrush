@@ -30,8 +30,8 @@ import { WatchBanner } from './components/Multiplayer'
 import { BrokeBanner } from './components/WorldBoard'
 import { PlayerCardDrawer } from './components/PlayerCard'
 import { AdminFloat } from './components/AdminFloat'
-import { LAB_VIEWS, setLabsVisible, watchFlags } from './game/flags'
-import { useLabs } from './hooks/useLabs'
+import { LAB_VIEWS, setCookingVisible, setLabsVisible, watchFlags } from './game/flags'
+import { useCooking, useLabs } from './hooks/useLabs'
 import { DiscoverView } from './pages/DiscoverView'
 import { TrenchesView } from './pages/TrenchesView'
 import { LeaderboardView } from './pages/LeaderboardView'
@@ -98,6 +98,13 @@ export default function App() {
     setLabsVisible(labs)
     if (!labs && labView && !profileOpen) useGame.getState().setView('discover')
   }, [labs, labView, profileOpen])
+  // The Cooking page too, by its own switch (`cooking`).
+  const cooking = useCooking()
+  const onCooking = useGame((s) => s.view === 'cooking')
+  useEffect(() => {
+    setCookingVisible(cooking)
+    if (!cooking && onCooking) useGame.getState().setView('discover')
+  }, [cooking, onCooking])
 
   // Start (or roll over to) this week's ranked season.
   useEffect(() => useGame.getState().checkSeason(), [])
@@ -130,7 +137,7 @@ export default function App() {
         <TrackerDock />
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="min-h-0 flex-1">
-            {(view === 'discover' || (!labs && labView)) && <DiscoverView />}
+            {(view === 'discover' || (!labs && labView) || (!cooking && onCooking)) && <DiscoverView />}
             {view === 'trenches' && <TrenchesView />}
             {view === 'token' && <TokenView />}
             {view === 'portfolio' && (
@@ -139,7 +146,7 @@ export default function App() {
               </Suspense>
             )}
             {view === 'missions' && <MissionsView />}
-            {view === 'cooking' && <CookingView />}
+            {cooking && view === 'cooking' && <CookingView />}
             {view === 'copytrade' && (labs ? <CopyTradeView /> : <WalletProfileOnly />)}
             {labs && view === 'sniper' && <SniperView />}
             {labs && view === 'monitor' && <MonitorView />}

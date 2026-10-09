@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { SocialProfile, CashbackState, SniperTask, Trade, VolumeBot, Chain, Challenge, CookSpec, CopyConfig, GameMode, LaunchRecord, MarketEvent, MarketState, Player, Portfolio, Profile, RunStatus, Settings, PriceAlert, RewardClaim, RewardsState, SimWallet, SocialPost, Toast, Token, TrackerSettings, WalletAction, WalletActionKind, WalletLabel } from '../types'
 import { clamp, Rng } from '../utils/rng'
-import { labsVisible, useFlags } from './flags'
+import { cookingVisible, labsVisible, useFlags } from './flags'
 import { restoreCharts, saveCharts } from './chartSave'
 import { fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { fakeAddress } from '../utils/address'
@@ -1536,6 +1536,10 @@ export const useGame = create<GameState>()((set, get) => {
 
     cook: (spec) => {
       if (watchingOnly()) return null
+      if (!cookingVisible()) {
+        get().notify({ title: 'CAN’T COOK', body: 'Cooking is closed for now while it is being reworked.', tone: 'warn', icon: '🍳' }, 'alert')
+        return null
+      }
       // Coins are launched from a dev wallet only. No dev wallet yet: one is made now (it is funded from the USD bank
       // like any wallet when auto-swap is on).
       if (get().runStatus === 'running' && !devWalletFor(get().portfolio, spec.devWallet)) get().createWallet('Dev 1', DEV_EMOJI)
@@ -2146,7 +2150,7 @@ export const useGame = create<GameState>()((set, get) => {
     },
     trackDaily: (fills, cooked = 0) => {
       const s = get()
-      const { state, completed, swept } = foldDailies(s.rewards.dailies, fills, cooked)
+      const { state, completed, swept } = foldDailies(s.rewards.dailies, fills, cooked, undefined, !cookingVisible())
       const paid: [string, number][] = completed.map((c) => [c.title, c.xp])
       if (swept) paid.push(['All three daily challenges', DAILY_SWEEP_XP])
       const claims: RewardClaim[] = paid.map(([, xp], i) => ({ id: `d${Date.now()}${i}`, time: Date.now(), kind: 'challenge', amount: xp, paidAs: 'xp' }))

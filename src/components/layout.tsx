@@ -7,7 +7,7 @@ import { GlobalSearch } from './GlobalSearch'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSelectedToken, useValuation } from '../hooks/useDerived'
 import { LAB_VIEWS } from '../game/flags'
-import { useLabs } from '../hooks/useLabs'
+import { useCooking, useLabs } from '../hooks/useLabs'
 import { selectSpeed, useGame, type DockTab, type View } from '../game/store'
 import { fmtUsd, toneClass } from '../utils/format'
 import { load, save } from '../utils/storage'
@@ -227,6 +227,7 @@ const MOBILE_NAV: { id: View; label: string; icon: typeof Compass }[] = [
 
 export function MobileNav() {
   const labs = useLabs() // CopyTrade, Sniper and Monitor: hidden unless the switch is on (or you are an admin)
+  const cooking = useCooking() // the Cooking page: the same, by its own switch
   const view = useGame((s) => s.view)
   const setView = useGame((s) => s.setView)
   return (
@@ -237,7 +238,7 @@ export function MobileNav() {
         <PnlButton />
       </div>
       <div className="no-scrollbar flex overflow-x-auto">
-        {MOBILE_NAV.filter((n) => labs || !LAB_VIEWS.includes(n.id)).map((n) => (
+        {MOBILE_NAV.filter((n) => (labs || !LAB_VIEWS.includes(n.id)) && (cooking || n.id !== 'cooking')).map((n) => (
           <button key={n.id} onClick={() => setView(n.id)} className={clsx('flex min-w-[56px] flex-1 flex-col items-center gap-0.5 py-1.5 text-[10px] font-semibold', view === n.id ? 'text-accent' : 'text-muted')}>
             <n.icon size={17} />
             {n.label}

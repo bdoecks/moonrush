@@ -241,6 +241,8 @@ export class Room {
   }
   /** Told about every timed tick: how long it took, and the error if it threw (the health watch listens). */
   static onTick: ((room: Room, ms: number, error?: unknown) => void) | null = null
+  /** The owner's `cooking` switch as the server last read it (see server/index.ts). Without a database: on. */
+  static playersCook = true
 
   dispose() {
     Room.all.delete(this)
@@ -872,6 +874,7 @@ export class Room {
     const w = this.walletOf(me)
     const money = msg.money
     if (!w || !money || !msg.token?.id) return fail('No round running')
+    if (!Room.playersCook) return fail('Cooking is closed for now while it is being reworked')
     // The coin's id comes from the game too (the game already shows the coin under it). Only the shape the game
     // makes, "TICKER-xxxx", and only as text: a LIST holding a live coin's id reads the same as that id once it is
     // turned into text, and the new coin then took the old coin's place (its chart, its holders' bags); an id like

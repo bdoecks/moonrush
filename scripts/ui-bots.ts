@@ -237,15 +237,16 @@ async function checklistBot(page: Page) {
     await shot(page, '01-start')
   })
 
-  await step(page, 'Hidden tabs', 'CopyTrade, Sniper and Monitor are hidden from players for now: no tab, and their letter keys do nothing.', async () => {
+  await step(page, 'Hidden tabs', 'CopyTrade, Sniper, Monitor and Cooking are hidden from players for now: no tab until their switch is on.', async () => {
     const dismiss = page.getByRole('button', { name: /Practice/ })
     void dismiss
     for (const label of ['CopyTrade', 'Monitor']) if (await page.getByRole('button', { name: label, exact: true }).count()) throw new Error(`the ${label} tab is showing`)
     if (await page.getByRole('button', { name: /Sniper$/ }).count()) throw new Error('the Sniper tab is showing')
+    if (await page.getByRole('button', { name: /Cooking$/ }).count()) throw new Error('the Cooking tab is showing')
     act('Switch the three pages on for the rest of this test (test copies only)')
     await page.evaluate(() => (window as any).__flags.setState({ labsDev: true }))
     await page.waitForTimeout(300)
-    return 'no CopyTrade, Sniper or Monitor tab until the switch is on'
+    return 'no CopyTrade, Sniper, Monitor or Cooking tab until the switch is on'
   })
 
   await step(page, 'Start a Practice round', 'Picking Practice should close the menu and start a round with $100,000.', async () => {

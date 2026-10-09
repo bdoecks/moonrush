@@ -10,9 +10,10 @@ export interface GameFlags {
   world: boolean // "MOONRUSH World" (off: only admins see it, until launch day)
   notice: string // banner at the top for everyone ('' = none)
   labs: boolean // CopyTrade, Sniper and Monitor (off: only admins see them, while they are being worked on)
+  cooking: boolean // the Cooking page and launching coins (off: only admins see it, and the server refuses players' launches)
 }
 
-export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false }
+export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false, cooking: false }
 
 // (`labsDev`: test copies only, so the UI bots can open the hidden pages. Never set by the live game.)
 export const useFlags = create<GameFlags & { loaded: boolean; labsDev?: boolean }>(() => ({ ...DEFAULT_FLAGS, loaded: false }))
@@ -25,6 +26,12 @@ let labsNow = false
 export const labsVisible = () => labsNow
 export const setLabsVisible = (v: boolean) => {
   labsNow = v
+}
+// The same for the Cooking page (the `cooking` switch; `useCooking` in hooks/useLabs.ts).
+let cookingNow = false
+export const cookingVisible = () => cookingNow
+export const setCookingVisible = (v: boolean) => {
+  cookingNow = v
 }
 
 export async function loadFlags() {

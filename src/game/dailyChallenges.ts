@@ -72,14 +72,18 @@ export const dailyFor = (state: DailyState | undefined, now = new Date()): Daily
  * The three challenges for a day. Each tier steps through its list one a day, so a goal never repeats two days running,
  * and the list lengths (5, 7, 4) share no factor: the same trio only comes back after 140 days.
  */
-export function dailyChallenges(date: string): DailyDef[] {
+export function dailyChallenges(date: string, noCooking = false): DailyDef[] {
   const [y, m, d] = date.split('-').map(Number)
   const n = Math.floor(Date.UTC(y, m - 1, d) / 86_400_000)
-  return (['easy', 'medium', 'hard'] as const).map((tier) => POOL[tier][n % POOL[tier].length])
+  // (`noCooking`: while the Cooking page is closed, a day whose turn is "Cook a coin" gets the next goal on the list.)
+  return (['easy', 'medium', 'hard'] as const).map((tier) => {
+    const pick = POOL[tier][n % POOL[tier].length]
+    return noCooking && pick.id === 'cook1' ? POOL[tier][(n + 1) % POOL[tier].length] : pick
+  })
 }
 
 /** Add fills and cooked coins to today. Returns the new numbers, the challenges that finished just now, and the bonus. */
-export function foldDailies(state: DailyState | undefined, fills: Trade[], cooked = 0, now = new Date()): { state: DailyState; completed: DailyDef[]; swept: boolean } {
+export function foldDailies(state: DailyState | undefined, fills: Trade[], cooked = 0, now = new Date(), noCooking = false): { state: DailyState; completed: DailyDef[]; swept: boolean } {
   const s = { ...dailyFor(state, now) }
   const coins = new Set(s.coins)
   for (const t of fills) {
@@ -95,7 +99,7 @@ export function foldDailies(state: DailyState | undefined, fills: Trade[], cooke
   s.peakPnl = Math.max(s.peakPnl, s.pnl)
   s.coins = [...coins]
   s.cooked += cooked
-  const defs = dailyChallenges(s.date)
+  const defs = dailyChallenges(s.date, noCooking)
   const completed = defs.filter((d) => !s.done.includes(d.id) && d.progress(s) >= d.target)
   if (completed.length) s.done = [...s.done, ...completed.map((d) => d.id)]
   const swept = !s.swept && defs.every((d) => s.done.includes(d.id))
