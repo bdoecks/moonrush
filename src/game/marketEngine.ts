@@ -1105,6 +1105,7 @@ export interface TickOptions {
   rugMult: number
   protectedIds: Set<string> // held or watched tokens are never delisted
   held?: Map<string, number> // coins in real wallets (players, bots), by coin id: the simulated crowd can't sell those
+  larps?: boolean // …and some posts are not what they look like (stage 2: real or larp)
   sparks?: boolean // the story market is on: most launches come from posts on the timeline (real-time engine only, see sparks.ts)
 }
 
@@ -1516,7 +1517,7 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
   // 8c. The story market: posts appear, devs launch coins on them, and the timeline settles on one coin or moves on.
   // (Switched off with stories still open: they are dropped, and their coins fade like any coin.)
   const storyMarket = realistic && !!opts.sparks
-  if (storyMarket) stepSparks(m, tokens, native, emit)
+  if (storyMarket) stepSparks(m, tokens, native, emit, !!opts.larps)
   else if (m.sparks?.length || (m.sparkSim && Object.keys(m.sparkSim).length)) dropSparks(m, tokens)
 
   // 9. New launches keep the trenches fresh.
@@ -1564,7 +1565,7 @@ const SPARK_KINDS: Record<SparkDev, Archetype> = { clean: 'runner', plain: 'chao
 const SPARK_LAUNCHES_A_TICK = 4
 
 /** One second of the story market: settle the stories that are due, launch the coins that are due, maybe a new post. */
-function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native'], emit: (e: Omit<MarketEvent, 'id' | 'tick' | 'time'>) => void) {
+function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native'], emit: (e: Omit<MarketEvent, 'id' | 'tick' | 'time'>) => void, larps = false) {
   // Its own dice (the market's seed and the tick), so the rest of the market draws the same numbers with it on or off.
   const rng = new Rng(((m.seed ^ 0x51ed270b) + Math.imul(m.tick, 0x9e3779b1)) >>> 0)
   const sims: Record<string, SparkSim> = { ...(m.sparkSim ?? {}) }
@@ -1583,6 +1584,15 @@ function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native
     if (m.time < sim.decideAt) continue
     delete sims[id]
     const spark = sparks.find((x) => x.id === id)
+    // A larp comes out: the crowd leaves every coin on it.
+    if (sim.larp) {
+      exposeSpark(m, tokens, id, rng)
+      if (!spark) continue
+      change(id, { over: m.time, fake: { kind: sim.larp, time: m.time, ...(sim.real ? { real: sim.real } : {}) } })
+      const who = sim.real ? `@${sim.real.handle}` : 'the account'
+      emit({ kind: 'sparkfake', sparkId: id, text: sim.larp === 'fake' ? `@${spark.by.handle} is not ${who}: the post was an impersonator's` : sim.larp === 'shot' ? `${who} never posted that: the screenshot was made up` : `${who} was hacked: the post was not theirs`, icon: '🎭', tone: 'down' })
+      continue
+    }
     const picked = settleSpark(m, tokens, id, sim, rng, native, emit)
     if (!spark) continue
     if (picked) {
@@ -1621,7 +1631,7 @@ function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native
       t.sim.flow!.att = Math.max(t.sim.flow!.att, t.sim.watch)
       pushCandles(t, m.time, t.price, 0)
       // Its snipers go by the post and by how early the coin is, not by what it is called.
-      snipe(m, t, rng, 1, blockUsd(sim.tier, sim.n, rng))
+      snipe(m, t, rng, 1, blockUsd(sim.tier, sim.n, rng, sim.larp))
       t.sim.flow!.ema = t.price // (they are in for the story: nobody takes profit on the launch block itself)
       tokens.unshift(t)
       live++
@@ -1633,7 +1643,7 @@ function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native
   if (rng.chance(sparkRate(FLOW.launchPerSec))) {
     const n = (m.nextSparkId = (m.nextSparkId ?? 0) + 1)
     m.sparkSeq = (m.sparkSeq ?? 0) + 1
-    const { spark, sim } = makeSpark(m, rng, `s${n}`, m.sparkSeq, new Set(Object.values(sims).map((x) => x.ticker)))
+    const { spark, sim } = makeSpark(m, rng, `s${n}`, m.sparkSeq, new Set(Object.values(sims).map((x) => x.ticker)), undefined, larps)
     sparks = [spark, ...sparks]
     sims[spark.id] = sim
     emit({ kind: 'spark', sparkId: spark.id, text: `@${spark.by.handle}: ${spark.text}`, icon: spark.kind === 'news' ? '📰' : '📣', tone: 'info' })
@@ -1644,6 +1654,31 @@ function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native
   for (const t of tokens) if (t.spark && (t.status === 'bonding' || t.status === 'graduated')) alive.add(t.spark.id)
   m.sparks = keptSparks(sparks, new Set(Object.keys(sims)), alive, m.time)
   m.sparkSim = sims
+}
+
+/** A post turns out to be a larp: its coins stop being watched and the crowd sells what it holds of every one of them. */
+function exposeSpark(m: MarketState, tokens: Token[], id: string, rng: Rng) {
+  for (const t of tokens) {
+    if (t.spark?.id !== id) continue
+    t.sim.watch = undefined
+    if (t.status !== 'bonding' || !t.sim.flow || curveDone(t)) continue
+    let qty = Math.max(0, LAUNCHPADS[t.pad].vTokens - t.liquidity / 2 / t.price - (t.sim.held ?? 0) - (t.creator === 'you' ? 0 : (t.devPct / 100) * SUPPLY)) * SPARK.dump
+    for (let k = rng.int(2, 4); k > 0 && qty > 0; k--) {
+      const part = k === 1 ? qty : qty * rng.range(0.35, 0.65)
+      qty -= part
+      const want = quoteSell(t, part).usdOut
+      if (want < FLOW.minTrade) continue
+      const usd = fillSim(m, t, 'sell', want, m.time, walletName(rng))
+      if (!(usd > 0)) continue
+      t.volume += usd
+      t.sells += 1
+      t.win = addWin(getWin(t, m.time), usd, 0, 1)
+      t.holders = Math.max(1, t.holders - 1)
+    }
+    t.sim.flow.att *= 0.05
+    t.hype = Math.max(0, t.hype - 30)
+    refreshChanges(t, m.time)
+  }
 }
 
 /** The story market is off: stories still open are closed with no coin picked, and old posts leave the list as they would. */

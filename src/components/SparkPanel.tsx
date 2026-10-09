@@ -24,7 +24,9 @@ const RISK_CLS: Record<Token['riskLevel'], string> = { LOW: 'border-up/25 text-u
 const live = (t: Token) => t.status === 'bonding' || t.status === 'graduated'
 
 /** What became of a post, in one line (null while the timeline has not settled). */
+const FAKE_TEXT = { fake: 'It came out: this was an impersonator, not the real account', shot: 'It came out: the screenshot was made up, the account never posted it', hack: 'It came out: the account was hacked, the post was not theirs' }
 function outcome(s: Spark, now: number) {
+  if (s.fake) return `${FAKE_TEXT[s.fake.kind]} (${fmtAge(Math.max(0, now - s.fake.time))} ago). The crowd left every coin on it`
   if (s.picked) return `The timeline settled on $${s.picked.ticker} ${fmtAge(Math.max(0, now - s.picked.time))} ago`
   if (s.over !== undefined) return `The timeline moved on ${fmtAge(Math.max(0, now - s.over))} ago: no coin was picked`
   return null
@@ -47,6 +49,7 @@ export function SparkPost({ s, now, small }: { s: Spark; now: number; small?: bo
         <span className={clsx('shrink-0 rounded px-1 text-[8px] font-bold', SRC_META.story.cls)} title={SRC_META.story.hint}>{SRC_META.story.label}</span>
       </div>
       <p className={clsx('whitespace-pre-line leading-snug text-ink/90', small ? 'mt-1.5 text-[11px]' : 'mt-2 text-[13px]')}>{s.text}</p>
+      {s.quote && <div className="mt-1.5 flex items-center gap-1 rounded border border-line2 px-1.5 py-0.5 text-[10px] text-muted">🖼 A screenshot. It says <b className="text-ink">{s.quote.name}</b>{s.quote.verified && <VerifiedMark size={10} />} <span className="text-dim">@{s.quote.handle}</span> posted this</div>}
     </div>
   )
 }
@@ -62,7 +65,7 @@ export function SparkChip({ id, wide }: { id: string; wide?: boolean }) {
   const spark = useGame((s) => s.market.sparks?.find((x) => x.id === id))
   const open = useGame((s) => s.openSpark)
   if (!spark && !n) return null
-  const done = spark?.picked ? `$${spark.picked.ticker} picked` : spark?.over !== undefined ? 'moved on' : null
+  const done = spark?.fake ? 'not real' : spark?.picked ? `$${spark.picked.ticker} picked` : spark?.over !== undefined ? 'moved on' : null
   return (
     <button
       type="button" onClick={() => open(id)} title="See the coins launched on this post"
@@ -70,7 +73,7 @@ export function SparkChip({ id, wide }: { id: string; wide?: boolean }) {
     >
       <Layers size={11} className="shrink-0 text-info" />
       <span className="num">{n ? `${n} coin${n === 1 ? '' : 's'} launched on this` : 'No coins on the market'}</span>
-      {done && <span className={clsx('ml-auto truncate', spark?.picked ? 'text-up' : 'text-dim')}>{done}</span>}
+      {done && <span className={clsx('ml-auto truncate', spark?.fake ? 'text-down' : spark?.picked ? 'text-up' : 'text-dim')}>{done}</span>}
     </button>
   )
 }
@@ -85,7 +88,7 @@ export function SparkSource({ t, now, onOpen }: { t: Token; now: number; onOpen?
   const spark = useGame((s) => (id ? s.market.sparks?.find((x) => x.id === id) : undefined))
   if (!t.spark || !spark) return null
   const after = Math.max(0, t.createdAt - spark.time)
-  const end = spark.picked
+  const end = spark.fake ? { text: FAKE_TEXT[spark.fake.kind], cls: 'text-down' } : spark.picked
     ? spark.picked.tokenId === t.id ? { text: 'The timeline settled on this coin', cls: 'text-up' } : { text: `The timeline settled on another coin on this post ($${spark.picked.ticker})`, cls: 'text-down' }
     : spark.over !== undefined ? { text: 'The timeline moved on: no coin on this post was picked', cls: 'text-dim' }
     : { text: 'The timeline has not settled on a coin yet', cls: 'text-warn' }
@@ -138,7 +141,7 @@ export function SparkDrawer() {
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {spark ? <SparkPost s={spark} now={now} /> : <p className="rounded-lg border border-line bg-bg p-3 text-[12px] text-dim">This post has left the timeline.</p>}
           {spark && (
-            <p className={clsx('mt-2 rounded-md border px-2.5 py-1.5 text-[11px] leading-snug', spark.picked ? 'border-up/30 bg-up/5 text-up' : spark.over !== undefined ? 'border-line text-dim' : 'border-warn/30 bg-warn/5 text-warn')}>
+            <p className={clsx('mt-2 rounded-md border px-2.5 py-1.5 text-[11px] leading-snug', spark.fake ? 'border-down/40 bg-down/5 text-down' : spark.picked ? 'border-up/30 bg-up/5 text-up' : spark.over !== undefined ? 'border-line text-dim' : 'border-warn/30 bg-warn/5 text-warn')}>
               {end ?? 'The timeline has not settled on a coin yet. Most posts go nowhere. When one does catch on, the crowd ends up in ONE of these coins and leaves the others.'}
             </p>
           )}

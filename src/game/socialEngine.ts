@@ -269,6 +269,13 @@ export function tickSocial(m: MarketState, rng: Rng, actions: WalletAction[], ev
       continue
     }
     if (e.kind === 'sparkpick') continue
+    // A larp has come out: the account it borrowed says so itself.
+    if (e.kind === 'sparkfake') {
+      const s = m.sparks?.find((x) => x.id === e.sparkId)
+      const real = s?.fake?.real
+      if (s && real) posts.push({ id: m.tick * 1000 + 700 + posts.length, tick: m.tick, time: m.time, accountId: real.id, by: real, isCall: false, text: s.fake!.kind === 'fake' ? `@${s.by.handle} is not me. i did not post that` : s.fake!.kind === 'shot' ? 'there is a screenshot going around. i never posted that' : 'we have our account back. ignore the last post, it was not ours' })
+      continue
+    }
     const t = e.tokenId ? byId.get(e.tokenId) : undefined
     if (!rng.chance(e.kind === 'rug' || e.kind === 'graduation' ? 0.8 : 0.35)) continue
     switch (e.kind) {

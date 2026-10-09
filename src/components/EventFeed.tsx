@@ -37,6 +37,7 @@ const KIND: Record<EventKind, { label: string; cat: Category; color: string }> =
   meta: { label: 'Meta', cat: 'social', color: '#8b93a1' },
   spark: { label: 'Post', cat: 'social', color: '#4da3ff' },
   sparkpick: { label: 'Picked', cat: 'social', color: '#c6ff3d' },
+  sparkfake: { label: 'Fake', cat: 'social', color: '#ff4d6a' },
 }
 const CATS: { id: 'all' | 'mine' | Category; label: string }[] = [
   { id: 'all', label: 'All' },

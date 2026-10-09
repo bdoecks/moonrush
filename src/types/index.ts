@@ -129,7 +129,11 @@ export interface Spark {
   theme?: Narrative
   picked?: { tokenId: string; ticker: string; time: number } // the coin the timeline settled on, said once it has happened
   over?: number // market time the timeline moved on without settling on any coin
+  quote?: { name: string; handle: string; verified: boolean } // a "screenshot": the post says THIS account posted it (it may never have)
+  fake?: { kind: SparkLarp; time: number; real?: SparkBy } // said once it has come out: the post was not what it looked like
 }
+/** A post that is not what it looks like: an impersonator's account, a made-up screenshot, a hacked account. */
+export type SparkLarp = 'fake' | 'shot' | 'hack'
 /** A spark's hidden side: what the simulation knows and a player has to work out. Never sent to a browser. */
 export interface SparkSim {
   tier: SparkTier
@@ -142,6 +146,8 @@ export interface SparkSim {
   decideAt: number // market time the timeline settles on one coin (or drops the story)
   due: number[] // market times of the launches still to come
   n: number // coins launched on it so far
+  larp?: SparkLarp // it is not what it looks like, and comes out at `decideAt` (never before: that is the game)
+  real?: SparkBy // …the account it pretends to be from
 }
 
 /** Themes that are hot outside the game, and where that knowledge comes from (never presented as a live feed unless it is one). */
@@ -660,7 +666,7 @@ export type MarketEngine = 'classic' | 'realistic'
 export type EventKind =
   | 'trending' | 'whale' | 'momentum' | 'liquidity' | 'panic' | 'viral' | 'volatility'
   | 'smartmoney' | 'devsell' | 'kol' | 'graduation' | 'rug' | 'launch' | 'marketup' | 'marketdown' | 'meta' | 'cook' | 'bundle' | 'wash' | 'airdrop'
-  | 'spark' | 'sparkpick' // the story market: a post that coins get launched on, and the timeline settling on one of them
+  | 'spark' | 'sparkpick' | 'sparkfake' // the story market: a post that coins get launched on, and the timeline settling on one of them
 
 export interface MarketEvent {
   id: number

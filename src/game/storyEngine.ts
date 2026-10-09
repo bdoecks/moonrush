@@ -131,7 +131,7 @@ export function tickStories(m: MarketState, input: StoryInput): NewBeat[] {
   const eventsOf = group(input.events)
   // The story market (see sparks.ts): posts the timeline settled this tick, one way or the other.
   const settled = new Map<string, MarketEvent>()
-  for (const e of input.events) if (e.kind === 'sparkpick' && e.sparkId) settled.set(e.sparkId, e)
+  for (const e of input.events) if ((e.kind === 'sparkpick' || e.kind === 'sparkfake') && e.sparkId) settled.set(e.sparkId, e)
   const sparkOf = new Map((m.sparks ?? []).map((x) => [x.id, x]))
   const actionsOf = group(input.actions)
   const postsOf = group(input.posts)
@@ -229,7 +229,8 @@ export function tickStories(m: MarketState, input: StoryInput): NewBeat[] {
       if (end && live(t)) {
         const who = sparkOf.get(t.spark!.id)?.by.handle
         const post = who ? `@${who}'s post` : 'the post it was launched on'
-        if (end.tokenId === t.id) push(t, { kind: 'milestone', tone: 'up', src: 'market', text: `The timeline settled on this coin for ${post}: the crowd left the other coins on it` })
+        if (end.kind === 'sparkfake') push(t, { kind: 'warn', tone: 'down', src: 'market', text: `The post this coin was launched on was not real (${end.text}): the crowd left` })
+        else if (end.tokenId === t.id) push(t, { kind: 'milestone', tone: 'up', src: 'market', text: `The timeline settled on this coin for ${post}: the crowd left the other coins on it` })
         else if (end.tokenId) push(t, { kind: 'fade', tone: 'down', src: 'market', text: `The timeline went with $${end.ticker} for ${post}: the crowd left this coin` })
         else push(t, { kind: 'fade', tone: 'info', src: 'market', text: `The timeline moved on from ${post} without settling on a coin` })
       }

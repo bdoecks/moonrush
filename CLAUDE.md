@@ -679,3 +679,21 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
 - He tests, then says "push it". Test locally first, say what you tested and what you could not test.
 - Two Claudes may be working at once (his and the backend developer's). Before starting, pull `main`; say which
   files you plan to touch; keep pull requests small and about one thing.
+
+## Story market stage 2: real or larp (the `larps` switch)
+
+- Built 2026-10-09 on top of stage 1, behind its own switch (`larps` in `app_flags`, default off; needs `sparks` on;
+  `Room.larps`; `STORY_LARPS=1` or `node scripts/world-dev.mjs larps` on a test copy). Of the posts that look like a
+  known account's (`SPARK.larp`): 14% come from an impersonator (same name and picture, a handle one slip off, no
+  check mark, fewer followers), 10% are a nobody's "screenshot" of a post the account never made (`Spark.quote`), 4%
+  are a hacked account's (nothing public gives it away); half those shares for mid-size accounts, never a nobody's
+  post. A larp never runs: at its settle time it comes out (`exposeSpark`: the crowd sells what it holds of EVERY
+  coin on it), the post is marked (`Spark.fake`), and the real account says so on the timeline. Which post is a larp
+  is in `SparkSim` (`larp`, `real`) and never leaves the server (`spark-test`).
+- An impersonator's handle is a slip of the real one: never one that doubles a letter ("midnigght" spelled a slur;
+  the test caught it).
+- Measured (`LARPS=1 post-test`, World with bots, $100, 48 World hours a rule, ONE round: good to about 3 points on
+  big accounts): the careful reader who also checks the account (check mark, not a screenshot) +2.5% over all his
+  trades and +7.4% on accounts of 500K to 20M; the careful reader who does not check -1.0% overall; the exact name
+  alone -3.2% (-4.9% on big accounts); the first coin -4.4% (-16% on big accounts, -20% on the huge ones).
+  Run more rounds before quoting finer than that, and before touching `SPARK.larp`.

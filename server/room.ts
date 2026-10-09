@@ -249,6 +249,8 @@ export class Room {
    * src/game/sparks.ts) in every room on the real-time engine, the World first of all. Without a database: off.
    */
   static storyMarket = false
+  /** …and the `larps` switch: some posts are not what they look like (stage 2). Only with the story market on. */
+  static larps = false
 
   dispose() {
     Room.all.delete(this)
@@ -1051,7 +1053,7 @@ export class Room {
     const held = new Map<string, number>()
     for (const m of this.members.values()) for (const [id, p] of Object.entries(m.wallet?.positions ?? {})) held.set(id, (held.get(id) ?? 0) + p.qty)
     for (const w of this.wallets) if (!w.bot) for (const [id, p] of Object.entries(w.positions)) held.set(id, (held.get(id) ?? 0) + p.qty) // (a bot's public wallet mirrors its own)
-    const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds, held, sparks: Room.storyMarket })
+    const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds, held, sparks: Room.storyMarket, larps: Room.larps })
     // The crowd talks about what just happened: a coin that bonded, a dev that dumped.
     for (const e of e1) {
       if (e.kind === 'graduation' && e.ticker) this.react('grad', e.ticker, 0.45, [2, 8])

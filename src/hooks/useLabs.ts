@@ -21,3 +21,10 @@ export function useSparks() {
   const admin = useAccount((s) => s.admin)
   return on || admin
 }
+
+/** Real or larp (stage 2 of the story market) is behind the `larps` switch, the same way. */
+export function useLarps() {
+  const on = useFlags((s) => s.larps || (import.meta.env.DEV && !!s.sparksDev))
+  const admin = useAccount((s) => s.admin)
+  return on || admin
+}

@@ -11,10 +11,11 @@ export interface GameFlags {
   notice: string // banner at the top for everyone ('' = none)
   labs: boolean // CopyTrade, Sniper and Monitor (off: only admins see them, while they are being worked on)
   cooking: boolean // the Cooking page and launching coins (off: only admins see it, and the server refuses players' launches)
+  larps: boolean // real or larp: some posts are fakes (off: only admins get it, in their own solo game with the story market)
   sparks: boolean // the story market: posts that coins get launched on (off: only admins get it, in solo play on the real-time engine)
 }
 
-export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false, cooking: false, sparks: false }
+export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false, cooking: false, sparks: false, larps: false }
 
 // (`labsDev`, `sparksDev`: test copies only, so the UI bots can open the hidden pages and play the story market.
 // Never set by the live game.)
@@ -43,6 +44,12 @@ let sparksNow: boolean | null = null
 export const sparksVisible = () => sparksNow
 export const setSparksVisible = (v: boolean | null) => {
   sparksNow = v
+}
+// …and for real or larp (the `larps` switch), the same way.
+let larpsNow = false
+export const larpsVisible = () => larpsNow
+export const setLarpsVisible = (v: boolean) => {
+  larpsNow = v
 }
 
 export async function loadFlags() {

@@ -9,7 +9,7 @@
 
 export interface Update {
   id: string
-  flag?: 'sparks' // told only while this switch is on (see the top of the file)
+  flag?: 'sparks' | 'larps' // told only while this switch is on (see the top of the file)
   date: string // as shown, e.g. "October 8, 2026"
   title: string
   fixed?: string[]
@@ -18,7 +18,8 @@ export interface Update {
 }
 
 /** What is being worked on now, newest plans first. */
-export const WORKING_ON: { what: string; why?: string; until?: 'sparks' }[] = [
+export const WORKING_ON: { what: string; why?: string; until?: 'sparks' | 'larps' }[] = [
+  { until: 'larps', what: 'Real or fake posts', why: 'Some posts will come from impersonators, made-up screenshots and hacked accounts, and you will have to check who really posted before you buy. It is being tested first.' },
   { until: 'sparks', what: 'Coins that come from a story', why: 'A post or a news item appears on the timeline, devs rush to launch coins on it, and you work out which coin is the real one. It is being tested before it opens to everyone.' },
   { what: 'Cooking (launching your own coin)', why: 'It is being rebuilt so that launching a coin is a real bet, not a way to print money.' },
   { what: 'CopyTrade, Sniper and Monitor', why: 'They work, but not well enough yet. They come back when they are worth using.' },
@@ -33,6 +34,18 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 
 /** Newest first. */
 export const UPDATES: Update[] = [
+  {
+    id: '2026-10-09-real-or-fake',
+    flag: 'larps',
+    date: 'October 2026',
+    title: 'Real or fake: check who posted',
+    added: [
+      'Not every post from a famous name is real. An impersonator has the same name and picture, but the handle is one letter off, there is no check mark and the follower count is lower.',
+      'A screenshot of a famous account\'s post, shared by a nobody, may be made up. The post says it is a screenshot and whose post it claims to be.',
+      'Now and then a real account is hacked. Nothing gives that one away until it comes out.',
+      'When a fake comes out, the real account says so on the timeline and the crowd leaves every coin that was launched on it.',
+    ],
+  },
   {
     id: '2026-10-09-story-market',
     flag: 'sparks',
@@ -98,7 +111,7 @@ export const UPDATES: Update[] = [
   },
 ]
 
-type Switches = Partial<Record<'sparks', boolean>>
+type Switches = Partial<Record<'sparks' | 'larps', boolean>>
 /** The updates a player is told about right now (an update behind a switch that is off is not news yet). */
 export const shownUpdates = (flags: Switches) => UPDATES.filter((u) => !u.flag || !!flags[u.flag])
 /** …and what is being worked on (a thing that has opened is not being worked on any more). */

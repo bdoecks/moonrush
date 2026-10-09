@@ -31,8 +31,8 @@ import { BrokeBanner } from './components/WorldBoard'
 import { PlayerCardDrawer } from './components/PlayerCard'
 import { SparkDrawer } from './components/SparkPanel'
 import { AdminFloat } from './components/AdminFloat'
-import { LAB_VIEWS, setCookingVisible, setLabsVisible, setSparksVisible, useFlags, watchFlags } from './game/flags'
-import { useCooking, useLabs, useSparks } from './hooks/useLabs'
+import { LAB_VIEWS, setCookingVisible, setLabsVisible, setLarpsVisible, setSparksVisible, useFlags, watchFlags } from './game/flags'
+import { useCooking, useLabs, useLarps, useSparks } from './hooks/useLabs'
 import { Tutorial } from './components/Tutorial'
 import { DiscoverView } from './pages/DiscoverView'
 import { TrenchesView } from './pages/TrenchesView'
@@ -111,6 +111,8 @@ export default function App() {
   // The story market in this player's own (solo) game, by its switch (`sparks`).
   const sparks = useSparks()
   const switchesRead = useFlags((s) => s.loaded)
+  const larps = useLarps()
+  useEffect(() => setLarpsVisible(larps), [larps])
   useEffect(() => setSparksVisible(sparks ? true : switchesRead ? false : null), [sparks, switchesRead])
 
   // Start (or roll over to) this week's ranked season.

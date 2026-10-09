@@ -28,7 +28,7 @@
 // Pure, and a leaf: the market engine imports this file, so nothing here may import the market engine.
 import { anonAccount, NEVER_SPELL, SPARK_ACCOUNTS, SPARK_NAMES, SPARK_TEXT, SPARK_TITLES, SUBJECTS, TYPE_THEME, VARIANT_POST, VARIANT_PRE, type SparkAccount } from '../data/sparkPosts'
 import { SAFE_THEMES } from '../data/themeWords'
-import type { MarketState, RiskLevel, Spark, SparkBy, SparkSim, SparkTier, Token } from '../types'
+import type { MarketState, RiskLevel, Spark, SparkBy, SparkLarp, SparkSim, SparkTier, Token } from '../types'
 import { clamp, type Rng } from '../utils/rng'
 import { isStale } from './dataSources'
 
@@ -82,6 +82,12 @@ export const SPARK = {
   dump: 0.9,
   gain: 0.7,
   keep: 1,
+  // Real or larp (stage 2, its own switch). Of the posts that look like a known account's: the share that come from an
+  // impersonator (the handle one slip off, no check mark, fewer followers), that are a nobody's "screenshot" of a
+  // post the account never made, and that are a hacked account's (nothing to see until it comes out). `mid`: the
+  // same for mid-size accounts, as a share of that. A larp never runs: when it comes out the crowd leaves every
+  // coin on it. `fakeBlock` / `shotBlock`: the snipers' money on them, next to the real thing (bots get fooled too).
+  larp: { fake: 0.14, shot: 0.1, hack: 0.04, mid: 0.5, fakeBlock: 0.6, shotBlock: 0.45, followers: [0.03, 0.25] as [number, number] },
   kept: 600, // seconds a post stays on the list after its last coin has gone
   max: 90, // posts kept at the most (the ones with a live coin are never dropped)
 }
@@ -103,7 +109,7 @@ const byOf = (a: SparkAccount): SparkBy => ({ id: a.id, name: a.name, handle: a.
  * A new post. `taken` = the right names of the stories still open (two posts about a Waffles at once would be two
  * right coins with one name). Returns the public spark and its hidden side.
  */
-export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trends'>, rng: Rng, id: string, seq: number, taken: Set<string> = new Set(), nowMs = Date.now()): { spark: Spark; sim: SparkSim } {
+export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trends'>, rng: Rng, id: string, seq: number, taken: Set<string> = new Set(), nowMs = Date.now(), larps = false): { spark: Spark; sim: SparkSim } {
   const tier = rng.weighted<SparkTier>(Object.fromEntries(TIERS.map((k) => [k, SPARK.tiers[k].w])) as Record<SparkTier, number>)
   const named = SPARK_ACCOUNTS.filter((a) => a.tier === tier)
   // (A small account is a nobody, or now and then a local paper; the smallest are always nobodies.)
@@ -139,6 +145,30 @@ export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trend
     .replaceAll('{H}', name.replace(/[^A-Za-z0-9]/g, '')).replaceAll('{P}', rng.pick(T.PLACES)).replaceAll('{J}', rng.pick(T.JOBS))
     .replace(/\b([aA]) (?=[aeioAEIO])/g, '$1n ') // "a owl" → "an owl" (not before a u: a ufo, a unicorn)
 
+  // Real or larp? (Only asked with that switch on, so the dice roll as before without it.)
+  let larp: SparkLarp | undefined
+  let by = byOf(account)
+  let said = text
+  let quote: Spark['quote']
+  if (larps && named.includes(account) && (tier === 'mid' || tier === 'big' || tier === 'mega')) {
+    const L = SPARK.larp
+    const k = tier === 'mid' ? L.mid : 1
+    const r = rng.next()
+    larp = r < L.fake * k ? 'fake' : r < (L.fake + L.shot) * k ? 'shot' : r < (L.fake + L.shot + L.hack) * k ? 'hack' : undefined
+    if (larp === 'fake') {
+      let handle = account.handle
+      // (Never a slip that doubles a letter: next to the letters already there that can spell a slur, "midnigght".)
+      const doubled = (h: string) => [...h].some((c, i) => i > 0 && c === h[i - 1] && !account.handle.includes(c + c))
+      for (let i = 0; i < 12 && (handle === account.handle || doubled(handle) || SPARK_ACCOUNTS.some((a) => a.handle === handle)); i++) handle = typo(account.handle, rng).toLowerCase().replace(/[^a-z0-9_]/g, '')
+      if (doubled(handle)) handle = account.handle
+      if (handle === account.handle) handle = `${account.handle}_`
+      by = { ...by, id: `sx-${handle}`, handle, verified: false, followers: Math.round(account.followers * rng.range(...L.followers)) }
+    } else if (larp === 'shot') {
+      by = byOf(anonAccount(() => rng.next(), 'small'))
+      quote = { name: account.name, handle: account.handle, verified: account.verified }
+      said = `${rng.pick(SHOT_LEAD).replace('{W}', account.name)} "${text}"`
+    }
+  }
   const t = SPARK.tiers[tier]
   const d = SPARK.decide
   const decideAt = m.time + Math.round(clamp(lognormal(rng, d.median, d.sigma), d.min, d.max))
@@ -149,10 +179,13 @@ export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trend
     due.push(at)
     at += Math.max(1, Math.round(-Math.log(1 - rng.next()) * t.gap))
   }
-  const spark: Spark = { id, seq, tick: m.tick, time: m.time, kind, by: byOf(account), text, theme: SAFE_THEMES.get(subject.word) ?? TYPE_THEME[subject.type] }
-  const sim: SparkSim = { tier, name, ticker, word: subject.word, emoji: subject.emoji, runs: rng.chance(t.runs), power: Math.exp(0.4 * rng.gauss()), decideAt, due, n: 0 }
+  const spark: Spark = { id, seq, tick: m.tick, time: m.time, kind, by, text: said, theme: SAFE_THEMES.get(subject.word) ?? TYPE_THEME[subject.type], ...(quote ? { quote } : {}) }
+  const runs = rng.chance(t.runs)
+  const sim: SparkSim = { tier, name, ticker, word: subject.word, emoji: subject.emoji, runs: runs && !larp, power: Math.exp(0.4 * rng.gauss()), decideAt, due, n: 0, ...(larp ? { larp, real: byOf(account) } : {}) }
   return { spark, sim }
 }
+/** How a nobody presents a "screenshot" of a known account's post. */
+const SHOT_LEAD = ['screenshot before it gets deleted. {W} just posted:', 'did {W} really just post this??', 'no way {W} posted this:', '{W} posted and deleted this in ten seconds:']
 const weightOf = (word: string, hot: Map<string, number>, meta: MarketState['meta'], onTrend: boolean) => (onTrend ? 0.2 + (hot.get(word) ?? 0) : 1) * (meta && SAFE_THEMES.get(word) === meta ? SPARK.meta : 1)
 
 // ─── What devs call their coins ──────────────────────────────────────────────
@@ -297,7 +330,7 @@ export function pickCoin(cands: Candidate[], rng: Rng): number {
 }
 
 /** The snipers' money ($) on the `n`-th coin of a post: they load the early ones, whatever those are called. */
-export const blockUsd = (tier: SparkTier, n: number, rng: Rng) => SPARK.tiers[tier].block * SPARK.blockDecay ** (n - 1) * Math.exp(SPARK.blockSigma * rng.gauss() - (SPARK.blockSigma * SPARK.blockSigma) / 2)
+export const blockUsd = (tier: SparkTier, n: number, rng: Rng, larp?: SparkLarp) => (larp === 'fake' ? SPARK.larp.fakeBlock : larp === 'shot' ? SPARK.larp.shotBlock : 1) * SPARK.tiers[tier].block * SPARK.blockDecay ** (n - 1) * Math.exp(SPARK.blockSigma * rng.gauss() - (SPARK.blockSigma * SPARK.blockSigma) / 2)
 /** The attention the `n`-th coin of a post has for as long as the story is open. */
 export const watchOf = (tier: SparkTier, n: number) => SPARK.tiers[tier].watch * Math.max(SPARK.watchMin, SPARK.watchDecay ** (n - 1))
 

@@ -135,6 +135,7 @@ async function takeBackup(note?: string) {
 // The story market on a test copy with no database to ask (`node scripts/world-dev.mjs stories`). Never set this on
 // Render: there the owner's `sparks` switch decides, and its answer replaces this within seconds.
 if (process.env.STORY_MARKET === '1') Room.storyMarket = true
+if (process.env.STORY_LARPS === '1') Room.larps = true
 if (persistOn) {
   // Once a minute: does the database answer.
   setInterval(() => void pingDb().then((r) => noteDb(r.ok, r.ms)), 60_000).unref()
@@ -145,7 +146,10 @@ if (persistOn) {
   askCooking()
   setInterval(askCooking, 60_000).unref()
   // The `sparks` switch the same way: the story market in the World and in rooms.
-  const askStories = () => void readFlag('sparks').then((on) => { if (on !== null) Room.storyMarket = on })
+  const askStories = () => {
+    void readFlag('sparks').then((on) => { if (on !== null) Room.storyMarket = on })
+    void readFlag('larps').then((on) => { if (on !== null) Room.larps = on })
+  }
   askStories()
   setInterval(askStories, 60_000).unref()
   // Backups are daily. Whether one is due is asked two minutes after the World has loaded and every ten minutes

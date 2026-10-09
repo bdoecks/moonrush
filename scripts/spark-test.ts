@@ -87,6 +87,24 @@ const made: { spark: Spark; sim: SparkSim }[] = []
   ok(runs('anon') < 0.1 && runs('big') > runs('mid') && runs('mid') > runs('small') && runs('mega') < 0.75, `most posts go nowhere, and a bigger account's are picked up more often (${['anon', 'small', 'mid', 'big', 'mega'].map((t) => `${t} ${pct(runs(t), 0)}`).join(', ')})`)
 }
 
+// Real or larp (stage 2): off, no post is a fake; on, some known-looking posts are, and nothing public gives a hacked one away.
+{
+  ok(made.every((x) => !x.sim.larp && !x.spark.quote && !x.spark.fake), 'without the larp switch no post is a fake')
+  const rng = new Rng(13)
+  const on: { spark: Spark; sim: SparkSim }[] = []
+  for (let i = 0; i < 20000; i++) on.push(makeSpark(fakeMarket, rng, `s${i}`, i, new Set(), undefined, true))
+  const known = on.filter((x) => ['big', 'mega'].includes(x.sim.tier))
+  const share = (k: string) => known.filter((x) => x.sim.larp === k).length / known.length
+  ok(Math.abs(share('fake') - SPARK.larp.fake) < 0.03 && Math.abs(share('shot') - SPARK.larp.shot) < 0.03 && Math.abs(share('hack') - SPARK.larp.hack) < 0.02 && on.every((x) => !x.sim.larp || !['anon', 'small'].includes(x.sim.tier)), `with it on, of the posts that look like a big account's: impersonators ${pct(share('fake'), 0)}, made-up screenshots ${pct(share('shot'), 0)}, hacked ${pct(share('hack'), 0)}; a nobody's post is never one`)
+  const fakes = on.filter((x) => x.sim.larp === 'fake')
+  ok(fakes.every((x) => !x.spark.by.verified && x.spark.by.handle !== x.sim.real!.handle && x.spark.by.name === x.sim.real!.name && x.spark.by.followers < x.sim.real!.followers && !SPARK_ACCOUNTS.some((a) => a.handle === x.spark.by.handle) && /^[a-z0-9_]{3,24}$/.test(x.spark.by.handle) && !nameBlocked(x.spark.by.handle)), 'an impersonator has the name and the picture, but a handle that is one slip off, no check mark and fewer followers')
+  const shots = on.filter((x) => x.sim.larp === 'shot')
+  ok(shots.every((x) => !!x.spark.quote && x.spark.quote.handle === x.sim.real!.handle && x.spark.by.followers < 25_000 && x.spark.text.includes(x.sim.real!.name) && (x.spark.text.includes(x.sim.name) || x.spark.text.includes(`#${x.sim.name.replace(/ /g, '')}`))), 'a made-up screenshot comes from a nobody and says which account it claims posted it')
+  const hacks = on.filter((x) => x.sim.larp === 'hack')
+  ok(hacks.length > 20 && hacks.every((x) => x.spark.by.verified === x.sim.real!.verified && x.spark.by.handle === x.sim.real!.handle && !x.spark.quote), 'a hacked account looks exactly like itself: nothing to read until it comes out')
+  ok(on.every((x) => !x.sim.larp || !x.sim.runs) && on.every((x) => !('larp' in x.spark) && !('real' in x.spark) && !x.spark.fake), 'a larp never runs, and the post a browser gets does not say it is one')
+}
+
 // ─── 2. What devs call their coins ───────────────────────────────────────────
 {
   const rng = new Rng(21)
@@ -358,7 +376,7 @@ function run(seed: number, ticks: number, dials: Partial<typeof SPARK> = {}): Ru
   const ws = { readyState: 1, close() {}, send: (d: string | Buffer) => { box.raw.push(String(d)); box.msgs.push(JSON.parse(String(d))) } }
   world.join(ws as never, { t: 'hello', name: 'Reader', avatar: '👀', level: 1, playerId: 'u-reader', verified: true })
   const welcome = box.msgs.find((x) => x.t === 'welcome') as Extract<ServerMsg, { t: 'welcome' }>
-  const HIDDEN = /"sparkSim"|"decideAt"|"runs":|"power":|"due":/
+  const HIDDEN = /"sparkSim"|"decideAt"|"runs":|"power":|"due":|"larp":/
   ok(!!welcome && (welcome.market.sparks?.length ?? 0) > 0 && !HIDDEN.test(box.raw.join('')), `joining brings the posts on the timeline (${welcome?.market.sparks?.length}) and nothing of their hidden side`)
   ok(Object.keys(w.market.sparkSim ?? {}).length > 0, '(the server itself has stories open at that moment, so there was something to hide)')
   let mine: Spark[] | undefined = welcome.market.sparks

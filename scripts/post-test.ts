@@ -8,6 +8,8 @@
 //   slow      the same, by a person: bought 5 s after it appears, sold 2 s after the post settles
 //   sure      the pickiest reader: only when the FIRST coin on a post has the exact name and a LOW tag (the coin
 //             with the most money in it is also the right one), and nothing otherwise
+//   checked   careful, and the account is looked at first: only posts from an account with a check mark that are
+//             not a screenshot of somebody else's post (stage 2, real or larp: run with LARPS=1)
 //   right     the first coin with the post's exact name, whatever its tag
 //   wrong     the first coin whose name is NOT the post's (the trap)
 //   first     the first coin on a post, whatever it is called
@@ -62,13 +64,14 @@ const rule = process.argv[3] ?? 'careful'
 const stake = Number(process.argv[4] ?? 100)
 const json = process.argv.includes('--json')
 const preset = process.argv.includes('--loose') ? 2 : 0
-if (!['careful', 'slow', 'sure', 'right', 'wrong', 'first', 'rich', 'any', 'news'].includes(rule)) throw new Error(`no rule "${rule}"`)
+if (!['careful', 'checked', 'slow', 'sure', 'right', 'wrong', 'first', 'rich', 'any', 'news'].includes(rule)) throw new Error(`no rule "${rule}"`)
 
 type Pos = { qty: number }
 type Mem = { wallet: { cash: number; positions: Record<string, Pos>; accounts: { id: string; balances: Record<string, number> }[] } }
 type R = { tick(): void; handle(pid: string, m: unknown): void; members: Map<string, Mem>; market: MarketState; timer: ReturnType<typeof setInterval> }
 
 Room.storyMarket = true
+if (process.env.LARPS === '1') Room.larps = true // real or larp: some posts are fakes
 const world = new Room(WORLD_CODE, true)
 const r = world as unknown as R
 clearInterval(r.timer)
@@ -143,6 +146,7 @@ for (let i = 0; i < ticks; i++) {
     if (done.has(s.id)) continue
     const take =
       rule === 'careful' || rule === 'slow' ? exact && t.riskLevel === 'LOW'
+      : rule === 'checked' ? exact && t.riskLevel === 'LOW' && s.by.verified && !s.quote
       : rule === 'sure' ? exact && t.riskLevel === 'LOW' && t.spark.n === 1
       : rule === 'right' ? exact
       : rule === 'wrong' ? !exact
