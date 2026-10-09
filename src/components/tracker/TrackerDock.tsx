@@ -1,4 +1,5 @@
 import clsx from 'clsx'
+import { BarChart2, Heart, MessageCircle, Repeat2 } from 'lucide-react'
 import { ArrowLeftRight, AtSign, ChevronDown, ChevronRight, ExternalLink, GripHorizontal, PanelLeftClose, PanelRightClose, PictureInPicture2, Radio, Send, UserPlus, Wallet, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { tokenMapOf, useTokenMap } from '../../hooks/useDerived'
@@ -11,7 +12,7 @@ import type { FloatBox, SimWallet, SocialPost, TrackerDockPrefs, WalletStyle, Wa
 import { fmtAge, fmtCompact, fmtUsd } from '../../utils/format'
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
-import { Composer, Engagement, postAccount } from '../SocialTracker'
+import { Composer, postAccount } from '../SocialTracker'
 import { SparkChip, VerifiedMark } from '../SparkPanel'
 import { openRow, useFriendRows, type TrackerRow } from './friendRows'
 import { useOpenPlayer } from '../PlayerCard'
@@ -318,6 +319,7 @@ function SocialSection() {
   const [scope, setScope] = useState<SocialScope>('x')
   const [onlyCA, setOnlyCA] = useState(false)
   const [onlyBig, setOnlyBig] = useState(false)
+  const [writing, setWriting] = useState(false) // the box for writing a post is folded away until asked for: the feed is what this panel is for
   // (The huge accounts are the story market's: without its posts there is nothing that big to filter for.)
   const stories = feed.some((p) => !!p.sparkId)
   const liveFeed = useLiveFeed()
@@ -343,7 +345,9 @@ function SocialSection() {
           {stories && <label className="flex cursor-pointer items-center gap-1" title="Only accounts with 500K followers or more: a big account's post moves far more than a small one's"><input type="checkbox" checked={onlyBig} onChange={(e) => setOnlyBig(e.target.checked)} className="accent-[var(--accent)]" /> Big accounts only</label>}
         </div>
       )}
-      {scope !== 'live' && scope !== 'tg' && <Composer />}
+      {scope !== 'live' && scope !== 'tg' && (writing
+        ? <div className="relative"><Composer /><button type="button" onClick={() => setWriting(false)} className="absolute right-2 top-1 text-[10px] text-dim hover:text-ink">Hide</button></div>
+        : <button type="button" onClick={() => setWriting(true)} className="mx-2 my-1.5 shrink-0 rounded-md border border-line px-2 py-1.5 text-left text-[11px] text-dim hover:border-line2 hover:text-muted">✍️ Write a post…</button>)}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {scope === 'live' ? <LiveXFeed /> : !posts.length ? (
           <EmptyState icon="📣" title={scope === 'following' ? 'No posts from accounts you follow' : 'No posts yet'} hint={scope === 'following' ? 'Hit Follow on any post' : 'Posts appear as the market moves'} />
@@ -353,6 +357,26 @@ function SocialSection() {
   )
 }
 
+/** How big an account is, at a glance: the colour of its follower badge and of the post's left edge. */
+const sizeLook = (followers: number) =>
+  followers >= 20_000_000 ? { badge: 'bg-[#c084fc]/20 text-[#d8b4fe]', edge: 'border-l-[#c084fc]', word: 'HUGE' }
+  : followers >= 500_000 ? { badge: 'bg-warn/20 text-warn', edge: 'border-l-warn', word: 'BIG' }
+  : followers >= 20_000 ? { badge: 'bg-info/15 text-info', edge: 'border-l-info/60', word: '' }
+  : { badge: 'bg-raise text-muted', edge: 'border-l-transparent', word: '' }
+
+/**
+ * The counts under a post (replies, reposts, likes, views). Made up like the post itself: they follow the account's
+ * size and grow for the first minutes, the same for everybody who looks (worked out from the post, never stored).
+ */
+function postCounts(p: SocialPost, followers: number, ageSec: number) {
+  const h = (Math.imul(p.id | 0, 0x9e3779b1) >>> 0) / 4294967296 // 0..1, fixed for this post
+  const reach = Math.max(30, followers) * (0.02 + 0.1 * h) * Math.min(1, 0.08 + ageSec / 240)
+  const likes = p.likes ?? Math.round(reach * 0.12)
+  return { views: Math.round(reach * 6 + 20 * h), likes, reposts: p.rts ?? Math.round(likes * (0.12 + 0.2 * h)), replies: Math.round(likes * (0.04 + 0.1 * (1 - h))) }
+}
+
+const cnt = (n: number) => (n < 1000 ? String(Math.round(n)) : fmtCompact(n, ''))
+
 function PostRow({ p }: { p: SocialPost }) {
   const acc = postAccount(p)!
   const you = useGame((s) => (s.online ? p.author?.pid === s.online.you : p.accountId === 'player'))
@@ -361,40 +385,62 @@ function PostRow({ p }: { p: SocialPost }) {
   const toggleFollow = useGame((s) => s.toggleFollowAccount)
   const select = useGame((s) => s.select)
   const t = useGame((s) => (p.tokenId ? tokenMapOf(s.market.tokens).get(p.tokenId) : undefined))
+  // (A post of the story market: what kind it is, and whether it is a screenshot of somebody else's.)
+  const spark = useGame((s) => (p.sparkId ? s.market.sparks?.find((x) => x.id === p.sparkId) : undefined))
   const since = t && p.mcapAtPost ? t.mcap / p.mcapAtPost - 1 : 0
+  const look = sizeLook(acc.player ? 0 : acc.followers)
+  const age = (tick - p.tick) * SIM_SEC_PER_TICK
+  const n = postCounts(p, acc.followers, age)
   return (
-    <div className={clsx('border-b border-line/40 px-2 py-2 hover:bg-panel2/70', acc.player && 'bg-info/[0.04]')}>
-      <div className="flex items-center gap-1.5">
-        <span className="grid size-6 shrink-0 place-items-center rounded-full bg-raise text-[13px]">{acc.avatar}</span>
-        <div className="min-w-0 flex-1 leading-tight">
-          <div className="flex items-center gap-1 truncate text-[11px] font-bold">
-            {acc.name}
-            {acc.verified && <VerifiedMark />}
-            {you && <span className="rounded bg-accent/15 px-1 text-[9px] text-accent">YOU</span>}
-            {acc.player && !you && <span className="rounded bg-info/15 px-1 text-[9px] text-info">PLAYER</span>}
-            {acc.player && acc.kol && <span className="rounded bg-warn/15 px-1 text-[9px] text-warn">KOL</span>}
+    <article className={clsx('flex gap-2.5 border-b border-line/60 px-3 py-3 hover:bg-white/[0.03]', acc.player && 'bg-info/[0.04]')}>
+      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-raise text-[20px]">{acc.avatar}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1 text-[14px] leading-5">
+          <span className="truncate font-bold text-ink">{acc.name}</span>
+          {acc.verified && <VerifiedMark size={15} />}
+          <span className="min-w-0 shrink truncate text-dim">@{acc.handle}</span>
+          <span className="shrink-0 text-dim">· {fmtAge(age)}</span>
+          {!acc.player && <button onClick={() => toggleFollow(acc.id)} className={clsx('ml-auto shrink-0 rounded-full px-3 py-0.5 text-[11px] font-bold', followed ? 'border border-line2 text-muted' : 'bg-ink text-bg hover:brightness-90')}>{followed ? 'Following' : 'Follow'}</button>}
+        </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] font-bold">
+          <span className={clsx('num rounded px-1.5 py-px', look.badge)} title="Followers">{look.word ? `${look.word} · ` : ''}{fmtCompact(acc.followers, '')} followers</span>
+          {you && <span className="rounded bg-accent/15 px-1.5 py-px text-accent">YOU</span>}
+          {acc.player && !you && <span className="rounded bg-info/15 px-1.5 py-px text-info">PLAYER</span>}
+          {acc.player && acc.kol && <span className="rounded bg-warn/15 px-1.5 py-px text-warn">KOL</span>}
+          {spark?.kind === 'news' && <span className="rounded bg-info/15 px-1.5 py-px text-info">NEWS</span>}
+          {spark?.kind === 'tech' && <span className="rounded bg-[#8fd14f]/15 px-1.5 py-px text-[#8fd14f]">TECH</span>}
+        </div>
+        <p className="mt-1.5 whitespace-pre-line break-words text-[14px] leading-[1.4] text-ink">
+          {p.text.split(/(\$[A-Z0-9]+|#[A-Za-z0-9]+)/g).map((part, i) => (/^[$#][A-Za-z0-9]+$/.test(part) ? <span key={i} className="text-[#1d9bf0]">{part}</span> : <span key={i}>{part}</span>))}
+        </p>
+        {spark?.quote && (
+          <div className="mt-2 rounded-xl border border-line2 px-3 py-2 text-[12px] text-muted">
+            <div className="flex items-center gap-1 font-bold text-ink">🖼 Screenshot <span className="font-normal text-dim">of a post by</span> {spark.quote.name}{spark.quote.verified && <VerifiedMark size={12} />}</div>
+            <div className="text-dim">@{spark.quote.handle} · not posted from that account</div>
           </div>
-          <div className="num truncate text-[10px] text-dim">@{acc.handle} · {fmtCompact(acc.followers, '')} · {fmtAge((tick - p.tick) * SIM_SEC_PER_TICK)}</div>
+        )}
+        {p.tokenId && (
+          <div className="mt-2 flex items-center gap-2 rounded-xl border border-line2 px-2.5 py-2">
+            <button disabled={!t} onClick={() => t && select(t.id)} className="flex min-w-0 items-center gap-1.5 hover:text-accent">
+              {t ? <TokenIcon token={t} size={22} /> : <span>❔</span>}
+              <span className="truncate text-[13px] font-bold">{p.ticker}</span>
+            </button>
+            <span className="num text-[12px] text-muted">{t ? fmtCompact(t.mcap) : 'delisted'}</span>
+            {t && p.mcapAtPost ? <Pct v={since} className="text-[12px]" /> : null}
+            {t && <span className="ml-auto"><QuickBuyButton t={t} className="h-6 px-2 text-[10px]" /></span>}
+          </div>
+        )}
+        {p.sparkId && <div className="mt-2"><SparkChip id={p.sparkId} wide /></div>}
+        <div className="num mt-2 flex items-center justify-between pr-6 text-[12px] text-dim">
+          <span className="flex items-center gap-1"><MessageCircle size={14} /> {cnt(n.replies)}</span>
+          <span className="flex items-center gap-1"><Repeat2 size={15} /> {cnt(n.reposts)}</span>
+          <span className="flex items-center gap-1"><Heart size={14} /> {cnt(n.likes)}</span>
+          <span className="flex items-center gap-1"><BarChart2 size={14} /> {cnt(n.views)}</span>
         </div>
-        {!acc.player && <button onClick={() => toggleFollow(acc.id)} className={clsx('shrink-0 rounded-full px-2 py-px text-[9px] font-bold', followed ? 'border border-line2 text-muted' : 'bg-ink text-bg')}>{followed ? 'Following' : 'Follow'}</button>}
+        {p.tokenId && p.buyers !== undefined && <div className="mt-1 text-[11px] text-dim">🦍 <span className={p.buyers ? 'font-semibold text-up' : ''}>{p.buyers} aped</span></div>}
+        {!!p.replies?.length && <div className="mt-1 truncate text-[11px] italic text-dim">{p.replies.map((r) => `“${r}”`).join('  ')}</div>}
       </div>
-      <p className="mt-1 line-clamp-3 whitespace-pre-line text-[11px] leading-snug text-ink/90">
-        {p.text.split(/(\$[A-Z0-9]+)/g).map((part, i) => (/^\$[A-Z0-9]+$/.test(part) ? <span key={i} className="font-semibold text-info">{part}</span> : <span key={i}>{part}</span>))}
-      </p>
-      {p.tokenId && (
-        <div className="mt-1.5 flex items-center gap-1.5 rounded-md border border-line bg-bg px-1.5 py-1">
-          <button disabled={!t} onClick={() => t && select(t.id)} className="flex min-w-0 items-center gap-1 hover:text-accent">
-            {t ? <TokenIcon token={t} size={16} /> : <span>❔</span>}
-            <span className="truncate text-[11px] font-bold">{p.ticker}</span>
-          </button>
-          <span className="num text-[10px] text-muted">{t ? fmtCompact(t.mcap) : 'delisted'}</span>
-          {t && p.mcapAtPost ? <Pct v={since} className="text-[10px]" /> : null}
-          {t && <span className="ml-auto"><QuickBuyButton t={t} className="h-5 px-1.5 text-[10px]" /></span>}
-        </div>
-      )}
-      {p.sparkId && <div className="mt-1.5"><SparkChip id={p.sparkId} wide /></div>}
-      <Engagement p={p} />
-    </div>
+    </article>
   )
 }
 

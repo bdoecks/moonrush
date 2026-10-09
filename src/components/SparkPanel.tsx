@@ -69,10 +69,10 @@ export function SparkChip({ id, wide }: { id: string; wide?: boolean }) {
   return (
     <button
       type="button" onClick={() => open(id)} title="See the coins launched on this post"
-      className={clsx('flex items-center gap-1.5 rounded-md border border-line bg-bg px-1.5 py-1 text-[10px] font-semibold text-muted hover:border-accent/50 hover:text-ink', wide && 'w-full')}
+      className={clsx('flex items-center gap-1.5 rounded-md border border-info/40 bg-info/10 px-2 py-1.5 text-[11px] font-semibold text-ink hover:border-info hover:bg-info/20', wide && 'w-full')}
     >
-      <Layers size={11} className="shrink-0 text-info" />
-      <span className="num">{n ? `${n} coin${n === 1 ? '' : 's'} launched on this` : 'No coins on the market'}</span>
+      <Layers size={13} className="shrink-0 text-info" />
+      <span className="num">{n ? `${n} coin${n === 1 ? '' : 's'} launched on this` : spark && !done ? 'Waiting for the first coin…' : 'No coins left on the market'}</span>
       {done && <span className={clsx('ml-auto truncate', spark?.fake ? 'text-down' : spark?.picked ? 'text-up' : 'text-dim')}>{done}</span>}
     </button>
   )
