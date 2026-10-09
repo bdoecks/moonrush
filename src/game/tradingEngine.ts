@@ -245,14 +245,24 @@ export function executeBuy(p: Portfolio, m: MarketState, tokenId: string, usd: n
   if (f && q0.slippage + extra > f.tolerance) {
     return { ok: false, error: slipError(q0.slippage + extra, f.tolerance, opts.setting!.priority, chain), burn: { chain, native: opts.setting!.priority } }
   }
-  // While the order was on its way other people's buys landed first (lag), and a sandwich bot may have bought just
-  // ahead of it (mev). Those are real trades on the same curve / pool, shown on the tape; the order is then filled at
+  // While the order was on its way somebody faster bought first (lag), and a sandwich bot may have bought just ahead
+  // of it (mev). Those are real trades on the same curve / pool, shown on the tape; the order is then filled at
   // exactly what the reserves give, so the price never moves by more than the money that went in.
+  // BOTH of them sell again straight after the order lands. The one who got in first used to stay in, and its buy
+  // moves the price by the same share whatever the order's size: a hundred $5 buys brought a hundred of them, the
+  // coin was pumped with money that was nobody's, and one sell took it out (+29% a go: scripts/spam-test.ts). A
+  // flipper costs the order its worse fill, as before, and leaves nothing behind.
   const rand = opts.rand ?? Math.random
   const ahead = (pct: number, cur: Token) => Math.max(1, cur.liquidity / 2) * (Math.sqrt(1 + pct) - 1)
   let market = m
   let botQty = 0
-  if (f && f.lag > 0) market = applySimTrade(market, tokenId, 'buy', { usd: ahead(f.lag, t) }, walletNameFrom(rand)).market
+  let firstQty = 0
+  const firstName = f && f.lag > 0 ? walletNameFrom(rand) : ''
+  if (f && f.lag > 0) {
+    const first = applySimTrade(market, tokenId, 'buy', { usd: ahead(f.lag, t) }, firstName)
+    market = first.market
+    firstQty = first.qty
+  }
   if (f?.sandwiched) {
     const bot = applySimTrade(market, tokenId, 'buy', { usd: ahead(f.mev, market.tokens.find((x) => x.id === tokenId) ?? t) }, 'MEV bot')
     market = bot.market
@@ -293,6 +303,7 @@ export function executeBuy(p: Portfolio, m: MarketState, tokenId: string, usd: n
   }
   market = applyPlayerTrade(market, tokenId, 'buy', usd, q.newPrice, opts.who)
   if (botQty > 0) market = applySimTrade(market, tokenId, 'sell', { qty: botQty }, 'MEV bot').market // the other half of the sandwich
+  if (firstQty > 0) market = applySimTrade(market, tokenId, 'sell', { qty: firstQty }, firstName).market // …and the one who got in first flips too
   return { ok: true, portfolio, market, trade, firstTimeToken, swapped, exec: f }
 }
 
@@ -320,7 +331,14 @@ export function executeSell(p: Portfolio, m: MarketState, tokenId: string, qty: 
   const ahead = (pct: number, cur: Token) => Math.max(1, cur.liquidity / 2) * (1 - Math.sqrt(Math.max(0, 1 - Math.min(0.95, pct))))
   let market = m
   let botQty = 0
-  if (f && f.lag > 0) market = applySimTrade(market, tokenId, 'sell', { usd: ahead(f.lag, t) }, walletNameFrom(rand)).market
+  let firstQty = 0
+  const firstName = f && f.lag > 0 ? walletNameFrom(rand) : ''
+  // (As on a buy: whoever sold first buys back straight after, so a seller cannot be used to push a price for free.)
+  if (f && f.lag > 0) {
+    const first = applySimTrade(market, tokenId, 'sell', { usd: ahead(f.lag, t) }, firstName)
+    market = first.market
+    firstQty = first.qty
+  }
   if (f?.sandwiched) {
     const bot = applySimTrade(market, tokenId, 'sell', { usd: ahead(f.mev, market.tokens.find((x) => x.id === tokenId) ?? t) }, 'MEV bot')
     market = bot.market
@@ -364,6 +382,13 @@ export function executeSell(p: Portfolio, m: MarketState, tokenId: string, qty: 
     const Q = cur ? Math.max(1, cur.liquidity / 2) : 0
     const T = cur ? Q / cur.price : 0
     if (cur && botQty < T * 0.9) market = applySimTrade(market, tokenId, 'buy', { usd: (Q * botQty) / (T - botQty) }, 'MEV bot').market
+  }
+  if (firstQty > 0) {
+    // The one who sold first buys the same coins back.
+    const cur = market.tokens.find((x) => x.id === tokenId)
+    const Q = cur ? Math.max(1, cur.liquidity / 2) : 0
+    const T = cur ? Q / cur.price : 0
+    if (cur && firstQty < T * 0.9) market = applySimTrade(market, tokenId, 'buy', { usd: (Q * firstQty) / (T - firstQty) }, firstName).market
   }
   return { ok: true, portfolio, market, trade, firstTimeToken: false, exec: f }
 }
