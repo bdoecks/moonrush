@@ -137,6 +137,7 @@ export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trend
   const line = titled ? rng.pick(T.MEME_TITLED) : rng.pick((kind === 'news' ? T.NEWS : T.MEME)[subject.type])
   const text = line.replaceAll('{N}', name).replaceAll('{A}', subject.word).replaceAll('{V}', rng.pick(T.DID[subject.type])).replaceAll('{D}', String(rng.int(2, 40)))
     .replaceAll('{H}', name.replace(/[^A-Za-z0-9]/g, '')).replaceAll('{P}', rng.pick(T.PLACES)).replaceAll('{J}', rng.pick(T.JOBS))
+    .replace(/\b([aA]) (?=[aeioAEIO])/g, '$1n ') // "a owl" → "an owl" (not before a u: a ufo, a unicorn)
 
   const t = SPARK.tiers[tier]
   const d = SPARK.decide
