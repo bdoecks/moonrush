@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { Bug, CircleHelp, Lightbulb, PanelLeft, PanelRight, Pause, Play, Settings as SettingsIcon, Timer, Volume2, VolumeX } from 'lucide-react'
+import { Bug, CircleHelp, Lightbulb, PanelLeft, ScrollText, PanelRight, Pause, Play, Settings as SettingsIcon, Timer, Volume2, VolumeX } from 'lucide-react'
 import { CHAINS, fmtNative } from '../data/chains'
 import { cashbackOf, REFERRALS_ENABLED } from '../game/rewardsEngine'
 import type { Chain } from '../types'
@@ -9,6 +9,7 @@ import { chainView } from '../game/chainPnl'
 import { levelFromXp, MODES, titleFor } from '../game/progression'
 import { LAB_VIEWS } from '../game/flags'
 import { useCooking, useLabs } from '../hooks/useLabs'
+import { useUnseenUpdate } from './Updates'
 import { selectSpeed, useGame, type View } from '../game/store'
 import { fmtClock, fmtUsd, toneClass } from '../utils/format'
 import { FlashNum } from './ui'
@@ -131,6 +132,7 @@ function DockToggle() {
 export function TopBar() {
   const labs = useLabs() // CopyTrade, Sniper and Monitor: hidden unless the switch is on (or you are an admin)
   const cooking = useCooking() // the Cooking page: the same, by its own switch
+  const unseen = useUnseenUpdate() // a dot on the Updates button until the newest update has been opened
   const v = useValuation()
   const view = useGame((s) => s.view)
   const backView = useGame((s) => s.backView)
@@ -194,6 +196,10 @@ export function TopBar() {
         <DockToggle />
         <button onClick={() => updateSettings({ sound: !sound })} className="rounded-md p-1.5 text-muted hover:bg-panel2 hover:text-ink" aria-label="Toggle sound" title="Sound">
           {sound ? <Volume2 size={15} /> : <VolumeX size={15} />}
+        </button>
+        <button onClick={() => setModal('updates')} className="relative hidden sm:block rounded-md p-1.5 text-muted hover:bg-panel2 hover:text-ink" aria-label="Updates" title="Updates: what changed, what we are working on, why something is closed">
+          <ScrollText size={15} />
+          {unseen && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-accent" />}
         </button>
         <button onClick={() => setModal('idea')} className="hidden sm:block rounded-md p-1.5 text-muted hover:bg-panel2 hover:text-ink" aria-label="Share an idea" title="Share an idea">
           <Lightbulb size={15} />

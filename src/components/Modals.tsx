@@ -10,6 +10,7 @@ import { Logo } from './TopBar'
 import { Kbd, Modal, Segmented, Toggle } from './ui'
 import { LobbyModal, WorldCard } from './Multiplayer'
 import { BugReportModal, IdeaModal } from './BugReport'
+import { UpdatesModal } from './Updates'
 import { TutorialButtons } from './Tutorial'
 import { cookingVisible, labsVisible } from '../game/flags'
 import { useFlags } from '../game/flags'
@@ -27,6 +28,7 @@ export function Modals() {
   if (modal === 'lobby') return <LobbyModal />
   if (modal === 'bug') return <BugReportModal />
   if (modal === 'idea') return <IdeaModal />
+  if (modal === 'updates') return <UpdatesModal />
   return null
 }
 
@@ -245,6 +247,7 @@ function SettingsModal() {
   return (
     <Modal title="Settings" onClose={() => setModal(null)}>
       <div className="divide-y divide-line">
+        <Row label="What changed?" hint="Every update's fixes, what we are working on, and why something is closed"><button onClick={() => setModal('updates')} className="rounded-md border border-line2 px-2.5 py-1 text-[12px] font-semibold text-ink hover:border-accent/60 hover:text-accent">📜 Updates</button></Row>
         <Row label="Got an idea?" hint="What the game needs, what should change, or go"><button onClick={() => setModal('idea')} className="rounded-md border border-line2 px-2.5 py-1 text-[12px] font-semibold text-ink hover:border-accent/60 hover:text-accent">💡 Share an idea</button></Row>
         <Row label="Found a bug?" hint="Tell us what went wrong. It goes straight to the team"><button onClick={() => setModal('bug')} className="rounded-md border border-line2 px-2.5 py-1 text-[12px] font-semibold text-ink hover:border-accent/60 hover:text-accent">🐞 Report a bug</button></Row>
         <Row label="Sound effects" hint="Synth blips for trades, alerts and level-ups"><Toggle label="Sound" on={settings.sound} onChange={(v) => update({ sound: v })} /></Row>
@@ -314,6 +317,10 @@ function HelpModal() {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2 text-[12px] text-muted">
           <TutorialButtons onStart={() => setModal(null)} />
+          <button onClick={() => setModal('updates')} className="flex w-full items-center justify-between rounded-md border border-line2 bg-panel2/60 px-3 py-2 text-left text-[12px] hover:border-accent/60">
+            <span><span className="font-semibold text-ink">📜 Updates.</span> <span className="text-muted">What was fixed, what we are working on, why something is closed.</span></span>
+            <span className="font-semibold text-accent">See the list →</span>
+          </button>
           <button onClick={() => setModal('bug')} className="flex w-full items-center justify-between rounded-md border border-line2 bg-panel2/60 px-3 py-2 text-left text-[12px] hover:border-accent/60">
             <span><span className="font-semibold text-ink">🐞 Found a bug?</span> <span className="text-muted">Tell us what went wrong.</span></span>
             <span className="font-semibold text-accent">Report a bug →</span>

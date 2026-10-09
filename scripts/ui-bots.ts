@@ -519,6 +519,23 @@ async function checklistBot(page: Page) {
     return 'deployed from a dev wallet; the panel bought and sold from it alone'
   })
 
+  await step(page, 'Updates', 'The scroll button (top right) opens the list of what changed, what is being worked on and why something is closed; the dot on it goes out once it has been opened.', async () => {
+    const btn = page.getByRole('button', { name: 'Updates', exact: true }).first()
+    act('Click the "Updates" button (top right)')
+    await btn.click()
+    await page.waitForTimeout(400)
+    const dialog = page.getByRole('dialog')
+    const text = await dialog.innerText()
+    for (const want of ['WORKING ON NOW', 'FIXED']) if (!text.toUpperCase().includes(want)) throw new Error(`the list has no "${want}" part`)
+    await shot(page, 'updates')
+    act('Close it')
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+    if (await page.getByRole('dialog').count()) throw new Error('the list did not close')
+    if (await btn.locator('span.bg-accent').count()) throw new Error('the dot is still on the button after the list was opened')
+    return 'opens, reads, closes; the dot goes out'
+  })
+
   await step(page, 'Share an idea', 'The idea button (top right) should open a short form with three kinds of idea; Send stays off until something is written; nothing is sent by this test.', async () => {
     act('Click the "Share an idea" button (top right)')
     await page.getByRole('button', { name: 'Share an idea', exact: true }).first().click()

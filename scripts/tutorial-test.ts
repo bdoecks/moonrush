@@ -3,6 +3,7 @@
 //   npx tsx scripts/tutorial-test.ts
 import { baseOf, TUTORIALS, type TutorialView } from '../src/game/tutorials'
 import { COOK_FEE, GRAD_BONUS } from '../src/game/marketEngine'
+import { CLOSED, UPDATES, WORKING_ON } from '../src/data/changelog'
 
 let failed = 0
 const ok = (cond: boolean, what: string) => {
@@ -37,5 +38,11 @@ ok(!open.done!(view(), baseOf(view())) && open.done!(view({ view: 'cooking' }), 
 const had = view({ launches: [{ tokenId: 'OLD' }] })
 ok(!cook.done!(had, baseOf(had)) && cook.done!(view({ launches: [{ tokenId: 'NEW' }, { tokenId: 'OLD' }] }), baseOf(had)), '"Cook it" is done by a new launch, not by one from before')
 ok(!goto.done!(view({ view: 'token', selectedId: 'X', selectedIsMine: false }), baseOf(view())) && goto.done!(view({ view: 'token', selectedId: 'X', selectedIsMine: true }), baseOf(view())), '"Go to your coin" is done on a coin you launched, not on anybody else\'s')
+// The Updates list (src/data/changelog.ts) players read.
+const lines = UPDATES.flatMap((x) => [...(x.fixed ?? []), ...(x.added ?? []), ...(x.changed ?? [])])
+ok(UPDATES.length >= 1 && new Set(UPDATES.map((x) => x.id)).size === UPDATES.length && UPDATES.every((x) => x.title.length > 3 && /\d{4}/.test(x.date) && (x.fixed ?? x.added ?? x.changed ?? []).length > 0), 'every update has its own id, a date, a title and something in it')
+ok(lines.every((l) => l.length >= 15 && l.length <= 260) && [...WORKING_ON.map((w) => w.what), ...CLOSED.map((c) => c.why)].every((l) => l.length >= 8), 'every line is a sentence a player can read, not a note to ourselves')
+ok(!/\b(botDev|stepFlow|flow\.|CREATOR_CUT|COOK_FEE|launchBlock|applySimTrade|PR|commit|branch)\b/.test([...lines, ...WORKING_ON.map((w) => w.what + (w.why ?? '')), ...CLOSED.map((c) => c.what + c.why)].join(' ')), 'no code names in it')
+ok(CLOSED.every((c) => c.why.length > 30 && ['cooking', 'labs'].includes(c.flag)) && new Set(CLOSED.map((c) => c.flag)).size === CLOSED.length, 'everything closed says why, and is tied to the switch that brings it back')
 console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')
 process.exit(0)

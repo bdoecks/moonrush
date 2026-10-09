@@ -482,6 +482,16 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   `trench-info-test`). It shows nothing the coin page's Story tab does not; a tap on it never opens the coin. It
   can be switched off in Display > Row elements (`story`).
 
+## The Updates list (what players are told)
+
+- `src/data/changelog.ts` is the list players read in the Updates window (`components/Updates.tsx`: the scroll button
+  in the top bar, with a dot until the newest entry has been opened; also in Help and Settings). The owner asked for
+  it (2026-10-08): what was fixed each update, what is being worked on, and why something is closed.
+- **Every push a player could notice adds an entry at the top of `UPDATES`, in the same change, in plain words.**
+  Keep `WORKING_ON` true. `CLOSED` entries are tied to the switch that brings the thing back and drop out of the list
+  by themselves when it is on. Say that a money bug is fixed, never how it was done. `tutorial-test` checks the list
+  is readable and carries no code names.
+
 ## Tutorials
 
 - Two of them: trading and deving (`src/game/tutorials.ts`: the steps, pure; `components/Tutorial.tsx`: the card, the
