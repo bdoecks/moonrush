@@ -32,6 +32,7 @@ import { PlayerCardDrawer } from './components/PlayerCard'
 import { AdminFloat } from './components/AdminFloat'
 import { LAB_VIEWS, setCookingVisible, setLabsVisible, watchFlags } from './game/flags'
 import { useCooking, useLabs } from './hooks/useLabs'
+import { Tutorial } from './components/Tutorial'
 import { DiscoverView } from './pages/DiscoverView'
 import { TrenchesView } from './pages/TrenchesView'
 import { LeaderboardView } from './pages/LeaderboardView'
@@ -136,6 +137,7 @@ export default function App() {
         {/* Wallet + social trackers; places itself on the left or right edge. */}
         <TrackerDock />
         <main className="flex min-w-0 flex-1 flex-col">
+          <Tutorial />
           <div className="min-h-0 flex-1">
             {(view === 'discover' || (!labs && labView) || (!cooking && onCooking)) && <DiscoverView />}
             {view === 'trenches' && <TrenchesView />}

@@ -258,6 +258,33 @@ async function checklistBot(page: Page) {
     if (s.modal) throw new Error(`the "${s.modal}" window is still open`)
   })
 
+  await step(page, 'Tutorial', 'A first-time player is offered the trading tutorial; it opens a card, points at the screen, waits for the player on the steps that ask for something, and can be closed.', async () => {
+    const offer = page.getByRole('region', { name: 'Tutorial offer' })
+    await offer.waitFor({ timeout: 5000 })
+    act('Click "Start the tutorial"')
+    await offer.getByRole('button', { name: 'Start the tutorial' }).click()
+    const card = page.getByRole('region', { name: 'Tutorial', exact: true })
+    await card.waitFor({ timeout: 3000 })
+    if (!(await card.innerText()).includes('1 / 10')) throw new Error('the card does not show step 1 of 10')
+    act('Click "Next"')
+    await card.getByRole('button', { name: /^Next/ }).click()
+    await page.waitForTimeout(700)
+    const t2 = await card.innerText()
+    if (!/Pick a coin/.test(t2) || !/Skip this step/.test(t2)) throw new Error('step 2 should ask the player to pick a coin and wait for it')
+    if (!(await page.locator('.ring-accent.animate-pulse').count())) throw new Error('nothing on the screen is pointed at')
+    await shot(page, 'tutorial')
+    act('Open a coin (the step should finish by itself)')
+    await page.evaluate(() => { const g = (window as any).__game.getState(); g.select(g.market.tokens.find((t: any) => t.status === 'bonding' || t.status === 'graduated').id) })
+    await page.waitForTimeout(1500)
+    if (!(await card.innerText()).includes('3 / 10')) throw new Error('opening a coin did not move the tutorial on')
+    act('Close the tutorial')
+    await card.getByRole('button', { name: 'Close the tutorial' }).click()
+    await page.waitForTimeout(300)
+    if (await card.count()) throw new Error('the card did not close')
+    await page.evaluate(() => (window as any).__game.getState().setView('discover'))
+    return 'offered once, walks and waits, closes'
+  })
+
   for (const n of NAV) {
     await step(page, `${n.label.replace(/^\S+ /, '')} page`, `Clicking the ${n.label} tab should open that page with content on it.`, async () => {
       await openNav(page, n)

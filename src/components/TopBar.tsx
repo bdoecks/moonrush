@@ -214,6 +214,7 @@ export function TopBar() {
         {NAV.filter((n) => (labs || !LAB_VIEWS.includes(n.id)) && (cooking || n.id !== 'cooking')).map((n) => (
           <button
             key={n.id}
+            data-tut={`nav-${n.id}`}
             onClick={() => setView(n.id)}
             title={`${n.label} (${n.key})`}
             className={clsx(

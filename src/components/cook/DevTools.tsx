@@ -148,7 +148,7 @@ export function SideWalletsSection({ spec, onChange }: { spec: CookSpec; onChang
   const baseRisk = spec.sideDelay ? 0.12 : 0.35
   const step = c.quick[0] / 5
   return (
-    <section className={clsx('rounded-md border p-3', sides.length ? 'border-accent/40 bg-accent/5' : 'border-line2')}>
+    <section data-tut="cook-deploy" className={clsx('rounded-md border p-3', sides.length ? 'border-accent/40 bg-accent/5' : 'border-line2')}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Wallet size={15} className="text-accent" />

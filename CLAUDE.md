@@ -47,6 +47,7 @@ npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Ligh
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/cook-test.ts                # cooking in the World: a player's launch is under the fair-market rules, snipers pass on a big dev bag
 npx tsx scripts/cook-report.ts 3            # what cooking pays, recipe by recipe (not pass/fail): read before and after touching launches or creator fees
+npx tsx scripts/tutorial-test.ts            # the tutorials: every step readable, the waiting steps move on for the right thing only
 npx tsx scripts/trench-info-test.ts         # the Trenches card: KOLs and smart money in a coin, the dev's migrated / launched
 npx tsx scripts/reset-test.ts               # the admin's World starting balance, and starting every World player over
 npx tsx scripts/bugs-test.ts                # bug reports and ideas: what the game sends is clean and small, and only admins can read the table
@@ -457,6 +458,18 @@ Also open after stage 1:
 The five stages, as agreed: 2) tracked traders on the chart (a colour each, average-entry line, position, share
 of supply, profit, history); 3) trader types that react to stories (narrative trader, contrarian, panic seller, FOMO,
 swing) on top of the real-data brain; 4) the data-source plug with provenance; 5) scale (send each player less).
+
+## Tutorials
+
+- Two of them: trading and deving (`src/game/tutorials.ts`: the steps, pure; `components/Tutorial.tsx`: the card, the
+  ring, the one-time "New here?" offer on a first round, the buttons in Help). A step either explains (Next) or asks
+  the player to do something in the real game and moves on when the game's own state shows it happened (`done`:
+  a coin page opened, a NEW buy, a NEW sell, the Cooking page, a NEW launch, their own coin opened). It never trades
+  for the player. What a step points at is marked `data-tut="…"` in the page; the first match on screen gets the ring.
+- The deving tutorial is offered only while the Cooking page is open (`useCooking`). Its texts name fees and bonuses
+  without pricing them (`tutorial-test` checks), so tuning does not make them wrong.
+- Bots: the UI bots have a "Tutorial" step; the online bots start with the offer marked as seen (it would sit over
+  buttons they press).
 
 ## The admin sees every wallet
 

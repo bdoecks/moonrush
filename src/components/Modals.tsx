@@ -10,6 +10,7 @@ import { Logo } from './TopBar'
 import { Kbd, Modal, Segmented, Toggle } from './ui'
 import { LobbyModal, WorldCard } from './Multiplayer'
 import { BugReportModal, IdeaModal } from './BugReport'
+import { TutorialButtons } from './Tutorial'
 import { cookingVisible, labsVisible } from '../game/flags'
 import { useFlags } from '../game/flags'
 import { useAccount } from '../net/account'
@@ -312,6 +313,7 @@ function HelpModal() {
     <Modal title="How to play" onClose={() => setModal(null)} wide>
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2 text-[12px] text-muted">
+          <TutorialButtons onStart={() => setModal(null)} />
           <button onClick={() => setModal('bug')} className="flex w-full items-center justify-between rounded-md border border-line2 bg-panel2/60 px-3 py-2 text-left text-[12px] hover:border-accent/60">
             <span><span className="font-semibold text-ink">🐞 Found a bug?</span> <span className="text-muted">Tell us what went wrong.</span></span>
             <span className="font-semibold text-accent">Report a bug →</span>

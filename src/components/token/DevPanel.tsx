@@ -58,7 +58,7 @@ function Panel({ t }: { t: Token }) {
   }
   if (!open) {
     return (
-      <button onClick={() => show(true)} title="Open the dev panel: buy and sell from this coin's dev wallet" className="fixed bottom-24 right-3 z-30 flex items-center gap-1 rounded-full border border-warn/50 bg-panel px-2.5 py-1 text-[11px] font-bold text-warn shadow-lg md:bottom-16">
+      <button data-tut="dev-panel-open" onClick={() => show(true)} title="Open the dev panel: buy and sell from this coin's dev wallet" className="fixed bottom-24 right-3 z-30 flex items-center gap-1 rounded-full border border-warn/50 bg-panel px-2.5 py-1 text-[11px] font-bold text-warn shadow-lg md:bottom-16">
         {DEV_EMOJI} Dev panel
       </button>
     )

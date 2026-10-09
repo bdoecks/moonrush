@@ -135,7 +135,7 @@ export function TokenView() {
       <DevPanel t={t} />
 
       {/* Chart */}
-      <div className="flex h-[380px] shrink-0 flex-col border-b border-line lg:h-auto lg:min-h-0 lg:flex-1 lg:shrink">
+      <div data-tut="chart" className="flex h-[380px] shrink-0 flex-col border-b border-line lg:h-auto lg:min-h-0 lg:flex-1 lg:shrink">
         <div className="flex h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-2 text-[12px] no-scrollbar">
           {TIMEFRAMES.map((x) => (
             <button key={x} onClick={() => setTf(x)} className={clsx('rounded px-1.5 py-0.5 font-semibold transition-colors', tf === x ? 'text-accent' : 'text-muted hover:text-ink')}>
@@ -234,7 +234,7 @@ export function TokenView() {
       )}
 
       {/* Mobile sticky actions */}
-      <div className="sticky bottom-0 z-10 mt-auto grid grid-cols-2 gap-2 border-t border-line bg-panel/95 p-2 backdrop-blur md:hidden">
+      <div data-tut="trade" className="sticky bottom-0 z-10 mt-auto grid grid-cols-2 gap-2 border-t border-line bg-panel/95 p-2 backdrop-blur md:hidden">
         <button onClick={() => requestTrade('buy')} className="h-11 rounded-md bg-up text-[14px] font-extrabold text-black">BUY ${t.ticker}</button>
         <button onClick={() => requestTrade('sell')} className="h-11 rounded-md bg-down text-[14px] font-extrabold text-white">SELL</button>
       </div>
@@ -262,7 +262,7 @@ function Header({ t }: { t: Token }) {
   }
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b border-line bg-panel px-3 py-2">
+    <div data-tut="coin-header" className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b border-line bg-panel px-3 py-2">
       <div className="flex min-w-0 items-center gap-2.5">
         <button onClick={() => setView(backView === 'token' ? 'discover' : backView)} className="rounded p-1 text-muted hover:bg-raise hover:text-ink" aria-label="Back" title="Back (Esc)">
           <ArrowLeft size={16} />

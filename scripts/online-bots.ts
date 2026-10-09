@@ -196,6 +196,8 @@ async function session(browser: Browser) {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
     // tsx names inline functions with a __name helper the page doesn't have; give it a do-nothing one.
     await ctx.addInitScript({ content: 'window.__name = (f) => f' })
+    // (The one-time "new here?" tutorial offer would sit over buttons these players press: they have seen it.)
+    await ctx.addInitScript({ content: "try { localStorage.setItem('moonrush:v1:tutOffered', 'true') } catch {}" })
     const page = await ctx.newPage()
     page.setDefaultTimeout(10_000)
     const p = { name, page }

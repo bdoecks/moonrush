@@ -97,7 +97,7 @@ export function TradePanel({ className }: { className?: string }) {
   const posPnl = pos ? posValue - pos.costBasis : 0
 
   return (
-    <form onSubmit={submit} className={clsx('flex flex-col gap-2.5 p-3', className)}>
+    <form onSubmit={submit} data-tut="trade" className={clsx('flex flex-col gap-2.5 p-3', className)}>
       <div className="flex items-center gap-1">
         {buyPresets.map((amounts, i) => (
           <button
