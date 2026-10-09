@@ -1,5 +1,6 @@
 ﻿// Browser side of multiplayer: connects to a room, turns the server's market updates into ticks for the local
 // store, and sends your orders / status. The server runs your wallets (it's the judge); this shows results instantly.
+import { chartReplaced } from '../game/chartRev'
 import { applyCandlePoints, candleStore, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SUPPLY, type CandlePoint } from '../game/marketEngine'
 import { newPortfolio, portfolioStats, valuePortfolio } from '../game/portfolioEngine'
 import { levelFromXp } from '../game/progression'
@@ -356,7 +357,10 @@ function onMessage(msg: ServerMsg) {
     case 'tick':
       return onTick(msg)
     case 'candles':
-      if (msg.candles) candleStore.set(msg.tokenId, msg.candles)
+      if (msg.candles) {
+        candleStore.set(msg.tokenId, msg.candles)
+        chartReplaced(msg.tokenId) // the chart on screen draws the real history in place of the one sketched on joining
+      }
       // (World: the coin's tape comes with its chart. While this coin was not the open one, only real players'
       // trades on it were sent.)
       if (msg.tape && st.online) {

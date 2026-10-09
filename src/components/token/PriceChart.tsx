@@ -21,6 +21,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { gradMcapUsd } from '../../game/curve'
 import { candleStore, SUPPLY } from '../../game/marketEngine'
+import { useChartRev } from '../../game/chartRev'
 import { LAUNCHPADS } from '../../data/launchpads'
 import { useGame } from '../../game/store'
 import type { Candle, ChartStyle, Timeframe } from '../../types'
@@ -157,6 +158,7 @@ export function PriceChart(o: ChartOptions) {
     entryLine.current = null
     migLine.current = null
 
+    if (import.meta.env.DEV) (window as unknown as { __chart: unknown }).__chart = { series: s, tokenId, tf } // test copies only: read what the chart is showing
     const data = candleStore.get(tokenId)?.[tf] ?? []
     if (style === 'candles') (s as ISeriesApi<'Candlestick'>).setData(data.map(toBar))
     else (s as ISeriesApi<'Area'>).setData(data.map((d) => ({ time: d.time as UTCTimestamp, value: d.close * k })))
@@ -242,6 +244,22 @@ export function PriceChart(o: ChartOptions) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenId, tf, style, unit, accent])
+
+  // The coin's whole history was replaced (the real chart arrived from the server after a join or a reload): draw it
+  // again from the start, where it is. The effect below only ever adds the newest candles.
+  const rev = useChartRev((s) => s.revs[tokenId] ?? 0)
+  useEffect(() => {
+    if (!rev || !main.current || !vol.current) return
+    const data = candleStore.get(tokenId)?.[tf] ?? []
+    cancelAnimationFrame(glide.current.raf)
+    if (style === 'candles') (main.current as ISeriesApi<'Candlestick'>).setData(data.map(toBar))
+    else (main.current as ISeriesApi<'Area'>).setData(data.map((d) => ({ time: d.time as UTCTimestamp, value: d.close * k })))
+    vol.current.setData(data.map(toVol))
+    lastTime.current = data[data.length - 1]?.time ?? 0
+    glide.current.shown = data.length ? { ...data[data.length - 1] } : null
+    setLegend(lastLegend())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rev])
 
   // Highlight the picked candle (only if it's on this timeframe's grid).
   useEffect(() => {
