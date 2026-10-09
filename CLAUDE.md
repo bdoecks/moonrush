@@ -262,6 +262,11 @@ older than `TREND_MAX_AGE_DAYS`), chefs launch the game's usual random coins, so
   tick carries no chart points and only real players' trades). In the World a coin's on-screen statistics
   (`SLOW_FIELDS` in `server/room.ts`) go out every `SLOW_FIELD_TICKS` seconds, each coin on its own turn; anything a trade
   quote reads stays live. Full refreshes are staggered per coin and wallet (`KEYFRAME_TICKS`), never all on one tick.
+- A chart on screen only ever adds its newest candles. When a coin's whole history is replaced (the real chart
+  arriving from the server after a join, a reload or opening the coin: the `candles` answer), call `chartReplaced(id)`
+  (`game/chartRev.ts`) and `PriceChart` draws it again. Without it the chart kept the placeholder sketched on joining
+  (which since V2 stage 5 looks nothing like the real one: "only up") until the timeframe was changed. In test copies
+  `window.__chart.series.data()` is what the chart is showing.
 - Feature switches the owner flips live are in Supabase `app_flags` (`src/game/flags.ts`). New risky features
   should ship behind one, admin-only at first (see the `world` flag).
 
