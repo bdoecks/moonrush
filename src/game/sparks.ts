@@ -26,9 +26,10 @@
 // orders. Read both before and after touching a dial.
 //
 // Pure, and a leaf: the market engine imports this file, so nothing here may import the market engine.
+import { SPARK_TECH, TECH_NAMES, TECH_TEXT, TECH_TOOLS } from '../data/sparkPosts'
 import { anonAccount, NEVER_SPELL, SPARK_ACCOUNTS, SPARK_NAMES, SPARK_TEXT, SPARK_TITLES, SUBJECTS, TYPE_THEME, VARIANT_POST, VARIANT_PRE, type SparkAccount } from '../data/sparkPosts'
 import { SAFE_THEMES } from '../data/themeWords'
-import type { MarketState, RiskLevel, Spark, SparkBy, SparkLarp, SparkSim, SparkTier, Token } from '../types'
+import type { DemoState, DemoTool, MarketState, RiskLevel, Spark, SparkBy, SparkLarp, SparkSim, SparkTier, Token } from '../types'
 import { clamp, type Rng } from '../utils/rng'
 import { isStale } from './dataSources'
 
@@ -88,6 +89,12 @@ export const SPARK = {
   // same for mid-size accounts, as a share of that. A larp never runs: when it comes out the crowd leaves every
   // coin on it. `fakeBlock` / `shotBlock`: the snipers' money on them, next to the real thing (bots get fooled too).
   larp: { fake: 0.14, shot: 0.1, hack: 0.04, mid: 0.5, fakeBlock: 0.6, shotBlock: 0.45, followers: [0.03, 0.25] as [number, number] },
+  // Tech coins (stage 3, its own switch): the share of mid-size and big accounts' posts that announce a tool, and what
+  // the demo does on the sites of the coins launched on it. Every such coin has the product's name: only trying the
+  // demo tells them apart, and the timeline reads a demo as it reads a name (`demoFit`).
+  tech: 0.2,
+  demos: { works: 0.3, canned: 0.2, soon: 0.3, dead: 0.2 } as Record<DemoState, number>,
+  demoFit: { works: 'exact', canned: 'near', soon: 'variant', dead: 'other' } as Record<DemoState, 'exact' | 'near' | 'variant' | 'other'>,
   kept: 600, // seconds a post stays on the list after its last coin has gone
   max: 90, // posts kept at the most (the ones with a live coin are never dropped)
 }
@@ -109,7 +116,7 @@ const byOf = (a: SparkAccount): SparkBy => ({ id: a.id, name: a.name, handle: a.
  * A new post. `taken` = the right names of the stories still open (two posts about a Waffles at once would be two
  * right coins with one name). Returns the public spark and its hidden side.
  */
-export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trends'>, rng: Rng, id: string, seq: number, taken: Set<string> = new Set(), nowMs = Date.now(), larps = false): { spark: Spark; sim: SparkSim } {
+export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trends'>, rng: Rng, id: string, seq: number, taken: Set<string> = new Set(), nowMs = Date.now(), larps = false, tech = false): { spark: Spark; sim: SparkSim } {
   const tier = rng.weighted<SparkTier>(Object.fromEntries(TIERS.map((k) => [k, SPARK.tiers[k].w])) as Record<SparkTier, number>)
   const named = SPARK_ACCOUNTS.filter((a) => a.tier === tier)
   // (A small account is a nobody, or now and then a local paper; the smallest are always nobodies.)
@@ -145,6 +152,26 @@ export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trend
     .replaceAll('{H}', name.replace(/[^A-Za-z0-9]/g, '')).replaceAll('{P}', rng.pick(T.PLACES)).replaceAll('{J}', rng.pick(T.JOBS))
     .replace(/\b([aA]) (?=[aeioAEIO])/g, '$1n ') // "a owl" → "an owl" (not before a u: a ufo, a unicorn)
 
+  // A tech post? (Only asked with that switch on.) A builder announces a tool: the post, the name and who posts are replaced.
+  if (tech && (tier === 'mid' || tier === 'big') && rng.chance(SPARK.tech)) {
+    const builder = rng.pick(SPARK_TECH.filter((a) => a.tier === tier))
+    const tool = rng.pick(Object.keys(TECH_TOOLS) as DemoTool[])
+    let product = rng.pick(TECH_NAMES)
+    for (let k = 0; k < 8 && taken.has(tickerOf(product)); k++) product = rng.pick(TECH_NAMES)
+    const tt = SPARK.tiers[tier]
+    const dd = SPARK.decide
+    const settle = m.time + Math.round(clamp(lognormal(rng, dd.median * 1.5, dd.sigma), dd.min * 2, dd.max)) // (a demo takes longer to try than a name to read)
+    const dues: number[] = []
+    let when = m.time + rng.int(...SPARK.first)
+    for (let k = rng.int(...tt.coins); k > 0 && when < settle - 2; k--) {
+      dues.push(when)
+      when += Math.max(1, Math.round(-Math.log(1 - rng.next()) * tt.gap))
+    }
+    return {
+      spark: { id, seq, tick: m.tick, time: m.time, kind: 'tech', by: byOf(builder), text: rng.pick(TECH_TEXT).replaceAll('{N}', product).replaceAll('{D}', TECH_TOOLS[tool].does), theme: 'ai' },
+      sim: { tier, name: product, ticker: tickerOf(product), word: 'tool', emoji: TECH_TOOLS[tool].emoji, runs: rng.chance(tt.runs), power: Math.exp(0.4 * rng.gauss()), decideAt: settle, due: dues, n: 0, tool },
+    }
+  }
   // Real or larp? (Only asked with that switch on, so the dice roll as before without it.)
   let larp: SparkLarp | undefined
   let by = byOf(account)
@@ -364,4 +391,24 @@ export function mergeSparks(have: Spark[] | undefined, got: Spark[] | undefined,
   const out = keptSparks(all, new Set(all.filter((x) => !x.picked && x.over === undefined).map((x) => x.id)), alive, now)
   // (Nothing new and nothing dropped: the list it had, so nothing that shows it is drawn again.)
   return !got?.length && have && out.length === have.length ? have : out
+}
+
+// ─── Tech coins: the demo on a coin's site ───────────────────────────────────
+/** What the tool really answers. */
+export function toolAnswer(tool: DemoTool, input: string): string {
+  const text = input.trim().slice(0, 60)
+  if (!text) return 'Type something first'
+  if (tool === 'ticker') return tickerOf(text) ? `$${tickerOf(text)}` : 'No letters in that'
+  if (tool === 'convert') {
+    const n = Number(text.replace(',', '.'))
+    return Number.isFinite(n) && n >= 0 ? `${n} SOL is about $${(n * 115).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : 'That is not an amount'
+  }
+  const letters = text.replace(/[^a-z]/gi, '')
+  return `${letters.length} letters, ${letters.replace(/[^aeiou]/gi, '').length} vowels`
+}
+/** What a coin's demo does with what was typed: an answer, "soon", or nothing at all (`null`: the button just spins). */
+export function demoAnswer(tool: DemoTool, state: DemoState | undefined, input: string): { status: 'ok' | 'soon' | 'dead'; out?: string } {
+  if (state === 'works') return { status: 'ok', out: toolAnswer(tool, input) }
+  if (state === 'canned') return { status: 'ok', out: toolAnswer(tool, TECH_TOOLS[tool].sample) } // (the same answer whatever is typed: a picture of a demo)
+  return { status: state === 'soon' ? 'soon' : 'dead' }
 }

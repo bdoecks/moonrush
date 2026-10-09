@@ -207,3 +207,19 @@ export const NEVER_SPELL = [
 ]
 /** …or after it. */
 export const VARIANT_POST = ['INU', 'AI', 'CTO', '2', 'COIN', 'CLUB', 'DAO', 'FAN']
+
+// ─── Tech posts (stage 3) ────────────────────────────────────────────────────
+/** Builders: invented, like every account here. They announce small tools. */
+export const SPARK_TECH: SparkAccount[] = [
+  ...acct('mid', false, false, [['weekend shipper', 'weekend_shipper', '🛠️', 41_000], ['two devs one desk', 'twodevsonedesk', '⌨️', 88_000], ['garage compiler', 'garagecompiler', '🧰', 27_000], ['nightly build nina', 'nightlybuildnina', '🌒', 156_000]]),
+  ...acct('big', true, false, [['Tinkerhouse Labs', 'tinkerhouselabs', '🔧', 1_300_000], ['Small Tools Weekly', 'smalltoolsweekly', '🧪', 720_000], ['Devin Okafor-Reyes', 'devinbuilds', '👨‍💻', 2_400_000]]),
+]
+/** Product names: made-up compounds, short enough for a ticker. None is a real product's (keep it so). */
+export const TECH_NAMES = ['Mossbyte', 'Lampwick', 'Cogberry', 'Wirefern', 'Bytepond', 'Pixelmoss', 'Dustloom', 'Tinsprout', 'Kettlebyte', 'Fogcutter', 'Clockmoth', 'Rivetpie', 'Sparkpond', 'Mothlight', 'Gearmoss', 'Bolttoad']
+/** What each tool does, as its post and its site say it. */
+export const TECH_TOOLS = {
+  ticker: { emoji: '🏷️', does: 'turns any name into a clean ticker', hint: 'Type a name', sample: 'Mayor Otter' },
+  convert: { emoji: '🧮', does: 'tells you what any amount of SOL is in dollars', hint: 'Type an amount of SOL', sample: '2.5' },
+  count: { emoji: '🔤', does: 'counts the letters and vowels in anything you type', hint: 'Type anything', sample: 'hello there' },
+} as const
+export const TECH_TEXT = ['we just shipped {N}. it {D}. demo is live, go break it', '{N} is out: a tiny tool that {D}. try the demo on the site', 'built {N} over the weekend. it {D}. the demo works, i promise', 'introducing {N}. it {D}. no waitlist, the demo is right there']

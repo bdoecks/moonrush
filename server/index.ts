@@ -136,6 +136,7 @@ async function takeBackup(note?: string) {
 // Render: there the owner's `sparks` switch decides, and its answer replaces this within seconds.
 if (process.env.STORY_MARKET === '1') Room.storyMarket = true
 if (process.env.STORY_LARPS === '1') Room.larps = true
+if (process.env.STORY_TECH === '1') Room.tech = true
 if (persistOn) {
   // Once a minute: does the database answer.
   setInterval(() => void pingDb().then((r) => noteDb(r.ok, r.ms)), 60_000).unref()
@@ -149,6 +150,7 @@ if (persistOn) {
   const askStories = () => {
     void readFlag('sparks').then((on) => { if (on !== null) Room.storyMarket = on })
     void readFlag('larps').then((on) => { if (on !== null) Room.larps = on })
+    void readFlag('tech').then((on) => { if (on !== null) Room.tech = on })
   }
   askStories()
   setInterval(askStories, 60_000).unref()

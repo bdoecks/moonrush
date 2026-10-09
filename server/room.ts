@@ -3,6 +3,7 @@
 // cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
 import { createHash } from 'node:crypto'
+import { demoAnswer } from '../src/game/sparks'
 import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, launchBlock, secPerTickOf, setCandleLog, setClock, SUPPLY, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
 import { BOT_BUST_USD, BOT_BY_ID, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, inVoice, mirrorWallet, pickCoin, STYLE, type BotBrain, type BotSpec } from './bots'
 import { tickStories } from '../src/game/storyEngine'
@@ -251,6 +252,8 @@ export class Room {
   static storyMarket = false
   /** …and the `larps` switch: some posts are not what they look like (stage 2). Only with the story market on. */
   static larps = false
+  /** …and the `tech` switch: posts that announce a tool, whose coins have a site with a demo (stage 3). */
+  static tech = false
 
   dispose() {
     Room.all.delete(this)
@@ -466,6 +469,13 @@ export class Room {
         return this.sendBoard(me, msg.list)
       case 'card':
         return this.sendCard(me, msg.id)
+      case 'demo': {
+        // Somebody tries the demo on a tech coin's site. What it really does is the server's to know: only the answer goes back.
+        const t = typeof msg.tokenId === 'string' ? this.market.tokens.find((x) => x.id === msg.tokenId) : undefined
+        if (!t?.site || typeof msg.input !== 'string') return
+        const input = msg.input.slice(0, 60)
+        return this.sendTo(playerId, { t: 'demo', tokenId: t.id, input, ...demoAnswer(t.site.tool, t.sim.demo, input) })
+      }
       case 'candles':
         // (World: that coin is now the one this player follows closely. Its tape goes with the chart: the ticks they
         // were sent while looking elsewhere carried only real players' trades.)
@@ -1053,7 +1063,7 @@ export class Room {
     const held = new Map<string, number>()
     for (const m of this.members.values()) for (const [id, p] of Object.entries(m.wallet?.positions ?? {})) held.set(id, (held.get(id) ?? 0) + p.qty)
     for (const w of this.wallets) if (!w.bot) for (const [id, p] of Object.entries(w.positions)) held.set(id, (held.get(id) ?? 0) + p.qty) // (a bot's public wallet mirrors its own)
-    const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds, held, sparks: Room.storyMarket, larps: Room.larps })
+    const { market, events: e1 } = tickMarket(this.market, rng, { rugMult: MODES[this.round.mode].rugMult, protectedIds, held, sparks: Room.storyMarket, larps: Room.larps, tech: Room.tech })
     // The crowd talks about what just happened: a coin that bonded, a dev that dumped.
     for (const e of e1) {
       if (e.kind === 'graduation' && e.ticker) this.react('grad', e.ticker, 0.45, [2, 8])

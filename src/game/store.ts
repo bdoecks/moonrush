@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { SocialProfile, CashbackState, SniperTask, Trade, VolumeBot, Chain, Challenge, CookSpec, CopyConfig, GameMode, LaunchRecord, MarketEvent, MarketState, Player, Portfolio, Profile, RunStatus, Settings, PriceAlert, RewardClaim, RewardsState, SimWallet, SocialPost, Toast, Token, TrackerSettings, WalletAction, WalletActionKind, WalletLabel } from '../types'
 import { clamp, Rng } from '../utils/rng'
-import { cookingVisible, labsVisible, larpsVisible, sparksVisible, useFlags } from './flags'
+import { cookingVisible, labsVisible, larpsVisible, sparksVisible, techVisible, useFlags } from './flags'
 import { restoreCharts, saveCharts } from './chartSave'
 import { fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { fakeAddress } from '../utils/address'
@@ -946,7 +946,7 @@ export const useGame = create<GameState>()((set, get) => {
     // it bought itself (see sellRoom in the market engine).
     const mine = new Map(Object.entries(s.portfolio.positions).map(([id, p]) => [id, p.qty]))
     for (const w of s.wallets) for (const [id, p] of Object.entries(w.positions)) mine.set(id, (mine.get(id) ?? 0) + p.qty)
-    const { market, events: e1 } = tickMarket(s.market, rng, { rugMult: MODES[s.mode].rugMult, protectedIds, held: mine, sparks: sparksVisible() ?? Object.keys(s.market.sparkSim ?? {}).length > 0, larps: larpsVisible() }) // (switches not read yet: a story market that was running goes on)
+    const { market, events: e1 } = tickMarket(s.market, rng, { rugMult: MODES[s.mode].rugMult, protectedIds, held: mine, sparks: sparksVisible() ?? Object.keys(s.market.sparkSim ?? {}).length > 0, larps: larpsVisible(), tech: techVisible() }) // (switches not read yet: a story market that was running goes on)
     const e2 = rollEvents(market, rng)
     const wr = tickWallets(s.wallets, market, rng)
     const newPosts = tickSocial(market, rng, wr.actions, [...e1, ...e2])

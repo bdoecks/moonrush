@@ -44,6 +44,6 @@ ok(UPDATES.length >= 1 && new Set(UPDATES.map((x) => x.id)).size === UPDATES.len
 ok(lines.every((l) => l.length >= 15 && l.length <= 260) && [...WORKING_ON.map((w) => w.what), ...CLOSED.map((c) => c.why)].every((l) => l.length >= 8), 'every line is a sentence a player can read, not a note to ourselves')
 ok(!/\b(botDev|stepFlow|flow\.|CREATOR_CUT|COOK_FEE|launchBlock|applySimTrade|PR|commit|branch)\b/.test([...lines, ...WORKING_ON.map((w) => w.what + (w.why ?? '')), ...CLOSED.map((c) => c.what + c.why)].join(' ')), 'no code names in it')
 ok(CLOSED.every((c) => c.why.length > 30 && ['cooking', 'labs'].includes(c.flag)) && new Set(CLOSED.map((c) => c.flag)).size === CLOSED.length, 'everything closed says why, and is tied to the switch that brings it back')
-ok(shownUpdates({}).every((u) => !u.flag) && shownUpdates({ sparks: true, larps: true }).length === UPDATES.length && shownWork({ sparks: true }).length < shownWork({}).length && shownWork({}).length === WORKING_ON.length, 'an update about something behind a switch is told only once that switch is on, and it then leaves the "working on" list')
+ok(shownUpdates({}).every((u) => !u.flag) && shownUpdates({ sparks: true, larps: true, tech: true }).length === UPDATES.length && shownWork({ sparks: true }).length < shownWork({}).length && shownWork({}).length === WORKING_ON.length, 'an update about something behind a switch is told only once that switch is on, and it then leaves the "working on" list')
 console.log(failed ?`\n${failed} check(s) failed` : '\nall checks passed')
 process.exit(0)

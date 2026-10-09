@@ -11,6 +11,8 @@ import { moderate, nameBlocked } from '../server/moderation'
 import { anonAccount, NEVER_SPELL, SPARK_ACCOUNTS, SPARK_NAMES, SPARK_TITLES, SUBJECTS, VARIANT_POST, VARIANT_PRE } from '../src/data/sparkPosts'
 import { SAFE_THEMES } from '../src/data/themeWords'
 import { computeRisk, createMarket, FLOW, setClock, tickMarket } from '../src/game/marketEngine'
+import { demoAnswer, toolAnswer } from '../src/game/sparks'
+import { SPARK_TECH, TECH_NAMES, TECH_TOOLS } from '../src/data/sparkPosts'
 import { auditOf, coinFor, devFor, fitOf, keptSparks, makeSpark, mergeSparks, pickWeights, SPARK, sparkLine, sparkRate, stakeOf, tickerOf, typo, type Candidate, type CoinFit } from '../src/game/sparks'
 import { tickSocial } from '../src/game/socialEngine'
 import { tickStories } from '../src/game/storyEngine'
@@ -103,6 +105,21 @@ const made: { spark: Spark; sim: SparkSim }[] = []
   const hacks = on.filter((x) => x.sim.larp === 'hack')
   ok(hacks.length > 20 && hacks.every((x) => x.spark.by.verified === x.sim.real!.verified && x.spark.by.handle === x.sim.real!.handle && !x.spark.quote), 'a hacked account looks exactly like itself: nothing to read until it comes out')
   ok(on.every((x) => !x.sim.larp || !x.sim.runs) && on.every((x) => !('larp' in x.spark) && !('real' in x.spark) && !x.spark.fake), 'a larp never runs, and the post a browser gets does not say it is one')
+}
+
+// Tech coins (stage 3): a tool, a site, a demo that works or does not.
+{
+  ok(made.every((x) => x.spark.kind !== 'tech' && !x.sim.tool), 'without the tech switch no post announces a tool')
+  const rng = new Rng(17)
+  const on: { spark: Spark; sim: SparkSim }[] = []
+  for (let i = 0; i < 20000; i++) on.push(makeSpark(fakeMarket, rng, `s${i}`, i, new Set(), undefined, false, true))
+  const tech = on.filter((x) => x.spark.kind === 'tech')
+  const big = on.filter((x) => ['mid', 'big'].includes(x.sim.tier))
+  ok(Math.abs(tech.length / big.length - SPARK.tech) < 0.03 && tech.every((x) => !!x.sim.tool && ['mid', 'big'].includes(x.sim.tier) && SPARK_TECH.some((a) => a.id === x.spark.by.id) && x.spark.text.includes(x.sim.name) && TECH_NAMES.includes(x.sim.name) && !/[{}]/.test(x.spark.text)), `with it on, about ${pct(SPARK.tech, 0)} of mid-size and big accounts' posts announce a tool (${pct(tech.length / big.length)}), from a builder, by name`)
+  ok([...SPARK_TECH.map((a) => a.handle), ...TECH_NAMES].every((w) => !nameBlocked(w)) && new Set(SPARK_TECH.map((a) => a.handle)).size === SPARK_TECH.length && !SPARK_TECH.some((a) => SPARK_ACCOUNTS.some((b) => b.handle === a.handle)) && TECH_NAMES.every((n) => /^[A-Z][a-z]{3,9}$/.test(n) && !FAMOUS.includes(n.toLowerCase())), 'builders and product names: invented, clean, their own')
+  ok(toolAnswer('ticker', 'Mayor Otter') === '$MAYOROTTER' && toolAnswer('convert', '2') !== toolAnswer('convert', '3') && /^10 letters, 3 vowels$/.test(toolAnswer('count', 'hello world!')) && toolAnswer('convert', 'abc') === 'That is not an amount', 'the three tools do what their posts say')
+  const tools = Object.keys(TECH_TOOLS) as (keyof typeof TECH_TOOLS)[]
+  ok(tools.every((k) => demoAnswer(k, 'works', '3').out !== demoAnswer(k, 'works', 'hello 44').out && demoAnswer(k, 'canned', '3').out === demoAnswer(k, 'canned', 'hello 44').out && demoAnswer(k, 'canned', 'x').status === 'ok' && demoAnswer(k, 'soon', 'x').status === 'soon' && demoAnswer(k, 'dead', 'x').status === 'dead' && demoAnswer(k, undefined, 'x').out === undefined), 'a demo that works answers what was typed; a canned one answers the same whatever is typed; the others answer nothing: two tries tell them apart')
 }
 
 // ─── 2. What devs call their coins ───────────────────────────────────────────
@@ -376,7 +393,7 @@ function run(seed: number, ticks: number, dials: Partial<typeof SPARK> = {}): Ru
   const ws = { readyState: 1, close() {}, send: (d: string | Buffer) => { box.raw.push(String(d)); box.msgs.push(JSON.parse(String(d))) } }
   world.join(ws as never, { t: 'hello', name: 'Reader', avatar: '👀', level: 1, playerId: 'u-reader', verified: true })
   const welcome = box.msgs.find((x) => x.t === 'welcome') as Extract<ServerMsg, { t: 'welcome' }>
-  const HIDDEN = /"sparkSim"|"decideAt"|"runs":|"power":|"due":|"larp":/
+  const HIDDEN = /"sparkSim"|"decideAt"|"runs":|"power":|"due":|"larp":|"demo":"/
   ok(!!welcome && (welcome.market.sparks?.length ?? 0) > 0 && !HIDDEN.test(box.raw.join('')), `joining brings the posts on the timeline (${welcome?.market.sparks?.length}) and nothing of their hidden side`)
   ok(Object.keys(w.market.sparkSim ?? {}).length > 0, '(the server itself has stories open at that moment, so there was something to hide)')
   let mine: Spark[] | undefined = welcome.market.sparks

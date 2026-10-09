@@ -45,7 +45,7 @@ export function SparkPost({ s, now, small }: { s: Spark; now: number; small?: bo
           </div>
           <div className="num truncate text-[10px] text-dim">@{s.by.handle} · {fmtCompact(s.by.followers, '')} followers · {fmtAge(Math.max(0, now - s.time))} ago</div>
         </div>
-        <span className="shrink-0 rounded bg-raise px-1 text-[9px] font-bold text-muted">{s.kind === 'news' ? 'NEWS' : 'POST'}</span>
+        <span className="shrink-0 rounded bg-raise px-1 text-[9px] font-bold text-muted">{s.kind === 'news' ? 'NEWS' : s.kind === 'tech' ? 'TECH' : 'POST'}</span>
         <span className={clsx('shrink-0 rounded px-1 text-[8px] font-bold', SRC_META.story.cls)} title={SRC_META.story.hint}>{SRC_META.story.label}</span>
       </div>
       <p className={clsx('whitespace-pre-line leading-snug text-ink/90', small ? 'mt-1.5 text-[11px]' : 'mt-2 text-[13px]')}>{s.text}</p>

@@ -235,6 +235,7 @@ export type ClientMsg =
   | { t: 'status'; equity: number; startEquity: number; trades: number; wins: number; level: number; finished: boolean; protect: string[]; seasonPoints?: number; holdings?: MainHolding[]; addrs?: string[]; cbVolume?: number; cbAuto?: 'off' | 'coin' | 'usdc' }
   | { t: 'candles'; tokenId: string }
   | { t: 'board'; list?: BoardList } // World: ask for one leaderboard
+  | { t: 'demo'; tokenId: string; input: string } // try the demo on a tech coin's site (the server answers: what the demo really does is hidden)
   | { t: 'card'; id: string } // World: ask for one player's public card (works for players who are off line)
   // Report a chat message to the admins (`from` + `time` + `text` say which one).
   | { t: 'report'; from: string; time: number; text: string }
@@ -283,6 +284,7 @@ export type ServerMsg =
   // World: the live chart points and trades of the coin a player has open, sent just before the tick they belong
   // to. (The tick itself carries no chart points there, and of the tapes only real players' trades.)
   | { t: 'focus'; tokenId: string; points?: CandlePoint[]; tape?: TapeTrade[] }
+  | { t: 'demo'; tokenId: string; input: string; status: 'ok' | 'soon' | 'dead'; out?: string }
   | { t: 'card'; id: string; card: PlayerCard | null } // null: nobody with a wallet here by that id
   | { t: 'chat'; from: string; name: string; avatar: string; text: string; time: number }
   | { t: 'error'; message: string }

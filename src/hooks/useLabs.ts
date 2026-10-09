@@ -28,3 +28,10 @@ export function useLarps() {
   const admin = useAccount((s) => s.admin)
   return on || admin
 }
+
+/** Tech coins (stage 3 of the story market) are behind the `tech` switch, the same way. */
+export function useTech() {
+  const on = useFlags((s) => s.tech || (import.meta.env.DEV && !!s.sparksDev))
+  const admin = useAccount((s) => s.admin)
+  return on || admin
+}

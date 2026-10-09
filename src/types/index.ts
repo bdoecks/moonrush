@@ -123,7 +123,7 @@ export interface Spark {
   seq: number // bumped when it changes (rooms send sparks by this, like beats)
   tick: number
   time: number // market time it was posted
-  kind: 'meme' | 'news'
+  kind: 'meme' | 'news' | 'tech'
   by: SparkBy
   text: string
   theme?: Narrative
@@ -132,6 +132,10 @@ export interface Spark {
   quote?: { name: string; handle: string; verified: boolean } // a "screenshot": the post says THIS account posted it (it may never have)
   fake?: { kind: SparkLarp; time: number; real?: SparkBy } // said once it has come out: the post was not what it looked like
 }
+/** The small tool a tech post announces (every coin launched on it has a site with a demo of it). */
+export type DemoTool = 'ticker' | 'convert' | 'count'
+/** What a coin's demo really does: it works, it gives the same answer whatever is typed, it says "soon", or nothing happens. Hidden. */
+export type DemoState = 'works' | 'canned' | 'soon' | 'dead'
 /** A post that is not what it looks like: an impersonator's account, a made-up screenshot, a hacked account. */
 export type SparkLarp = 'fake' | 'shot' | 'hack'
 /** A spark's hidden side: what the simulation knows and a player has to work out. Never sent to a browser. */
@@ -146,6 +150,7 @@ export interface SparkSim {
   decideAt: number // market time the timeline settles on one coin (or drops the story)
   due: number[] // market times of the launches still to come
   n: number // coins launched on it so far
+  tool?: DemoTool // a tech post: the tool it announces
   larp?: SparkLarp // it is not what it looks like, and comes out at `decideAt` (never before: that is the game)
   real?: SparkBy // …the account it pretends to be from
 }
@@ -471,6 +476,7 @@ export interface TokenSim {
   held?: number // coins in real wallets (players and bots), as of the last tick: the simulated crowd can't sell those
   baseTurnover: number
   flow?: FlowState // realistic engine only
+  demo?: DemoState // a tech coin: what the demo on its site really does (never sent to a World browser: it has to be tried)
   watch?: number // a coin on a post the timeline has not settled yet: people keep an eye on it (the least attention it has, see sparks.ts)
 }
 
@@ -481,6 +487,7 @@ export interface Token {
   tax?: Tax // buy/sell tax (tax pads only)
   devTrades?: DevTrade[] // dev wallet buys/sells, newest first
   beats?: Beat[] // the coin's story feed and chart markers, newest first (see storyEngine)
+  site?: { tool: DemoTool } // a tech coin has a site with a demo of the tool its post announced
   spark?: { id: string; n: number } // the post it was launched on, and its place in the order of launches on that post (1 = first)
   win?: WinStats // rolling 1m / 5m / 24h volume and txns
   name: string

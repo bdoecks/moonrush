@@ -1105,6 +1105,7 @@ export interface TickOptions {
   rugMult: number
   protectedIds: Set<string> // held or watched tokens are never delisted
   held?: Map<string, number> // coins in real wallets (players, bots), by coin id: the simulated crowd can't sell those
+  tech?: boolean // …and some posts announce a tool, whose coins have a site with a demo (stage 3)
   larps?: boolean // …and some posts are not what they look like (stage 2: real or larp)
   sparks?: boolean // the story market is on: most launches come from posts on the timeline (real-time engine only, see sparks.ts)
 }
@@ -1517,7 +1518,7 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
   // 8c. The story market: posts appear, devs launch coins on them, and the timeline settles on one coin or moves on.
   // (Switched off with stories still open: they are dropped, and their coins fade like any coin.)
   const storyMarket = realistic && !!opts.sparks
-  if (storyMarket) stepSparks(m, tokens, native, emit, !!opts.larps)
+  if (storyMarket) stepSparks(m, tokens, native, emit, !!opts.larps, !!opts.tech)
   else if (m.sparks?.length || (m.sparkSim && Object.keys(m.sparkSim).length)) dropSparks(m, tokens)
 
   // 9. New launches keep the trenches fresh.
@@ -1565,7 +1566,7 @@ const SPARK_KINDS: Record<SparkDev, Archetype> = { clean: 'runner', plain: 'chao
 const SPARK_LAUNCHES_A_TICK = 4
 
 /** One second of the story market: settle the stories that are due, launch the coins that are due, maybe a new post. */
-function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native'], emit: (e: Omit<MarketEvent, 'id' | 'tick' | 'time'>) => void, larps = false) {
+function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native'], emit: (e: Omit<MarketEvent, 'id' | 'tick' | 'time'>) => void, larps = false, tech = false) {
   // Its own dice (the market's seed and the tick), so the rest of the market draws the same numbers with it on or off.
   const rng = new Rng(((m.seed ^ 0x51ed270b) + Math.imul(m.tick, 0x9e3779b1)) >>> 0)
   const sims: Record<string, SparkSim> = { ...(m.sparkSim ?? {}) }
@@ -1617,11 +1618,16 @@ function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native
       }
       sim.due.shift()
       sim.n++
-      const base = coinFor(sim, rng)
+      // (Every coin on a tech post carries the product's name: only the demo on its site tells them apart.)
+      const base = sim.tool ? { name: sim.name, ticker: sim.ticker, emoji: sim.emoji } : coinFor(sim, rng)
       const dev = devFor(rng)
       const t = launchFlowToken(rng, m, base, { q: SPARK.preQ, archetype: SPARK_KINDS[dev.kind], devPct: dev.devPct, top10Pct: dev.top10Pct, insidersPct: dev.insidersPct })
       if (tokens.some((x) => x.id === t.id)) t.id = `${t.ticker}-${Math.floor(rng.next() * 1e9).toString(36)}` // (several coins on a post share a ticker: never an id)
       t.spark = { id, n: sim.n }
+      if (sim.tool) {
+        t.site = { tool: sim.tool }
+        t.sim.demo = rng.weighted(SPARK.demos)
+      }
       if (spark?.theme) t.narrative = spark.theme
       t.sim.watch = watchOf(sim.tier, sim.n)
       // (Its risk tag as it will read from now on: the timeline goes by it, and so does anybody reading the card.)
@@ -1643,7 +1649,7 @@ function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native
   if (rng.chance(sparkRate(FLOW.launchPerSec))) {
     const n = (m.nextSparkId = (m.nextSparkId ?? 0) + 1)
     m.sparkSeq = (m.sparkSeq ?? 0) + 1
-    const { spark, sim } = makeSpark(m, rng, `s${n}`, m.sparkSeq, new Set(Object.values(sims).map((x) => x.ticker)), undefined, larps)
+    const { spark, sim } = makeSpark(m, rng, `s${n}`, m.sparkSeq, new Set(Object.values(sims).map((x) => x.ticker)), undefined, larps, tech)
     sparks = [spark, ...sparks]
     sims[spark.id] = sim
     emit({ kind: 'spark', sparkId: spark.id, text: `@${spark.by.handle}: ${spark.text}`, icon: spark.kind === 'news' ? '📰' : '📣', tone: 'info' })
@@ -1704,7 +1710,7 @@ function settleSpark(m: MarketState, tokens: Token[], id: string, sim: SparkSim,
   // The crowd's own coins in each (never the ones in real wallets, nor a crowd dev's bag): see `bag` in stepFlow.
   const bagOf = (t: Token) => Math.max(0, LAUNCHPADS[t.pad].vTokens - t.liquidity / 2 / t.price - (t.sim.held ?? 0) - (t.creator === 'you' ? 0 : (t.devPct / 100) * SUPPLY))
   // A coin's stake: the share of its price it loses if the crowd sells what it would (see `SPARK.dump` below).
-  const win = coins[pickCoin(coins.map((t) => ({ fit: fitOf(t, sim), audit: auditOf(t), stake: stakeOf(t.liquidity / 2 / t.price, bagOf(t) * SPARK.dump) })), rng)]
+  const win = coins[pickCoin(coins.map((t) => ({ fit: sim.tool ? SPARK.demoFit[t.sim.demo ?? 'dead'] : fitOf(t, sim), audit: auditOf(t), stake: stakeOf(t.liquidity / 2 / t.price, bagOf(t) * SPARK.dump) })), rng)]
   const count = (t: Token, usd: number, side: 'buy' | 'sell') => {
     t.volume += usd
     if (side === 'buy') t.buys += 1

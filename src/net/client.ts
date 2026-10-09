@@ -3,6 +3,7 @@
 import { chartReplaced } from '../game/chartRev'
 import { applyCandlePoints, candleStore, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SUPPLY, type CandlePoint } from '../game/marketEngine'
 import { mergeSparks } from '../game/sparks'
+import { demoArrived } from '../game/demoStore'
 import { newPortfolio, portfolioStats, valuePortfolio } from '../game/portfolioEngine'
 import { levelFromXp } from '../game/progression'
 import { seasonNumber } from '../game/season'
@@ -420,6 +421,8 @@ function onMessage(msg: ServerMsg) {
     }
     case 'board':
       return useWorldBoard.setState({ board: msg })
+    case 'demo':
+      return demoArrived(msg)
     case 'card':
       // (Only the card that is open: an answer to a name clicked before this one is dropped.)
       if (usePlayerCard.getState().id === msg.id) usePlayerCard.setState({ card: msg.card })

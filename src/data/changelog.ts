@@ -9,7 +9,7 @@
 
 export interface Update {
   id: string
-  flag?: 'sparks' | 'larps' // told only while this switch is on (see the top of the file)
+  flag?: 'sparks' | 'larps' | 'tech' // told only while this switch is on (see the top of the file)
   date: string // as shown, e.g. "October 8, 2026"
   title: string
   fixed?: string[]
@@ -18,7 +18,8 @@ export interface Update {
 }
 
 /** What is being worked on now, newest plans first. */
-export const WORKING_ON: { what: string; why?: string; until?: 'sparks' | 'larps' }[] = [
+export const WORKING_ON: { what: string; why?: string; until?: 'sparks' | 'larps' | 'tech' }[] = [
+  { until: 'tech', what: 'Tech coins', why: 'Posts that announce a small tool. Every coin launched on one has a site with a demo, and only on some of them does the demo really work. It is being tested first.' },
   { until: 'larps', what: 'Real or fake posts', why: 'Some posts will come from impersonators, made-up screenshots and hacked accounts, and you will have to check who really posted before you buy. It is being tested first.' },
   { until: 'sparks', what: 'Coins that come from a story', why: 'A post or a news item appears on the timeline, devs rush to launch coins on it, and you work out which coin is the real one. It is being tested before it opens to everyone.' },
   { what: 'Cooking (launching your own coin)', why: 'It is being rebuilt so that launching a coin is a real bet, not a way to print money.' },
@@ -34,6 +35,18 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 
 /** Newest first. */
 export const UPDATES: Update[] = [
+  {
+    id: '2026-10-09-tech-coins',
+    flag: 'tech',
+    date: 'October 2026',
+    title: 'Tech coins: try the demo',
+    added: [
+      'Some posts now announce a small tool. Every coin launched on such a post has the same name, so the name tells you nothing.',
+      'Each of those coins has a site. Open it from the coin\'s page (the blue line under its name) and try the demo.',
+      'On some coins the demo really works. On others it gives the same answer whatever you type, says "coming soon", or just keeps loading. Try it with two different things.',
+      'The timeline tends to settle on a coin whose demo works. A coin with a working demo and a clean risk tag is the better bet.',
+    ],
+  },
   {
     id: '2026-10-09-real-or-fake',
     flag: 'larps',
@@ -111,7 +124,7 @@ export const UPDATES: Update[] = [
   },
 ]
 
-type Switches = Partial<Record<'sparks' | 'larps', boolean>>
+type Switches = Partial<Record<'sparks' | 'larps' | 'tech', boolean>>
 /** The updates a player is told about right now (an update behind a switch that is off is not news yet). */
 export const shownUpdates = (flags: Switches) => UPDATES.filter((u) => !u.flag || !!flags[u.flag])
 /** …and what is being worked on (a thing that has opened is not being worked on any more). */

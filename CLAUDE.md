@@ -697,3 +697,20 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   trades and +7.4% on accounts of 500K to 20M; the careful reader who does not check -1.0% overall; the exact name
   alone -3.2% (-4.9% on big accounts); the first coin -4.4% (-16% on big accounts, -20% on the huge ones).
   Run more rounds before quoting finer than that, and before touching `SPARK.larp`.
+
+## Story market stage 3: tech coins (the `tech` switch)
+
+- Built 2026-10-09, behind its own switch (`tech` in `app_flags`, default off; needs `sparks` on; `Room.tech`;
+  `STORY_TECH=1` or `node scripts/world-dev.mjs tech` on a test copy). With it on, `SPARK.tech` (20%) of mid-size
+  and big accounts' posts come from a builder (`SPARK_TECH`) and announce a small tool (`TECH_TOOLS`: a ticker maker,
+  a SOL converter, a letter counter). Every coin launched on such a post carries the product's name, so the name
+  says nothing; each has a site (`Token.site`, `components/token/SitePanel.tsx`, the blue line on the coin page)
+  with a demo. What the demo really does is `sim.demo` (`SPARK.demos`: works 30%, gives the same answer whatever
+  is typed 20%, "coming soon" 30%, nothing 20%) and the timeline reads it as it reads a name (`SPARK.demoFit`).
+- **What the demo does stays on the server** in the World: the browser asks (`{ t: 'demo' }`) and gets only the
+  answer (`demoAnswer`). Solo play works it out itself. Friends rooms still send a coin's `sim` (the old known gap),
+  so there it can be read: close that gap before calling tech coins fair in friends rooms.
+- Measured (`TECH=1 post-test`, World with bots, $100, 72 World hours a rule, one round): buying the first coin whose
+  demo works and whose tag is LOW +1.4% (+4.2% on accounts of 500K and up); buying the first LOW coin without
+  trying anything -1.3%. Not yet run with it on: UI bots, soak, `fair-test`.
+
