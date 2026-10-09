@@ -536,6 +536,33 @@ async function checklistBot(page: Page) {
     return 'opens, reads, closes; the dot goes out'
   })
 
+  await step(page, 'Floating trackers', 'The Wallet Tracker can be popped out of the side dock into a floating panel, dragged by its top bar, and docked back.', async () => {
+    await page.evaluate(() => (window as any).__game.getState().updateSettings({ trackerDock: { open: true, side: 'left', width: 320, split: 0.5, wallet: true, social: true } }))
+    await page.waitForTimeout(300)
+    const pop = page.getByRole('button', { name: 'Pop out the Wallet Tracker' })
+    if (!(await pop.count())) return 'the side dock is not shown at this screen size: skipped'
+    act('Click the pop-out button on the Wallet Tracker')
+    await pop.click()
+    const panel = page.getByRole('region', { name: 'Wallet Tracker (floating)' })
+    await panel.waitFor({ timeout: 3000 })
+    const before = await panel.boundingBox()
+    act('Drag it by its top bar')
+    await page.mouse.move(before!.x + 120, before!.y + 14)
+    await page.mouse.down()
+    await page.mouse.move(before!.x + 320, before!.y + 114, { steps: 6 })
+    await page.mouse.up()
+    await page.waitForTimeout(300)
+    const after = await panel.boundingBox()
+    if (!after || Math.abs(after.x - before!.x - 200) > 12 || Math.abs(after.y - before!.y - 100) > 12) throw new Error(`the panel did not follow the drag (moved ${Math.round((after?.x ?? 0) - before!.x)}, ${Math.round((after?.y ?? 0) - before!.y)})`)
+    await shot(page, 'floating-tracker')
+    act('Dock it back')
+    await page.getByRole('button', { name: 'Dock the Wallet Tracker' }).click()
+    await page.waitForTimeout(300)
+    if (await panel.count()) throw new Error('the floating panel did not go away')
+    if (!(await pop.count())) throw new Error('the tracker did not return to the side dock')
+    return 'pops out, follows the drag, docks back'
+  })
+
   await step(page, 'Share an idea', 'The idea button (top right) should open a short form with three kinds of idea; Send stays off until something is written; nothing is sent by this test.', async () => {
     act('Click the "Share an idea" button (top right)')
     await page.getByRole('button', { name: 'Share an idea', exact: true }).first().click()

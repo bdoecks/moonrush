@@ -760,6 +760,14 @@ export interface Settings {
   trackerDock?: TrackerDockPrefs // GMGN-style side dock with the wallet + social trackers
 }
 
+/** A floating panel's place and size on the screen (px). */
+export interface FloatBox {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export interface TrackerDockPrefs {
   open: boolean
   side: 'left' | 'right'
@@ -767,6 +775,7 @@ export interface TrackerDockPrefs {
   split: number // share of the height the wallet tracker gets (0..1)
   wallet: boolean // wallet section expanded
   social: boolean // social section expanded
+  float?: { wallet?: FloatBox; social?: FloatBox } // a tracker popped out of the dock: where its floating panel is
   liveUrl?: string // feed server for real X posts (Server-Sent Events)
 }
 

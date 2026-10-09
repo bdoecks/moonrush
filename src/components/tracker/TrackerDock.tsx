@@ -1,13 +1,13 @@
 import clsx from 'clsx'
-import { ArrowLeftRight, AtSign, ChevronDown, ChevronRight, ExternalLink, PanelLeftClose, PanelRightClose, Radio, Send, UserPlus, Wallet } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { ArrowLeftRight, AtSign, ChevronDown, ChevronRight, ExternalLink, GripHorizontal, PanelLeftClose, PanelRightClose, PictureInPicture2, Radio, Send, UserPlus, Wallet, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { tokenMapOf, useTokenMap } from '../../hooks/useDerived'
 import { OnScreen } from '../OnScreen'
 import { useLiveFeed } from '../../game/liveSocial'
 import { SIM_SEC_PER_TICK } from '../../game/marketEngine'
 import { useGame } from '../../game/store'
 import { useFriends } from '../../net/friends'
-import type { SimWallet, SocialPost, TrackerDockPrefs, WalletStyle, WalletTrade } from '../../types'
+import type { FloatBox, SimWallet, SocialPost, TrackerDockPrefs, WalletStyle, WalletTrade } from '../../types'
 import { fmtAge, fmtCompact, fmtUsd } from '../../utils/format'
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
@@ -30,20 +30,38 @@ export function useDockPrefs(): [TrackerDockPrefs, (patch: Partial<TrackerDockPr
 /**
  * GMGN-style side dock: Wallet Tracker on top, Social Tracker below. Docks to the left or right edge, drag its inner
  * edge to resize, drag the divider to share the height, or collapse it to a thin rail. Desktop only.
+ * Either tracker can be popped out into a floating panel (the button in its title bar) that drags by its top bar and
+ * resizes from its corner, like Instant Trade; its dock button puts it back.
  */
 export function TrackerDock() {
   const [p, set] = useDockPrefs()
   const [live, setLive] = useState<{ width: number; split: number } | null>(null) // while dragging
+  const [front, setFront] = useState<'wallet' | 'social'>('wallet') // of two floating panels, the one touched last is on top
   const width = live?.width ?? p.width
   const split = live?.split ?? p.split
   const left = p.side === 'left'
+  // A tracker that has been popped out floats over the page; the dock holds only the ones still in it.
+  const fw = p.float?.wallet
+  const fs = p.float?.social
+  const setFloat = (which: 'wallet' | 'social', box: FloatBox | undefined) => set({ float: { ...p.float, [which]: box }, ...(box ? {} : { open: true, [which]: true }) })
+  const popOut = (which: 'wallet' | 'social') => setFloat(which, clampBox({ x: left ? width + 24 : window.innerWidth - width - 384, y: which === 'wallet' ? 110 : 190, w: 360, h: 440 }))
+  const floats = (
+    <>
+      {fw && <FloatPanel title="Wallet Tracker" icon={<Wallet size={12} />} box={fw} onBox={(b) => setFloat('wallet', b)} onDock={() => setFloat('wallet', undefined)} front={front === 'wallet'} onFront={() => setFront('wallet')}><WalletSection /></FloatPanel>}
+      {fs && <FloatPanel title="Social Tracker" icon={<AtSign size={12} />} box={fs} onBox={(b) => setFloat('social', b)} onDock={() => setFloat('social', undefined)} front={front === 'social'} onFront={() => setFront('social')}><SocialSection /></FloatPanel>}
+    </>
+  )
+  if (fw && fs) return floats // both are floating: the dock has nothing left to hold
 
   if (!p.open) {
     return (
+      <>
+      {floats}
       <div className={clsx('hidden w-9 shrink-0 flex-col items-center gap-1 bg-panel py-2 lg:flex', left ? 'order-first border-r border-line' : 'order-last border-l border-line')}>
         <RailButton title="Open wallet tracker" onClick={() => set({ open: true, wallet: true })}><Wallet size={15} /></RailButton>
         <RailButton title="Open social tracker" onClick={() => set({ open: true, social: true })}><AtSign size={15} /></RailButton>
       </div>
+      </>
     )
   }
 
@@ -83,8 +101,10 @@ export function TrackerDock() {
     window.addEventListener('pointerup', up)
   }
 
-  const both = p.wallet && p.social
+  const both = p.wallet && p.social && !fw && !fs
   return (
+    <>
+    {floats}
     <aside
       className={clsx('relative hidden shrink-0 flex-col bg-panel lg:flex', left ? 'order-first border-r border-line' : 'order-last border-l border-line', live && 'select-none')}
       style={{ width }}
@@ -100,15 +120,71 @@ export function TrackerDock() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <Section title="Wallet Tracker" icon={<Wallet size={12} />} open={p.wallet} onToggle={() => set({ wallet: !p.wallet })} style={both ? { height: `${split * 100}%` } : p.wallet ? { flex: 1 } : undefined}>
+        {!fw && <Section title="Wallet Tracker" icon={<Wallet size={12} />} open={p.wallet} onToggle={() => set({ wallet: !p.wallet })} onFloat={() => popOut('wallet')} style={both ? { height: `${split * 100}%` } : p.wallet ? { flex: 1 } : undefined}>
           <WalletSection />
-        </Section>
+        </Section>}
         {both && <div onPointerDown={dragSplit} onDoubleClick={() => set({ split: 0.5 })} title="Drag to resize · double-click to reset" className="h-1 shrink-0 cursor-row-resize bg-line hover:bg-accent/50" />}
-        <Section title="Social Tracker" icon={<AtSign size={12} />} open={p.social} onToggle={() => set({ social: !p.social })} style={both ? { height: `${(1 - split) * 100}%` } : p.social ? { flex: 1 } : undefined}>
+        {!fs && <Section title="Social Tracker" icon={<AtSign size={12} />} open={p.social} onToggle={() => set({ social: !p.social })} onFloat={() => popOut('social')} style={both ? { height: `${(1 - split) * 100}%` } : p.social ? { flex: 1 } : undefined}>
           <SocialSection />
-        </Section>
+        </Section>}
       </div>
     </aside>
+    </>
+  )
+}
+
+// ─── Floating panels ─────────────────────────────────────────────────────────
+const FLOAT_MIN = { w: 280, h: 220 }
+/** Keep a floating panel a sane size and on the screen (whatever the window has become since it was placed). */
+const clampBox = (b: FloatBox): FloatBox => {
+  const w = Math.min(Math.max(FLOAT_MIN.w, b.w), Math.max(FLOAT_MIN.w, window.innerWidth - 16))
+  const h = Math.min(Math.max(FLOAT_MIN.h, b.h), Math.max(FLOAT_MIN.h, window.innerHeight - 72))
+  return { w, h, x: Math.min(Math.max(8, b.x), Math.max(8, window.innerWidth - w - 8)), y: Math.min(Math.max(56, b.y), Math.max(56, window.innerHeight - h - 8)) }
+}
+
+/**
+ * A tracker out of the dock: drag it by its top bar, resize it from the bottom-right corner, put it back with the dock
+ * button. Where it sits is saved with your settings. Desktop only, like the dock.
+ */
+function FloatPanel({ title, icon, box, onBox, onDock, front, onFront, children }: { title: string; icon: ReactNode; box: FloatBox; onBox: (b: FloatBox) => void; onDock: () => void; front: boolean; onFront: () => void; children: ReactNode }) {
+  const [live, setLive] = useState<FloatBox | null>(null) // while dragging or resizing
+  const latest = useRef(box)
+  const [, redraw] = useState(0)
+  useEffect(() => {
+    const on = () => redraw((n) => n + 1)
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  const b = clampBox(live ?? box)
+  const track = (e: React.PointerEvent, next: (dx: number, dy: number) => FloatBox) => {
+    if ((e.target as HTMLElement).closest('button, input, a')) return
+    e.preventDefault()
+    const sx = e.clientX, sy = e.clientY
+    latest.current = b
+    const move = (ev: PointerEvent) => {
+      latest.current = clampBox(next(ev.clientX - sx, ev.clientY - sy))
+      setLive(latest.current)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      setLive(null)
+      onBox(latest.current)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  return (
+    <div role="region" aria-label={`${title} (floating)`} onPointerDownCapture={onFront} className={clsx('fixed hidden flex-col', front ? 'z-[31]' : 'z-30', 'flex-col overflow-hidden rounded-lg border border-line2 bg-panel/95 shadow-2xl backdrop-blur lg:flex', live && 'select-none')} style={{ left: b.x, top: b.y, width: b.w, height: b.h }}>
+      <div onPointerDown={(e) => track(e, (dx, dy) => ({ ...b, x: b.x + dx, y: b.y + dy }))} className="flex h-8 shrink-0 cursor-grab touch-none items-center gap-1.5 border-b border-line px-2 active:cursor-grabbing">
+        <GripHorizontal size={14} className="text-dim" />
+        <span className="text-dim">{icon}</span>
+        <span className="text-[12px] font-bold text-ink">{title}</span>
+        <button onClick={onDock} className="ml-auto rounded p-1 text-dim hover:bg-panel2 hover:text-ink" title="Put it back in the side dock" aria-label={`Dock the ${title}`}><X size={14} /></button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      <div onPointerDown={(e) => track(e, (dx, dy) => ({ ...b, w: b.w + dx, h: b.h + dy }))} title="Drag to resize" aria-label={`Resize the ${title}`} className="absolute bottom-0 right-0 z-10 size-4 cursor-nwse-resize touch-none" style={{ background: 'linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.25) 50%)' }} />
+    </div>
   )
 }
 
@@ -116,14 +192,17 @@ function RailButton({ title, onClick, children }: { title: string; onClick: () =
   return <button onClick={onClick} title={title} aria-label={title} className="grid size-7 place-items-center rounded-md text-muted hover:bg-panel2 hover:text-ink">{children}</button>
 }
 
-function Section({ title, icon, open, onToggle, style, children }: { title: string; icon: ReactNode; open: boolean; onToggle: () => void; style?: React.CSSProperties; children: ReactNode }) {
+function Section({ title, icon, open, onToggle, onFloat, style, children }: { title: string; icon: ReactNode; open: boolean; onToggle: () => void; onFloat?: () => void; style?: React.CSSProperties; children: ReactNode }) {
   return (
     <section className={clsx('flex min-h-0 flex-col', !open && 'shrink-0')} style={open ? style : undefined}>
-      <button onClick={onToggle} className="flex h-7 shrink-0 items-center gap-1.5 border-b border-line/60 px-2 text-[12px] font-bold text-ink hover:bg-panel2/60" aria-expanded={open}>
-        {open ? <ChevronDown size={12} className="text-dim" /> : <ChevronRight size={12} className="text-dim" />}
-        <span className="text-dim">{icon}</span>
-        {title}
-      </button>
+      <div className="flex h-7 shrink-0 items-center border-b border-line/60 hover:bg-panel2/60">
+        <button onClick={onToggle} className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-[12px] font-bold text-ink" aria-expanded={open}>
+          {open ? <ChevronDown size={12} className="text-dim" /> : <ChevronRight size={12} className="text-dim" />}
+          <span className="text-dim">{icon}</span>
+          {title}
+        </button>
+        {onFloat && <button onClick={onFloat} className="mr-1 rounded p-1 text-dim hover:bg-panel2 hover:text-ink" title="Pop out: a floating panel you can drag anywhere" aria-label={`Pop out the ${title}`}><PictureInPicture2 size={13} /></button>}
+      </div>
       {open && <div className="flex min-h-0 flex-1 flex-col">{children}</div>}
     </section>
   )

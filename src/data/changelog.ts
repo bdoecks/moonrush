@@ -30,6 +30,14 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-10-08-floating-trackers',
+    date: 'October 8, 2026',
+    title: 'Trackers you can drag anywhere',
+    added: [
+      'The Wallet Tracker and the Social Tracker can be popped out of the side dock (the small window button in their title bar) into floating panels. Drag one by its top bar, resize it from its corner, and press its X to put it back. On a computer screen only.',
+    ],
+  },
+  {
     id: '2026-10-08-missions',
     date: 'October 8, 2026',
     title: 'A bigger Missions tab',

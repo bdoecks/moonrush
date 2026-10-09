@@ -493,6 +493,13 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   by themselves when it is on. Say that a money bug is fixed, never how it was done. `tutorial-test` checks the list
   is readable and carries no code names.
 
+## Floating trackers
+
+- The Wallet Tracker and Social Tracker live in the side dock (`components/tracker/TrackerDock.tsx`, desktop only).
+  Each can be popped out into a floating panel (`FloatPanel`): drag by the top bar, resize from the bottom-right
+  corner, the X docks it back. Where each sits is saved in `settings.trackerDock.float`, and it is kept on screen
+  when the window changes size (`clampBox`). With both floating the dock is not drawn at all.
+
 ## Missions: daily, weekly, career
 
 - The Missions page has four tabs. Daily (`game/dailyChallenges.ts`, three a day) and This round
