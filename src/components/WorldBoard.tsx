@@ -9,7 +9,8 @@ import { fmtCountdown, seasonEnds } from '../game/season'
 import { dayEndsAt } from '../game/worldSeason'
 import { useGame } from '../game/store'
 import { useOpenPlayer } from './PlayerCard'
-import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, type BoardList, type BoardRow, type HallEntry } from '../net/protocol'
+import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, worldStartOf, type BoardList, type BoardRow, type HallEntry } from '../net/protocol'
+import { nextWorldRank, WORLD_RANKS, worldRank } from '../game/worldRank'
 import { useWorldBoard } from '../net/worldBoard'
 import { fmtCompact, fmtUsd, toneClass } from '../utils/format'
 import { load, save } from '../utils/storage'
@@ -37,6 +38,7 @@ export function WorldBoard() {
   const board = useWorldBoard((s) => s.board)
   const you = useGame((s) => s.online?.you)
   const spectator = useGame((s) => !!s.online?.spectator)
+  const round = useGame((s) => s.online?.round)
   const send = useGame((s) => s.requestBoard)
   const [tab, setTab0] = useState<Tab>(() => load<Tab>('worldBoardTab') ?? 'season')
   const setTab = (t: Tab) => (setTab0(t), save('worldBoardTab', t))
@@ -59,6 +61,7 @@ export function WorldBoard() {
   const inList = !!me && rows.some((r) => r.id === me.row.id)
   const showMe = !!me && !inList && me.rank > 0 // rank 0: not on this list (e.g. Devs before your first launch)
   const info = TABS.find((t) => t.id === tab)!
+  const start = worldStartOf(round) // what a World wallet starts with: the ranks are measured against it
 
   return (
     <div className="space-y-3">
@@ -78,6 +81,7 @@ export function WorldBoard() {
             </div>
           )}
         </div>
+        {board.me && <MyRank season={board.me.row.season} start={start} />}
         {board.me?.row.trophies?.length ? <div className="mt-2 flex flex-wrap gap-1">{board.me.row.trophies.map((t, i) => <span key={i} className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-[10px] font-bold text-warn">{t}</span>)}</div> : null}
       </div>
 
@@ -97,6 +101,8 @@ export function WorldBoard() {
           {tab !== 'hall' && <> · {board.total} ranked · real players only</>}
         </span>
       </div>
+
+      {tab !== 'hall' && fresh && <Podium rows={rows} list={list} you={you} start={start} />}
 
       {tab === 'hall' ? <Hall hall={board.hall} /> : (
         <div className="overflow-x-auto rounded-md border border-line bg-panel">
@@ -119,11 +125,11 @@ export function WorldBoard() {
               )}
             </thead>
             <tbody>
-              {rows.map((r, i) => <Line key={r.id} r={r} rank={i + 1} you={r.id === you} list={list} />)}
+              {rows.map((r, i) => <Line key={r.id} r={r} rank={i + 1} you={r.id === you} list={list} start={start} />)}
               {me && showMe && (
                 <>
                   <tr><td colSpan={7} className="border-t border-line px-3 py-1 text-center text-[10px] text-dim">· · ·</td></tr>
-                  <Line r={me.row} rank={me.rank} you list={list} />
+                  <Line r={me.row} rank={me.rank} you list={list} start={start} />
                 </>
               )}
             </tbody>
@@ -135,7 +141,7 @@ export function WorldBoard() {
   )
 }
 
-function Who({ r, you }: { r: BoardRow; you: boolean }) {
+function Who({ r, you, start }: { r: BoardRow; you: boolean; start: number }) {
   return (
     <span className="flex items-center gap-2">
       <span className="relative grid size-7 shrink-0 place-items-center rounded-md bg-raise text-[15px]">
@@ -149,13 +155,13 @@ function Who({ r, you }: { r: BoardRow; you: boolean }) {
           {r.trophies?.slice(-3).map((t, i) => <span key={i} className="rounded bg-warn/10 px-1 text-[9px] font-bold text-warn" title="Season trophy">{t}</span>)}
           {you && <span className="text-[10px] text-accent">(you)</span>}
         </span>
-        <span className="text-[10px] text-dim">Lv {r.level}</span>
+        <span className="flex items-center gap-1.5 text-[10px] text-dim"><RankBadge season={r.season} start={start} /> Lv {r.level}</span>
       </span>
     </span>
   )
 }
 
-function Line({ r, rank, you, list }: { r: BoardRow; rank: number; you: boolean; list: BoardList }) {
+function Line({ r, rank, you, list, start }: { r: BoardRow; rank: number; you: boolean; list: BoardList; start: number }) {
   // A row opens that player's card (your own row: your Portfolio). Also for players who are off line.
   const open = useOpenPlayer()
   const row = { onClick: open ? () => open(r.id) : undefined, title: open ? (you ? 'Open your Portfolio' : `Open ${r.name}'s card`) : undefined }
@@ -165,7 +171,7 @@ function Line({ r, rank, you, list }: { r: BoardRow; rank: number; you: boolean;
     return (
       <tr {...row} className={clsx('border-t border-line/60', you && 'bg-accent/5', open && 'cursor-pointer hover:bg-panel2')}>
         {rankCell}
-        <td className="px-2 py-2"><Who r={r} you={you} /></td>
+        <td className="px-2 py-2"><Who r={r} you={you} start={start} /></td>
         <td className="num px-2 py-2 text-right font-bold text-up">{fmtUsd(d?.season.fees ?? 0, 0)}</td>
         <td className="num px-2 py-2 text-right">{d?.season.cooked ?? 0}</td>
         <td className="num px-2 py-2 text-right">{d?.season.migrated ?? 0}{d && d.season.cooked > 0 ? <span className="text-[10px] text-dim"> ({Math.round((d.season.migrated / d.season.cooked) * 100)}%)</span> : null}</td>
@@ -178,12 +184,88 @@ function Line({ r, rank, you, list }: { r: BoardRow; rank: number; you: boolean;
   return (
     <tr {...row} className={clsx('border-t border-line/60', you && 'bg-accent/5', open && 'cursor-pointer hover:bg-panel2')}>
       {rankCell}
-      <td className="px-2 py-2"><Who r={r} you={you} /></td>
+      <td className="px-2 py-2"><Who r={r} you={you} start={start} /></td>
       <td className={clsx('num px-2 py-2 text-right font-bold', list === 'worth' ? 'text-ink' : toneClass(v))}>{list === 'worth' ? fmtUsd(v, 0) : signed(v)}</td>
       <td className="num px-2 py-2 text-right">{fmtUsd(r.equity, 0)}</td>
       <td className={clsx('num hidden px-2 py-2 text-right sm:table-cell', toneClass(r.pnl))}>{signed(r.pnl)}</td>
       <td className="num hidden px-3 py-2 text-right text-muted md:table-cell">{r.restarts || '—'}</td>
     </tr>
+  )
+}
+
+/** A player's season rank as a small badge (see game/worldRank.ts). */
+function RankBadge({ season, start, big }: { season: number; start: number; big?: boolean }) {
+  const rank = worldRank(season, start)
+  return <span className={clsx('inline-flex items-center gap-0.5 rounded border font-bold', rank.cls, big ? 'px-1.5 py-0.5 text-[11px]' : 'px-1 text-[9px]')} title={`Season rank: ${rank.name}. Ranks follow season profit, measured against a starting wallet (${fmtUsd(start, 0)}).`}>{rank.icon} {rank.name}</span>
+}
+
+/** Your own rank in the season banner, and how far the next one is. */
+function MyRank({ season, start }: { season: number; start: number }) {
+  const next = nextWorldRank(season, start)
+  const [ladder, setLadder] = useState(false)
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="text-dim">Your rank</span>
+        <RankBadge season={season} start={start} big />
+        {next ? <span className="text-muted"><b className="num text-ink">{fmtUsd(next.need, 0)}</b> more season profit to {next.rank.icon} <b className="text-ink">{next.rank.name}</b></span> : <span className="text-warn">The top rank. Nothing above you but the podium.</span>}
+        <button onClick={() => setLadder((v) => !v)} className="ml-auto text-[10px] text-dim underline hover:text-ink">{ladder ? 'Hide the ranks' : 'All ranks'}</button>
+      </div>
+      {next && <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-line2"><div className="h-full bg-warn transition-all" style={{ width: `${Math.round(next.progress * 100)}%` }} /></div>}
+      {ladder && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {WORLD_RANKS.map((r) => (
+            <span key={r.id} className={clsx('rounded border px-1.5 py-0.5 text-[10px]', r.cls, worldRank(season, start).id === r.id && 'bg-white/5 font-bold')}>
+              {r.icon} {r.name} <span className="num text-dim">{!Number.isFinite(r.from) ? `down more than ${fmtUsd(0.05 * start, 0)}` : r.from <= 0 ? 'the start' : `from +${fmtUsd(r.from * start, 0)}`}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The top three of a list, on a podium. An empty step is an open spot, said so: a young season is not a broken page. */
+function Podium({ rows, list, you, start }: { rows: BoardRow[]; list: BoardList; you?: string; start: number }) {
+  const open = useOpenPlayer()
+  // Shown 2nd, 1st, 3rd, as a podium stands, on every screen (three narrow steps on a phone).
+  const order = [1, 0, 2]
+  const HEIGHT = ['pt-0', 'pt-4', 'pt-6']
+  const PLACE = ['1st', '2nd', '3rd']
+  const RING = ['border-warn/70 bg-[radial-gradient(circle_at_50%_0%,rgba(255,201,61,0.18),transparent_70%)]', 'border-[#b4bed2]/50 bg-[radial-gradient(circle_at_50%_0%,rgba(180,190,210,0.12),transparent_70%)]', 'border-[#cd7f32]/50 bg-[radial-gradient(circle_at_50%_0%,rgba(205,127,50,0.14),transparent_70%)]']
+  return (
+    <div className="grid grid-cols-3 items-end gap-1.5 md:gap-2" role="list" aria-label="Podium">
+      {order.map((i) => {
+        const r = rows[i]
+        const v = r ? value(list, r) : 0
+        return (
+          <div key={i} role="listitem" className={clsx('min-w-0', HEIGHT[i])}>
+            <div
+              onClick={r && open ? () => open(r.id) : undefined}
+              className={clsx('rounded-lg border px-1.5 py-2 text-center md:px-3 md:py-3', RING[i], r && open && 'cursor-pointer hover:brightness-125', !r && 'border-dashed opacity-70', r?.id === you && 'ring-1 ring-accent')}
+            >
+              <div className="text-[22px] leading-none">{MEDAL[i]}</div>
+              <div className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-dim">{PLACE[i]}</div>
+              {r ? (
+                <>
+                  <div className="mt-1 text-[26px] leading-none">{r.avatar}</div>
+                  <div className="mt-1 truncate text-[13px] font-bold text-ink">{r.name}{r.id === you && <span className="ml-1 text-[10px] text-accent">(you)</span>}</div>
+                  <div className="mt-0.5 flex flex-wrap items-center justify-center gap-x-1.5 text-[10px] text-dim"><RankBadge season={r.season} start={start} /> <span>Lv {r.level}</span></div>
+                  <div className={clsx('num mt-1 font-display text-[14px] font-bold md:text-[17px]', list === 'worth' || list === 'dev' ? 'text-ink' : toneClass(v))}>{list === 'worth' || list === 'dev' ? fmtUsd(v, 0) : signed(v)}</div>
+                  <div className="text-[9px] uppercase tracking-wider text-dim">{COLUMN[list]}</div>
+                </>
+              ) : (
+                <>
+                  <div className="mt-1 text-[26px] leading-none opacity-40">👤</div>
+                  <div className="mt-1 text-[13px] font-bold text-muted">Open spot</div>
+                  <div className="mt-0.5 text-[10px] leading-tight text-dim">{list === 'dev' ? 'Launch a coin to take it' : 'Trade to take it'}</div>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
