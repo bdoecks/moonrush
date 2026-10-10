@@ -209,14 +209,14 @@ const VOICE: Record<SparkTier, string[]> = {
     '{N} the {A} {V} lol', 'ok but {N} the {A} though', 'adding {N} the {A} to the list of things keeping me going', 'the way {N} the {A} {V} 😭',
   ],
   anon: [
-    'bro {N} the {A} {V} 😭😭', 'lmaooo {N} the {A} {V}', 'yo has anyone seen {N} the {A}??', 'cant sleep. thinking about {N} the {A}', '{N} the {A} >>>>',
+    'bro {N} the {A} {V} 😭😭', 'lmaooo {N} the {A} {V}', 'yo has anyone seen {N} the {A}??', 'cant sleep. thinking about {N} the {A}', '{N} the {A} >>>> everything else',
     'not me crying over a {A} named {N} at 3am', '{N} the {A} {V} lol', 'wait {N} the {A} is real??', 'i love {N} the {A} so much its not even funny',
     'someone tell me more about {N} the {A} pls', '{N} the {A} {V} im crying', 'first time posting. it is about {N} the {A}',
   ],
 }
 const MEME_TITLED = ['#{H} is the only thing getting me through this week', 'somebody please explain #{H} to me. actually do not. i get it', '#{H} {V} and i think about it daily', 'we are all just living in the #{H} era',
   '#{H} for president of my street', 'i did not have #{H} on my list for this year but here we are', 'day {D} of #{H} and i am still not over it', 'if you do not know about #{H} yet, you will by tonight',
-  'the group chat has been nothing but #{H} since breakfast', '#{H} {V}. i need a minute', 'logging off. nothing will top #{H} today', '#{H} supremacy', 'how is #{H} not the top trend yet']
+  'the group chat has been nothing but #{H} since breakfast', '#{H} {V}. i need a minute', 'logging off. nothing will top #{H} today', '#{H} supremacy. no notes', 'how is #{H} not the top trend yet']
 
 /** News posts (invented outlets and invented places). Same marks as above; `{P}` = a place, `{J}` = a job. */
 const NEWS: Record<SubjectType, string[]> = {
