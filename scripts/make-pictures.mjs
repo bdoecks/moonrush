@@ -2,9 +2,10 @@
 //   node scripts/make-pictures.mjs            the test batch: the first 20 on the list
 //   node scripts/make-pictures.mjs --all      every picture on the list that is not made yet
 //   node scripts/make-pictures.mjs --list     what would be made, and what it would cost (asks nobody anything)
+//   node scripts/make-pictures.mjs --schnell  the same with the cheaper model (flux-schnell), into its own folder
 // Setup: put your Replicate token in the file called .env in this folder (never in the game, a commit or a chat):
 //   REPLICATE_API_TOKEN=your-token-here
-// Pictures land in bot-data/pictures/ (private: that folder is never uploaded). They are looked at, one by one,
+// Pictures land in bot-data/pictures/<model>/ (private: that folder is never uploaded). They are looked at, one by one,
 // before any of them is moved into the game. A picture that exists is never made again, so a run can be stopped.
 // The owner's rule holds here as everywhere: no real person, brand, place, famous animal or character, and no
 // writing in a picture. A description says what IS there ("an empty hall"): "no people" makes the model draw people.
@@ -15,9 +16,10 @@ import { fileURLToPath } from 'node:url'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 if (existsSync(join(ROOT, '.env'))) process.loadEnvFile(join(ROOT, '.env'))
 const TOKEN = process.env.REPLICATE_API_TOKEN?.trim()
-const MODEL = process.env.PICTURE_MODEL ?? 'black-forest-labs/flux-dev'
+const MODEL = process.argv.includes('--schnell') ? 'black-forest-labs/flux-schnell' : (process.env.PICTURE_MODEL ?? 'black-forest-labs/flux-dev')
 const PRICE = MODEL.endsWith('schnell') ? 0.003 : MODEL.endsWith('dev') ? 0.025 : 0.04 // dollars a picture, as Replicate listed them (2026-10-10)
-const OUT = join(ROOT, 'bot-data', 'pictures')
+// (A folder for each model, so the same list can be made with two of them and compared side by side.)
+const OUT = join(ROOT, 'bot-data', 'pictures', MODEL.split('/').pop())
 
 // How a post's picture looks: something a passer-by took on a phone, not a studio shot.
 const PHONE = 'amateur phone photo taken by a passer-by, ordinary daylight, slightly off-centre, a little soft, quiet empty surroundings, plain unmarked surfaces'
@@ -92,4 +94,4 @@ for (const [name, what, look] of todo) {
   }
   await sleep(500)
 }
-console.log(`Done: ${made} made, about $${(made * PRICE).toFixed(2)} spent. They are in bot-data/pictures. Tell Claude, who looks at every one before any goes into the game.`)
+console.log(`Done: ${made} made, about $${(made * PRICE).toFixed(2)} spent. They are in ${OUT}. Tell Claude, who looks at every one before any goes into the game.`)
