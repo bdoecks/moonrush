@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { LIST } from './picture-list.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 if (existsSync(join(ROOT, '.env'))) process.loadEnvFile(join(ROOT, '.env'))
@@ -21,38 +22,12 @@ const PRICE = MODEL.endsWith('schnell') ? 0.003 : MODEL.endsWith('dev') ? 0.025 
 // (A folder for each model, so the same list can be made with two of them and compared side by side.)
 const OUT = join(ROOT, 'bot-data', 'pictures', MODEL.split('/').pop())
 
-// How a post's picture looks: something a passer-by took on a phone, not a studio shot.
-const PHONE = 'amateur phone photo taken by a passer-by, ordinary daylight, slightly off-centre, a little soft, quiet empty surroundings, plain unmarked surfaces'
-const PAPER = 'local newspaper photo, on-camera flash, slightly grainy, an empty room behind, plain unmarked surfaces'
-// [file name, what is in it, the look]. The file name is the subject and what happened, as the game's posts have them.
-const LIST = [
-  ['otter-station-master', 'a river otter wearing a small plain navy cap, sitting on a bench on an empty train platform', PHONE],
-  ['sloth-counts', 'a sloth sitting at a wooden table looking at a row of apples', PAPER],
-  ['duck-library', 'a duck standing on the counter of an empty public library next to a stack of books', PHONE],
-  ['dog-bus', 'a scruffy dog sitting alone on a seat of an empty city bus, looking out of the window', PHONE],
-  ['cat-salad-bowl', 'a cat curled up asleep inside a large salad bowl on a kitchen counter', PHONE],
-  ['hippo-hot-tub', 'a small hippo sitting in an outdoor hot tub in a back garden, looking content', PHONE],
-  ['frog-backwards', 'a green frog on a garden path seen from behind, mid-step', PHONE],
-  ['penguin-pool', 'a penguin standing at the edge of an empty indoor swimming pool at dusk', PHONE],
-  ['horse-shoes', 'a horse in a stable doorway with a pile of mismatched human shoes on the straw beside it', PHONE],
-  ['goat-meeting', 'a goat sitting upright on an office chair at an empty meeting table', PAPER],
-  ['squirrel-fridge', 'a squirrel perched on the shelf of an open fridge in a kitchen', PHONE],
-  ['bear-traffic-cone', 'a small bear cub hugging an orange traffic cone on a quiet empty road', PHONE],
-  ['owl-fire-station', 'an owl perched on the bumper of a fire engine inside an empty fire station', PAPER],
-  ['pig-shopping-cart', 'a pig sitting in a shopping cart in an empty supermarket car park', PHONE],
-  ['koala-fountain', 'a wet koala sitting on the edge of a town square fountain, looking unbothered', PHONE],
-  ['pancake-worried', 'a pancake on a plate with a worried face made of blueberries, in a staff kitchen', PHONE],
-  ['pizza-counter', 'a whole pizza sitting untouched on a kitchen counter with a small paper crown on it', PHONE],
-  ['robot-stuck-chair', 'a small round robot vacuum wedged under a wooden dining chair', PHONE],
-  ['robot-crosswalk', 'a small boxy delivery robot waiting at the kerb of an empty pedestrian crossing', PHONE],
-  ['console-attic', 'a dusty grey retro games console in an open cardboard box in an attic, lit by a torch', PHONE],
-]
-
+// The list is in scripts/picture-list.mjs (about 300; each entry says which subject and happening it goes with).
 const args = process.argv.slice(2)
-const todo = (args.includes('--all') ? LIST : LIST.slice(0, 20)).filter(([name]) => !existsSync(join(OUT, `${name}.webp`)))
+const todo = (args.includes('--all') ? LIST : LIST.slice(0, 20)).filter((p) => !existsSync(join(OUT, `${p.name}.webp`)))
 console.log(`${LIST.length} pictures on the list, ${todo.length} to make with ${MODEL}: about $${(todo.length * PRICE).toFixed(2)}`)
 if (args.includes('--list')) {
-  for (const [name, what, look] of todo) console.log(`  ${name}: ${what}, ${look}`)
+  for (const p of todo) console.log(`  ${p.name}: ${p.what}, ${p.look}`)
   process.exit(0)
 }
 if (!TOKEN) {
@@ -89,7 +64,7 @@ async function make(prompt, tries = 0) {
 }
 
 let made = 0
-for (const [name, what, look] of todo) {
+for (const { name, what, look } of todo) {
   try {
     writeFileSync(join(OUT, `${name}.webp`), await make(`${what}, ${look}`))
     made++
