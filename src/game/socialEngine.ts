@@ -2,6 +2,7 @@ import { CHAINS } from '../data/chains'
 import { WALLET_SEEDS } from '../data/wallets'
 import type { MarketEvent, MarketState, SocialAccount, SocialPost, SocialProfile, Token, WalletAction } from '../types'
 import { walletName } from './marketEngine'
+import { flavorPosts } from './feedFlavor'
 import { sparkLine } from './sparks'
 import { fakeAddress } from '../utils/address'
 import { fmtCompact } from '../utils/format'
@@ -288,6 +289,13 @@ export function tickSocial(m: MarketState, rng: Rng, actions: WalletAction[], ev
       case 'marketdown': post('x-bagholder', 'the whole market is bleeding and i am holding all of it'); break
       case 'marketup': post('x-gmgmgm', 'green everywhere. gm to everyone except bears'); break
     }
+  }
+
+  // The story market's timeline talks: an open story's account follows up, others repost it. (No dice, and nothing
+  // from the hidden side but the name its post already gave: see feedFlavor.ts.)
+  if (m.sparks?.length) {
+    let n = 0
+    posts.push(...flavorPosts(m, Object.fromEntries(Object.entries(m.sparkSim ?? {}).map(([id, x]) => [id, x.name])), () => m.tick * 1000 + 900 + n++))
   }
 
   // Telegram channels post calls, and their members briefly pump what gets called.

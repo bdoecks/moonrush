@@ -261,6 +261,7 @@ export interface SocialPost {
   isCall: boolean
   by?: SparkBy // a post by one of the story market's accounts (not in ACCOUNTS: who it is travels with the post)
   sparkId?: string // …and the spark it is: coins were launched on this post
+  quote?: { by: SparkBy; text: string } // a repost with a line of its own: the post it shows underneath (flavour, no coins on it)
 }
 
 export interface WalletLabel {

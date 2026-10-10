@@ -2,9 +2,11 @@
 // line, the text, a quoted box for a screenshot, the coin it calls, and the row of reply / repost / like / view
 // counts. Shared by every place the game shows the feed (the side dock, the bottom panel, the Track page), in the
 // timeline's own colours (`X` below). Everything in it is made up by the game: accounts, posts and counts.
+import { useState } from 'react'
 import clsx from 'clsx'
 import { BarChart2, Heart, MessageCircle, Repeat2 } from 'lucide-react'
 import { tokenMapOf } from '../../hooks/useDerived'
+import { repliesOf } from '../../game/feedFlavor'
 import { SIM_SEC_PER_TICK } from '../../game/marketEngine'
 import { useGame } from '../../game/store'
 import type { SocialPost } from '../../types'
@@ -48,11 +50,14 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
   const t = useGame((s) => (p.tokenId ? tokenMapOf(s.market.tokens).get(p.tokenId) : undefined))
   // (A post of the story market: what kind it is, and whether it is a screenshot of somebody else's.)
   const spark = useGame((s) => (p.sparkId ? s.market.sparks?.find((x) => x.id === p.sparkId) : undefined))
+  const [open, setOpen] = useState(false)
   if (!acc) return null
   const since = t && p.mcapAtPost ? t.mcap / p.mcapAtPost - 1 : 0
   const look = sizeLook(acc.player ? 0 : acc.followers)
   const age = (tick - p.tick) * SIM_SEC_PER_TICK
   const n = postCounts(p, acc.followers, age)
+  // (The replies under a story's post: made up from the post itself, the same for everybody. See feedFlavor.ts.)
+  const thread = spark ? repliesOf(spark, age) : []
   return (
     <article className={clsx('flex gap-3 border-b px-4 transition-colors hover:bg-white/[0.03]', roomy ? 'py-3.5' : 'py-3')} style={{ borderColor: X.line }}>
       <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[#16181C] text-[20px]">{acc.avatar}</span>
@@ -81,6 +86,17 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
             <div style={{ color: X.dim }}>@{spark.quote.handle} · not posted from that account</div>
           </div>
         )}
+        {p.quote && (
+          <div className="mt-2.5 rounded-2xl border px-3 py-2.5" style={{ borderColor: X.line }}>
+            <div className="flex items-center gap-1 text-[13px] leading-4">
+              <span className="grid size-5 shrink-0 place-items-center rounded-full bg-[#16181C] text-[11px]">{p.quote.by.avatar}</span>
+              <span className="truncate font-bold" style={{ color: X.text }}>{p.quote.by.name}</span>
+              {p.quote.by.verified && <VerifiedMark size={13} />}
+              <span className="min-w-0 shrink truncate" style={{ color: X.dim }}>@{p.quote.by.handle}</span>
+            </div>
+            <p className="mt-1 whitespace-pre-line break-words text-[14px] leading-5" style={{ color: X.text }}>{p.quote.text}</p>
+          </div>
+        )}
         {p.tokenId && (
           <div className="mt-2.5 flex items-center gap-2 rounded-2xl border px-3 py-2" style={{ borderColor: X.line }}>
             <button disabled={!t} onClick={() => t && select(t.id)} className="flex min-w-0 items-center gap-2 hover:underline">
@@ -93,13 +109,27 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
           </div>
         )}
         <div className="num mt-2.5 flex max-w-[420px] items-center justify-between text-[13px]" style={{ color: X.dim }}>
-          <span className="flex items-center gap-1.5"><MessageCircle size={16} /> {cnt(n.replies)}</span>
+          <span className="flex items-center gap-1.5"><MessageCircle size={16} /> {cnt(Math.max(n.replies, thread.length))}</span>
           <span className="flex items-center gap-1.5"><Repeat2 size={17} /> {cnt(n.reposts)}</span>
           <span className="flex items-center gap-1.5"><Heart size={16} /> {cnt(n.likes)}</span>
           <span className="flex items-center gap-1.5"><BarChart2 size={16} /> {cnt(n.views)}</span>
         </div>
         {p.tokenId && p.buyers !== undefined && <div className="mt-1 text-[12px]" style={{ color: X.dim }}>🦍 <span className={p.buyers ? 'font-semibold text-up' : ''}>{p.buyers} aped</span></div>}
         {!!p.replies?.length && <div className="mt-1 truncate text-[12px] italic" style={{ color: X.dim }}>{p.replies.map((r) => `“${r}”`).join('  ')}</div>}
+        {thread.length > 0 && (
+          <div className="mt-2.5 border-l-2 pl-3" style={{ borderColor: X.line }}>
+            {(open ? thread : thread.slice(-2)).map((r, i) => (
+              <div key={i} className="flex gap-2 py-1">
+                <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#16181C] text-[12px]">{r.avatar}</span>
+                <div className="min-w-0 text-[13px] leading-[18px]">
+                  <span className="font-bold" style={{ color: X.text }}>{r.name}</span> <span style={{ color: X.dim }}>@{r.handle}</span>
+                  <div className="break-words" style={{ color: X.text }}>{r.text}</div>
+                </div>
+              </div>
+            ))}
+            {thread.length > 2 && <button onClick={() => setOpen(!open)} className="py-1 text-[13px] hover:underline" style={{ color: X.blue }}>{open ? 'Show fewer replies' : `Show ${thread.length - 2} more ${thread.length - 2 === 1 ? 'reply' : 'replies'}`}</button>}
+          </div>
+        )}
       </div>
     </article>
   )

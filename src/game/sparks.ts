@@ -27,6 +27,7 @@
 //
 // Pure, and a leaf: the market engine imports this file, so nothing here may import the market engine.
 import { SPARK_TECH, TECH_NAMES, TECH_TEXT, TECH_TOOLS } from '../data/sparkPosts'
+import { styleText } from './feedFlavor'
 import { anonAccount, NEVER_SPELL, SPARK_ACCOUNTS, SPARK_NAMES, SPARK_TEXT, SPARK_TITLES, SUBJECTS, TYPE_THEME, VARIANT_POST, VARIANT_PRE, type SparkAccount } from '../data/sparkPosts'
 import { SAFE_THEMES } from '../data/themeWords'
 import type { DemoState, DemoTool, MarketState, RiskLevel, Spark, SparkBy, SparkLarp, SparkSim, SparkTier, Token } from '../types'
@@ -88,7 +89,7 @@ export const SPARK = {
   // its price, `gain` times the sum of the shares the others lost (1 = every coin was a fair bet, see the top), and
   // never more money goes in than `keep` times what came out of the others.
   dump: 0.9,
-  gain: 0.7,
+  gain: 0.6,
   keep: 1,
   // Real or larp (stage 2, its own switch). Of the posts that look like a known account's: the share that come from an
   // impersonator (the handle one slip off, no check mark, fewer followers), that are a nobody's "screenshot" of a
@@ -156,9 +157,10 @@ export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trend
   const T = SPARK_TEXT
   // (Its words: the lines for that kind of thing, and the lines in the voice of that size of account.)
   const line = titled ? rng.pick(T.MEME_TITLED) : rng.pick(kind === 'news' ? [...T.NEWS[subject.type], ...T.NEWS_VOICE[tier === 'mega' || tier === 'big' ? 'wire' : 'local']] : [...T.MEME[subject.type], ...T.VOICE[tier]])
-  const text = line.replaceAll('{N}', name).replaceAll('{A}', subject.word).replaceAll('{V}', rng.pick(T.DID[subject.type])).replaceAll('{D}', String(rng.int(2, 40)))
+  const plain = line.replaceAll('{N}', name).replaceAll('{A}', subject.word).replaceAll('{V}', rng.pick(T.DID[subject.type])).replaceAll('{D}', String(rng.int(2, 40)))
     .replaceAll('{H}', name.replace(/[^A-Za-z0-9]/g, '')).replaceAll('{P}', rng.pick(T.PLACES)).replaceAll('{J}', rng.pick(T.JOBS))
     .replace(/\b([aA]) (?=[aeioAEIO])/g, '$1n ') // "a owl" → "an owl" (not before a u: a ufo, a unicorn)
+  const text = styleText(account.handle, plain, id, name) // (in that account's own way of writing: no dice, see feedFlavor.ts)
 
   // A tech post? (Only asked with that switch on.) A builder announces a tool: the post, the name and who posts are replaced.
   if (tech && (tier === 'mid' || tier === 'big') && rng.chance(SPARK.tech)) {

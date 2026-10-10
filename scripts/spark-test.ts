@@ -19,6 +19,8 @@ import { tickSocial } from '../src/game/socialEngine'
 import { tickStories } from '../src/game/storyEngine'
 import { WORLD_CODE, type ServerMsg } from '../src/net/protocol'
 import { Rng } from '../src/utils/rng'
+import { ACCOUNT_STYLE, FOLLOW_UPS, QUOTE_LINES, REPLIES } from '../src/data/sparkFlavor'
+import { flavorPlan, flavorPosts, repliesOf, styleText } from '../src/game/feedFlavor'
 import type { MarketState, Spark, SparkSim, Token } from '../src/types'
 
 const hours = Number(process.argv[2] ?? 2)
@@ -73,9 +75,27 @@ const made: { spark: Spark; sim: SparkSim }[] = []
   for (let i = 0; i < 6000; i++) made.push(makeSpark(fakeMarket, rng, `s${i}`, i))
   const texts = made.map((x) => x.spark.text)
   ok(texts.every((t) => !/[{}]/.test(t) && t.length >= 20 && t.length <= 200), 'every post is filled in whole and fits a timeline')
+  // The timeline's flavour (feedFlavor.ts): styles, follow-ups, reposts, replies. Words only, and none about a coin.
+  {
+    const lines = [...Object.values(FOLLOW_UPS).flat(), ...QUOTE_LINES, ...Object.values(REPLIES).flat(), ...Object.values(ACCOUNT_STYLE).flatMap((x) => [...(x.pre ?? []), ...(x.post ?? [])])]
+    const words = (x: string) => x.toLowerCase().split(/[^a-z]+/).filter(Boolean)
+    ok(lines.every((l) => !/$[A-Za-z]/.test(l) && !words(l).some((w) => FAMOUS.includes(w)) && !/\{(?!N\}|D\})/.test(l)), `${lines.length} flavour lines: no ticker, no famous name, nothing left to fill in but the name`)
+    ok(Object.keys(ACCOUNT_STYLE).every((h) => SPARK_ACCOUNTS.some((a) => a.handle === h)), 'every account style belongs to an account that exists')
+    const open = made.slice(0, 1500).map((x) => x.spark)
+    const names = Object.fromEntries(made.slice(0, 1500).map((x) => [x.spark.id, x.sim.name]))
+    const run = () => { const out = []; let n = 0; for (let age = 0; age <= 70; age++) out.push(...flavorPosts({ tick: 1 + age, time: 0, sparks: open }, names, () => n++)); return out }
+    const a = run(), b = run()
+    ok(a.length > 200 && JSON.stringify(a) === JSON.stringify(b), `follow-ups and reposts come from the post alone: the same every time (${a.length} on 1500 posts)`)
+    ok(a.every((p) => !p.sparkId && !p.tokenId && !p.isCall && p.text.length <= 200 && !/[{}]/.test(p.text) && (!p.quote || p.quote.by.handle !== p.by!.handle)), 'none of them is a post coins launch on, a call, or an account reposting itself')
+    const settled = open.map((x, i) => (i % 3 === 0 ? { ...x, picked: { tokenId: 'x', ticker: 'X', time: 1 } } : i % 3 === 1 ? { ...x, over: 1 } : x))
+    ok(open.every((x, i) => { const before = repliesOf(x, 40), after = repliesOf(settled[i], 40); return JSON.stringify(after.slice(0, before.length)) === JSON.stringify(before) && after.length - before.length <= 1 }), 'replies say how a story ended only once the post shows it, and the earlier replies do not change')
+    ok(open.every((x) => repliesOf(x, 5).length <= repliesOf(x, 300).length && repliesOf(x, 300).length <= 15) && open.some((x) => repliesOf(x, 300).length >= 8), 'replies build up over the first minutes, more under a big account')
+    ok(open.every((x) => { const p = flavorPlan(x); return p.follow < 60 && p.quote1 < 60 && p.quote2 < 60 }) && styleText('bigmilo', 'meet Waffles the otter', 'k') === styleText('bigmilo', 'meet Waffles the otter', 'k') && styleText('nobody_here', 'abc', 'k') === 'abc', 'an account always writes its own way, and an account with no style is left alone')
+  }
   const an = texts.filter((t) => / an? (owl|otter|egg|android|alien|arcade)/i.test(t))
   ok(an.length > 50 && an.every((t) => !/(^| )a (owl|otter|egg|android|alien|arcade)/i.test(t)) && texts.some((t) => / a (ufo|unicorn)/.test(t)), `and reads right: an owl, an android, a ufo (${an.length} such posts)`)
-  ok(made.every((x) => x.spark.text.includes(x.sim.name) || x.spark.text.includes(`#${x.sim.name.replace(/[^A-Za-z0-9]/g, '')}`)), 'every post names what it is about: the right name is in it, to be read')
+  // (An account that writes in capitals writes the name in capitals too: it is read letter by letter all the same.)
+  ok(made.every((x) => x.spark.text.includes(x.sim.name) || x.spark.text.includes(x.sim.name.toUpperCase()) || x.spark.text.toLowerCase().includes(`#${x.sim.name.replace(/[^A-Za-z0-9]/g, '').toLowerCase()}`)), 'every post names what it is about: the right name is in it, to be read')
   ok(made.every((x) => !/\$[A-Z]/.test(x.spark.text)), 'no post names a ticker: the coins come after the post, not with it')
   ok(made.every((x) => x.sim.ticker === tickerOf(x.sim.name) && /^[A-Z0-9]{2,10}$/.test(x.sim.ticker)), "the right ticker is the name's letters, ten at the most")
   const bad = texts.filter((t) => { const m = moderate(t, { noLinks: true }); return !m.ok || m.strike })
@@ -102,7 +122,7 @@ const made: { spark: Spark; sim: SparkSim }[] = []
   const fakes = on.filter((x) => x.sim.larp === 'fake')
   ok(fakes.every((x) => !x.spark.by.verified && x.spark.by.handle !== x.sim.real!.handle && x.spark.by.name === x.sim.real!.name && x.spark.by.followers < x.sim.real!.followers && !SPARK_ACCOUNTS.some((a) => a.handle === x.spark.by.handle) && /^[a-z0-9_]{3,24}$/.test(x.spark.by.handle) && !nameBlocked(x.spark.by.handle)), 'an impersonator has the name and the picture, but a handle that is one slip off, no check mark and fewer followers')
   const shots = on.filter((x) => x.sim.larp === 'shot')
-  ok(shots.every((x) => !!x.spark.quote && x.spark.quote.handle === x.sim.real!.handle && x.spark.by.followers < 25_000 && x.spark.text.includes(x.sim.real!.name) && (x.spark.text.includes(x.sim.name) || x.spark.text.includes(`#${x.sim.name.replace(/ /g, '')}`))), 'a made-up screenshot comes from a nobody and says which account it claims posted it')
+  ok(shots.every((x) => !!x.spark.quote && x.spark.quote.handle === x.sim.real!.handle && x.spark.by.followers < 25_000 && x.spark.text.includes(x.sim.real!.name) && (x.spark.text.includes(x.sim.name) || x.spark.text.includes(x.sim.name.toUpperCase()) || x.spark.text.toLowerCase().includes(`#${x.sim.name.replace(/ /g, '').toLowerCase()}`))), 'a made-up screenshot comes from a nobody and says which account it claims posted it')
   const hacks = on.filter((x) => x.sim.larp === 'hack')
   ok(hacks.length > 20 && hacks.every((x) => x.spark.by.verified === x.sim.real!.verified && x.spark.by.handle === x.sim.real!.handle && !x.spark.quote), 'a hacked account looks exactly like itself: nothing to read until it comes out')
   ok(on.every((x) => !x.sim.larp || !x.sim.runs) && on.every((x) => !('larp' in x.spark) && !('real' in x.spark) && !x.spark.fake), 'a larp never runs, and the post a browser gets does not say it is one')
@@ -312,8 +332,9 @@ function run(seed: number, ticks: number, dials: Partial<typeof SPARK> = {}): Ru
         moves.push(now.get(t.id)! / (first.get(t.id) ?? prev.get(t.id)!) - 1)
         if (t.id === s.picked.tokenId) { r.winN++; gained = mv; if (mv > -0.02) r.winUp++ } else { r.loseN++; lost += Math.max(0, -mv); if (mv < 0.05) r.loseUp++ }
       }
-      // (This second's ordinary trading is in these moves too: a few points either way.)
-      if (gained > SPARK.gain * lost * 1.25 + 0.3) r.overGain++
+      // (This second's ordinary trading is in these moves too: a few points either way, and more on the picked coin,
+      // whose crowd arrives in a rush from this second on.)
+      if (gained > SPARK.gain * lost * 1.25 + 0.4) r.overGain++
       r.basket.push(avg(moves))
       r.settle.push(avg(inSecond))
     }
