@@ -28,7 +28,7 @@
 import { readFileSync } from 'node:fs'
 import { Room } from '../server/room'
 import { DEFAULT_TRADE_SETTINGS } from '../src/data/tradeSettings'
-import { fitOf } from '../src/game/sparks'
+import { fitOf, SPARK } from '../src/game/sparks'
 import { WORLD_CODE } from '../src/net/protocol'
 import type { Chain, MarketState, Token } from '../src/types'
 
@@ -72,6 +72,19 @@ type Pos = { qty: number }
 type Mem = { wallet: { cash: number; positions: Record<string, Pos>; accounts: { id: string; balances: Record<string, number> }[] } }
 type R = { tick(): void; handle(pid: string, m: unknown): void; members: Map<string, Mem>; market: MarketState; timer: ReturnType<typeof setInterval> }
 
+// (Tuning only: VARIANT=norush,oldwatch,oldq runs with some of the tiers' dials as they were before the rush.)
+{
+  const v = (process.env.VARIANT ?? '').split(',')
+  const tiers = SPARK.tiers as unknown as Record<string, { q: number; watch: number }>
+  const rush = SPARK.rush as Record<string, number>
+  const old: Record<string, [number, number]> = { anon: [0.5, 0.1], small: [0.8, 0.18], mid: [1.1, 0.3], big: [1.6, 0.5], mega: [2.4, 0.8] }
+  for (const k of Object.keys(old)) {
+    if (v.includes('norush')) rush[k] = 0
+    if (v.includes('halfrush')) rush[k] /= 2
+    if (v.includes('oldq')) tiers[k].q = old[k][0]
+    if (v.includes('oldwatch')) tiers[k].watch = old[k][1]
+  }
+}
 Room.storyMarket = true
 if (process.env.TECH === '1') Room.tech = true // tech coins: posts that announce a tool
 if (process.env.LARPS === '1') Room.larps = true // real or larp: some posts are fakes

@@ -60,8 +60,10 @@ export const SPARK = {
   blockSigma: 0.4,
   watchDecay: 0.8, // the same for the attention a later coin gets while the story is open…
   watchMin: 0.35, // …down to this share of the first coin's
-  // The rush: a hot coin's clock is slowed so it can be traded (see `pace` in stepFlow). On a post it is slowed no
-  // further than this, by the size of the account: the same buying and selling in fewer seconds, so no odds change.
+  // The rush: a hot coin's clock is slowed so it can be traded (see `pace` in stepFlow). The coin the timeline picked
+  // is slowed no further than this, by the size of the account: the same buying and selling in fewer seconds. Only
+  // the picked coin, and only after the pick: on every coin of an open post it took the reader's edge away
+  // (careful reading on big accounts read -7% where it had been +4%; post-test, 2026-10-10).
   rush: { anon: 0, small: 0.12, mid: 0.3, big: 0.55, mega: 0.8 } as Record<SparkTier, number>,
   preQ: 0.25, // a coin's pull on the crowd while its story is open (it is watched, not believed in yet)
   // Who launches on a post: three kinds of dev, how many of each, and what their coin's audit shows (the dev's own

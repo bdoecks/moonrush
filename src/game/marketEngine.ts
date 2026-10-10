@@ -1647,7 +1647,6 @@ function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native
       }
       if (spark?.theme) t.narrative = spark.theme
       t.sim.watch = watchOf(sim.tier, sim.n)
-      t.sim.rush = SPARK.rush[sim.tier] || undefined
       // (Its risk tag as it will read from now on: the timeline goes by it, and so does anybody reading the card.)
       const risk = computeRisk(t, m.time)
       t.riskScore = risk.score
@@ -1775,6 +1774,9 @@ function settleSpark(m: MarketState, tokens: Token[], id: string, sim: SparkSim,
   const f = win.sim.flow!
   f.q = SPARK.tiers[sim.tier].q * sim.power // it is the coin now: the crowd it has from here is the story's
   f.att += 3 + 2 * f.q
+  // (The rush is the picked coin's alone, from here: before the pick a faster clock only brought every coin's dumps
+  // forward, and reading a post stopped paying.)
+  win.sim.rush = SPARK.rush[sim.tier] || undefined
   f.lastTrade = m.time
   f.ema = win.price // (the crowd that came for it has only just bought: the run it may take profit on starts here)
   win.hype = clamp(win.hype + 30, 0, 100)
