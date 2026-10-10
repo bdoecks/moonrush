@@ -1,14 +1,12 @@
 import clsx from 'clsx'
 import { AtSign, Crown, Paperclip, Send } from 'lucide-react'
 import { useState } from 'react'
-import { tokenMapOf } from '../hooks/useDerived'
-import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { ACCOUNTS, callAppeal, followerCapPerDay, followersLeftToday, freshSocial, KOL_FOLLOWERS, POST_COOLDOWN_TICKS } from '../game/socialEngine'
 import { playerAuthor, socialNow, useGame } from '../game/store'
 import type { SocialPost } from '../types'
-import { fmtAge, fmtCompact } from '../utils/format'
-import { EmptyState, Pct, TokenIcon } from './ui'
-import { VerifiedMark } from './SparkPanel'
+import { fmtCompact } from '../utils/format'
+import { EmptyState, TokenIcon } from './ui'
+import { feedStyle, Tweet } from './tracker/Tweet'
 
 const byId = new Map(ACCOUNTS.map((a) => [a.id, a]))
 
@@ -141,51 +139,13 @@ export function SocialTracker() {
         </span>
       </div>
       <Composer compact />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto" style={feedStyle}>
         {posts.length === 0 ? (
           <EmptyState icon="📣" title={scope === 'following' ? 'No posts from accounts you follow' : 'No posts yet'} hint={scope === 'following' ? 'Follow accounts here or on the Track tab' : 'Posts appear as the market moves'} />
         ) : (
-          posts.slice(0, 80).map((p) => <Row key={p.id} p={p} />)
+          posts.slice(0, 80).map((p) => <Tweet key={p.id} p={p} />)
         )}
       </div>
-    </div>
-  )
-}
-
-function Row({ p }: { p: SocialPost }) {
-  const acc = postAccount(p)!
-  const tick = useGame((s) => s.market.tick)
-  const you = useGame((s) => (s.online ? p.author?.pid === s.online.you : p.accountId === 'player'))
-  const followed = useGame((s) => s.followedAccounts.includes(acc.id))
-  const toggleFollow = useGame((s) => s.toggleFollowAccount)
-  const select = useGame((s) => s.select)
-  const t = useGame((s) => (p.tokenId ? tokenMapOf(s.market.tokens).get(p.tokenId) : undefined))
-  const since = t && p.mcapAtPost ? t.mcap / p.mcapAtPost - 1 : 0
-  return (
-    <div className={clsx('slide-in flex items-start gap-2 border-b border-line/50 px-3 py-1.5 hover:bg-panel2', acc.player && 'bg-info/[0.04]')}>
-      <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-raise text-[13px]">{acc.avatar}</span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-[11px]">
-          <span className="font-bold">{acc.name}</span>
-          {acc.verified && <VerifiedMark />}
-          {you && <span className="rounded bg-accent/15 px-1 text-[9px] font-bold text-accent">YOU</span>}
-          {acc.player && !you && <span className="rounded bg-info/15 px-1 text-[9px] font-bold text-info">PLAYER</span>}
-          <span className="text-dim">@{acc.handle}</span>
-          {acc.platform === 'tg' ? <Send size={10} className="text-info" /> : <AtSign size={10} className="text-dim" />}
-          <span className="num text-[10px] text-dim">{fmtCompact(acc.followers, '')} · {fmtAge((tick - p.tick) * SIM_SEC_PER_TICK)}</span>
-          {!acc.player && <button onClick={() => toggleFollow(acc.id)} className={clsx('ml-auto rounded-full px-2 text-[9px] font-bold', followed ? 'border border-line2 text-muted' : 'bg-ink text-bg')}>{followed ? 'Following' : 'Follow'}</button>}
-        </div>
-        <p className="truncate text-[11px] text-ink/90" title={p.text}>{p.text.replace(/\n/g, ' ')}</p>
-        <Engagement p={p} />
-      </div>
-      {p.tokenId && (
-        <button disabled={!t} onClick={() => t && select(t.id)} className="flex shrink-0 items-center gap-1.5 self-center rounded-md border border-line bg-bg px-1.5 py-1 text-[11px] hover:border-accent/50">
-          {t ? <TokenIcon token={t} size={16} /> : <span>❔</span>}
-          <span className="font-bold">{p.ticker}</span>
-          <span className="num text-muted">{t ? fmtCompact(t.mcap) : '—'}</span>
-          {t && p.mcapAtPost ? <Pct v={since} className="text-[10px]" /> : null}
-        </button>
-      )}
     </div>
   )
 }

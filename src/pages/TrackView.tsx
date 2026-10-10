@@ -2,20 +2,20 @@ import clsx from 'clsx'
 import { AtSign, Bell, BellOff, Plus, Search, Send, Settings2, Trash2, Volume2, VolumeX, X } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { EmptyState, Pct, TokenIcon } from '../components/ui'
-import { QuickBuyButton, QuickSlotPicker } from '../components/chain'
+import { QuickSlotPicker } from '../components/chain'
 import { TrackerFeed } from '../components/tracker/TrackerFeed'
 import { CalloutTracker } from '../components/tracker/CalloutTracker'
 import { WatchedWallets } from '../components/tracker/WatchedWallets'
 import { TrackerSettingsModal } from '../components/tracker/TrackerSettingsModal'
 import { STYLE_META } from '../data/wallets'
-import { tokenMapOf, useTokenMap } from '../hooks/useDerived'
+import { useTokenMap } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { ACCOUNTS } from '../game/socialEngine'
-import { VerifiedMark } from '../components/SparkPanel'
+import { feedStyle, Tweet } from '../components/tracker/Tweet'
 import { alertText, useGame } from '../game/store'
 import { useFriends } from '../net/friends'
 import { walletStats } from '../game/walletEngine'
-import type { AlertType, SocialPost, Token } from '../types'
+import type { AlertType, SocialPost } from '../types'
 import { fakeAddress } from '../utils/address'
 import { fmtAge, fmtCompact, toneClass } from '../utils/format'
 
@@ -73,9 +73,6 @@ export function TrackView() {
   )
 }
 
-function QuickBuy({ t }: { t?: Token }) {
-  return <QuickBuyButton t={t} className="py-0.5" />
-}
 
 const th = 'px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-dim whitespace-nowrap'
 const td = 'px-3 py-1.5 whitespace-nowrap'
@@ -378,54 +375,13 @@ function SocialPanel() {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="CA / Symbol / @handle" className="h-6 w-full rounded border border-line2 bg-bg pl-5 pr-1 text-[11px] outline-none placeholder:text-dim focus:border-accent/60" aria-label="Search posts" />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto" style={feedStyle}>
         {posts.length === 0 ? (
           <EmptyState icon={platform === 'x' ? <AtSign /> : <Send />} title={scope === 'mine' ? "No posts from accounts you follow" : 'Nothing posted yet'} hint={scope === 'mine' ? 'Follow accounts from Recommended' : 'Posts appear as the market moves'} />
-        ) : posts.slice(0, 60).map((p) => <PostCard key={p.id} p={p} />)}
+        ) : posts.slice(0, 60).map((p) => <Tweet key={p.id} p={p} roomy />)}
       </div>
       <p className="border-t border-line px-3 py-1.5 text-[9px] text-dim">Fictional accounts reacting to the simulation. Not real people, not advice.</p>
     </div>
   )
 }
 
-function PostCard({ p }: { p: SocialPost }) {
-  const acc = accOf(p)!
-  const tick = useGame((s) => s.market.tick)
-  const followed = useGame((s) => s.followedAccounts.includes(acc.id))
-  const toggleFollow = useGame((s) => s.toggleFollowAccount)
-  const select = useGame((s) => s.select)
-  const openWallet = useGame((s) => s.openWallet)
-  const t = useGame((s) => (p.tokenId ? tokenMapOf(s.market.tokens).get(p.tokenId) : undefined))
-  const since = t && p.mcapAtPost ? t.mcap / p.mcapAtPost - 1 : 0
-  const parts = p.text.split(/(\$[A-Z0-9]+)/g)
-  return (
-    <div className="slide-in border-b border-line/60 px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <div className="grid size-8 place-items-center rounded-full bg-raise text-[16px]">{acc.avatar}</div>
-        <div className="min-w-0 flex-1 leading-tight">
-          <div className="flex items-center gap-1 text-[12px] font-bold">
-            <span className="truncate">{acc.name}</span>
-            {p.by?.verified && <VerifiedMark size={12} />}
-            {acc.walletId && <button onClick={() => openWallet(acc.walletId!)} title="This account's wallet" className="rounded bg-info/15 px-1 text-[9px] font-semibold text-info">wallet</button>}
-          </div>
-          <div className="num text-[10px] text-dim">@{acc.handle} · {fmtCompact(acc.followers, '')} · {fmtAge((tick - p.tick) * SIM_SEC_PER_TICK)}</div>
-        </div>
-        <button onClick={() => toggleFollow(acc.id)} className={clsx('rounded-full px-2.5 py-0.5 text-[10px] font-bold', followed ? 'border border-line2 text-muted' : 'bg-ink text-bg hover:brightness-90')}>{followed ? 'Following' : 'Follow'}</button>
-      </div>
-      <p className="mt-1.5 whitespace-pre-line text-[12px] leading-snug text-ink/90">
-        {parts.map((part, i) => (/^\$[A-Z0-9]+$/.test(part) ? <span key={i} className="font-semibold text-info">{part}</span> : <span key={i}>{part}</span>))}
-      </p>
-      {p.tokenId && (
-        <div className="mt-2 flex items-center gap-2 rounded-md border border-line bg-bg px-2 py-1.5">
-          <button disabled={!t} onClick={() => t && select(t.id)} className="flex min-w-0 items-center gap-1.5 hover:text-accent">
-            {t ? <TokenIcon token={t} size={20} /> : <span>❔</span>}
-            <span className="text-[12px] font-bold">{p.ticker}</span>
-          </button>
-          <span className="num text-[11px] text-muted">{t ? fmtCompact(t.mcap) : 'delisted'}</span>
-          {t && p.mcapAtPost ? <span className="flex items-center gap-1 text-[10px] text-dim">since post <Pct v={since} className="text-[10px]" /></span> : null}
-          <span className="ml-auto"><QuickBuy t={t} /></span>
-        </div>
-      )}
-    </div>
-  )
-}
