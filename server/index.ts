@@ -226,7 +226,7 @@ function newCode() {
   }
 }
 
-const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' }
+const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.json': 'application/json' }
 
 // Nothing a visitor sends may stop the server. An error with nothing waiting to catch it would end the process: every
 // player dropped, and (being a crash, not a shutdown) the last minutes of the World not saved. So such errors are
@@ -289,7 +289,8 @@ const http = createServer((req, res) => {
     const file = path.startsWith(DIST) && existsSync(path) && statSync(path).isFile() ? path : join(DIST, 'index.html')
     // Built assets have content hashes in their names, so browsers (phones!) can keep them forever; the page itself
     // is always re-checked so a new deploy shows up on the next load.
-    const cache = url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache'
+    // (The story market's pictures keep their names: a day in the browser, so a feed does not fetch them again and again.)
+    const cache = url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : url.pathname.startsWith('/posts/') ? 'public, max-age=86400' : 'no-cache'
     res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': cache })
     res.end(readFileSync(file))
     return
