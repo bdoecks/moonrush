@@ -42,6 +42,8 @@ export const UPDATES: Update[] = [
     title: 'A timeline that feels alive',
     added: [
       'Pictures on posts. Many posts now come with a photo of what they are about. Every picture is made up, like the accounts.',
+      "Coins launched on a post wear that post's picture, the way devs lift a post's image for their coin. Every coin on the same post gets the same picture, so the picture never tells you which one is right.",
+      "Accounts have profile pictures now. A fake account copies the real one's picture along with its name: check the handle and the check mark, not the picture.",
       'Replies under a post, and "Show more replies" to read the rest. They are chatter, not tips: nobody in the replies knows which coin is the right one.',
       'Accounts follow up on their own posts, and other accounts repost them with a line of their own.',
       'Every known account now writes in its own way, so you can tell them apart by how they talk.',
