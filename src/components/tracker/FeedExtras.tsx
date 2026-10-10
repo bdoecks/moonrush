@@ -5,12 +5,12 @@ import { useEffect } from 'react'
 import { X as Close } from 'lucide-react'
 import { ACCOUNT_BIOS } from '../../data/sparkFlavor'
 import { narrativeLabel } from '../../data/narratives'
-import { hash01 } from '../../game/feedFlavor'
+import { faceOf, hash01 } from '../../game/feedFlavor'
 import { useGame } from '../../game/store'
 import { fmtCompact } from '../../utils/format'
 import { VerifiedMark } from '../SparkPanel'
 import { useAccountCard } from './accountCard'
-import { Tweet, X } from './Tweet'
+import { Face, Tweet, X } from './Tweet'
 
 /** What the last ten minutes of posts were about: the meta, the busiest hashtags, the busiest other theme. */
 export function Happening() {
@@ -81,7 +81,7 @@ export function AccountCardHost() {
           <div className="h-24" style={{ background: `linear-gradient(90deg, ${BANNERS[Math.floor(h('ban') * BANNERS.length)]})` }} />
           <div className="border-b px-4 pb-3" style={{ borderColor: X.line }}>
             <div className="-mt-9 flex items-end justify-between">
-              <span className="grid size-[76px] place-items-center rounded-full border-4 bg-[#16181C] text-[36px]" style={{ borderColor: X.bg }}>{by.avatar}</span>
+              <span className="rounded-full border-4" style={{ borderColor: X.bg }}><Face face={by.face ?? faceOf(by.handle)} emoji={by.avatar} size={72} /></span>
               <button onClick={() => toggleFollow(by.id)} className={followed ? 'rounded-full border px-4 py-1.5 text-[14px] font-bold' : 'rounded-full bg-[#EFF3F4] px-4 py-1.5 text-[14px] font-bold text-black hover:bg-[#D7DBDC]'} style={followed ? { borderColor: '#536471' } : undefined}>{followed ? 'Following' : 'Follow'}</button>
             </div>
             <div className="mt-2 flex items-center gap-1 text-[20px] font-extrabold leading-6">{by.name}{by.verified && <VerifiedMark size={18} />}</div>

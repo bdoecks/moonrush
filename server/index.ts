@@ -290,7 +290,7 @@ const http = createServer((req, res) => {
     // Built assets have content hashes in their names, so browsers (phones!) can keep them forever; the page itself
     // is always re-checked so a new deploy shows up on the next load.
     // (The story market's pictures keep their names: a day in the browser, so a feed does not fetch them again and again.)
-    const cache = url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : url.pathname.startsWith('/posts/') ? 'public, max-age=86400' : 'no-cache'
+    const cache = url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : url.pathname.startsWith('/posts/') || url.pathname.startsWith('/faces/') ? 'public, max-age=86400' : 'no-cache'
     res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': cache })
     res.end(readFileSync(file))
     return

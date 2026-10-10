@@ -4,6 +4,7 @@
 // cannot depend on what the simulation hides (whether a story runs, which coin is right, whether a post is a larp).
 // A reply about how a story ended is only ever written from what the post already shows publicly.
 import { ACCOUNT_STYLE, FOLLOW_UPS, QUOTE_LINES, REPLIES } from '../data/sparkFlavor'
+import { SPARK_FACES } from '../data/sparkFaces'
 import { anonAccount, SPARK_ACCOUNTS } from '../data/sparkPosts'
 import type { MarketState, SocialPost, Spark, SparkBy } from '../types'
 
@@ -17,6 +18,14 @@ export function hash01(s: string): number {
   h = Math.imul(h, 0xc2b2ae35)
   h ^= h >>> 16
   return (h >>> 0) / 4294967296
+}
+/**
+ * An account's profile picture (a file in public/faces): its own if it is a named account, else one from the pool the
+ * nobodies share, always the same one for the same handle. None made yet: undefined, and the emoji shows.
+ */
+export function faceOf(handle: string): string | undefined {
+  if (SPARK_FACES.named.includes(handle)) return handle
+  return SPARK_FACES.pool > 0 ? `pool-${1 + (Math.floor(hash01(handle + 'face') * SPARK_FACES.pool) % SPARK_FACES.pool)}` : undefined
 }
 const pickBy = <T,>(a: readonly T[], key: string) => a[Math.floor(hash01(key) * a.length) % a.length]
 
@@ -44,7 +53,7 @@ export function flavorPlan(s: Pick<Spark, 'id' | 'by'>) {
   }
 }
 
-const byOf = (a: (typeof SPARK_ACCOUNTS)[number]): SparkBy => ({ id: a.id, name: a.name, handle: a.handle, avatar: a.avatar, followers: a.followers, verified: a.verified })
+const byOf = (a: (typeof SPARK_ACCOUNTS)[number]): SparkBy => ({ id: a.id, name: a.name, handle: a.handle, avatar: a.avatar, followers: a.followers, verified: a.verified, face: faceOf(a.handle) })
 // Who reposts: accounts with a following of their own that are not outlets.
 const QUOTERS = SPARK_ACCOUNTS.filter((a) => !a.news && (a.tier === 'mid' || a.tier === 'big'))
 
@@ -75,7 +84,7 @@ export function flavorPosts(m: Pick<MarketState, 'tick' | 'time' | 'sparks'>, na
   return out
 }
 
-export interface Reply { handle: string; name: string; avatar: string; text: string; at: number }
+export interface Reply { handle: string; name: string; avatar: string; face?: string; text: string; at: number }
 
 /**
  * The replies under a post that can be read `ageSec` seconds after it: more on a big account's post, the first within
@@ -97,7 +106,7 @@ export function repliesOf(s: Pick<Spark, 'id' | 'kind' | 'by' | 'picked' | 'over
     let text = pickBy(pool, s.id + 't' + i)
     for (let j = 1; seen.has(text) && j < 6; j++) text = pickBy(pool, s.id + 't' + i + '.' + j)
     seen.add(text)
-    out.push({ handle: who.handle, name: who.name, avatar: who.avatar, text, at })
+    out.push({ handle: who.handle, name: who.name, avatar: who.avatar, face: faceOf(who.handle), text, at })
   }
   const end = s.fake ? REPLIES.faked : s.picked ? REPLIES.picked : s.over !== undefined ? REPLIES.over : null
   if (end && total >= 3) {
@@ -106,7 +115,7 @@ export function repliesOf(s: Pick<Spark, 'id' | 'kind' | 'by' | 'picked' | 'over
       const who = anonAccount(() => hash01(s.id + 'e' + i + ':' + k++), 'anon')
       const text = pickBy(end, s.id + 'end' + i)
       if (out.some((r) => r.text === text)) continue
-      out.push({ handle: who.handle, name: who.name, avatar: who.avatar, text, at: ageSec })
+      out.push({ handle: who.handle, name: who.name, avatar: who.avatar, face: faceOf(who.handle), text, at: ageSec })
     }
   }
   return out

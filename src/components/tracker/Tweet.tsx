@@ -6,7 +6,7 @@ import { useState } from 'react'
 import clsx from 'clsx'
 import { BarChart2, Heart, MessageCircle, Repeat2 } from 'lucide-react'
 import { tokenMapOf } from '../../hooks/useDerived'
-import { repliesOf } from '../../game/feedFlavor'
+import { faceOf, repliesOf } from '../../game/feedFlavor'
 import { SIM_SEC_PER_TICK } from '../../game/marketEngine'
 import { useGame } from '../../game/store'
 import type { SocialPost } from '../../types'
@@ -21,6 +21,16 @@ import { useAccountCard } from './accountCard'
 export const X = { bg: '#000000', text: '#E7E9EA', dim: '#71767B', line: '#2F3336', blue: '#1D9BF0', hover: 'rgba(231,233,234,0.03)' }
 /** The style a feed's box takes: the colours above and the system fonts a timeline uses. */
 export const feedStyle = { background: X.bg, color: X.text, fontFamily: '"Segoe UI", Inter, -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif' }
+
+/** An account's picture: its photo when it has one (public/faces), else its emoji. Round, like a timeline's. */
+export function Face({ face, emoji, size, className }: { face?: string; emoji: string; size: number; className?: string }) {
+  const [broken, setBroken] = useState(false)
+  return (
+    <span className={clsx('grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#16181C]', className)} style={{ width: size, height: size, fontSize: Math.round(size / 2) }}>
+      {face && !broken && /^[a-z0-9_-]+$/.test(face) ? <img src={`${import.meta.env.BASE_URL}faces/${face}.webp`} alt="" loading="lazy" draggable={false} onError={() => setBroken(true)} className="size-full object-cover" /> : emoji}
+    </span>
+  )
+}
 
 /** How big an account is, at a glance: the colour of its follower badge. */
 const sizeLook = (followers: number) =>
@@ -62,7 +72,7 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
   const thread = spark ? repliesOf(spark, age) : []
   return (
     <article className={clsx('flex gap-3 border-b px-4 transition-colors hover:bg-white/[0.03]', roomy ? 'py-3.5' : 'py-3')} style={{ borderColor: X.line }}>
-      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[#16181C] text-[20px]">{acc.avatar}</span>
+      <Face face={p.by ? (p.by.face ?? faceOf(p.by.handle)) : acc.player ? undefined : faceOf(acc.handle)} emoji={acc.avatar} size={40} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1 text-[15px] leading-5">
           {p.by ? <button onClick={() => showAccount(p.by!)} className="truncate font-bold hover:underline" style={{ color: X.text }}>{acc.name}</button> : <span className="truncate font-bold" style={{ color: X.text }}>{acc.name}</span>}
@@ -109,7 +119,7 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
         {p.quote && (
           <div className="mt-2.5 rounded-2xl border px-3 py-2.5" style={{ borderColor: X.line }}>
             <div className="flex items-center gap-1 text-[13px] leading-4">
-              <span className="grid size-5 shrink-0 place-items-center rounded-full bg-[#16181C] text-[11px]">{p.quote.by.avatar}</span>
+              <Face face={p.quote.by.face ?? faceOf(p.quote.by.handle)} emoji={p.quote.by.avatar} size={20} />
               <span className="truncate font-bold" style={{ color: X.text }}>{p.quote.by.name}</span>
               {p.quote.by.verified && <VerifiedMark size={13} />}
               <span className="min-w-0 shrink truncate" style={{ color: X.dim }}>@{p.quote.by.handle}</span>
@@ -140,7 +150,7 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
           <div className="mt-2.5 border-l-2 pl-3" style={{ borderColor: X.line }}>
             {(open ? thread : thread.slice(-2)).map((r, i) => (
               <div key={i} className="flex gap-2 py-1">
-                <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[#16181C] text-[12px]">{r.avatar}</span>
+                <Face face={r.face} emoji={r.avatar} size={24} />
                 <div className="min-w-0 text-[13px] leading-[18px]">
                   <span className="font-bold" style={{ color: X.text }}>{r.name}</span> <span style={{ color: X.dim }}>@{r.handle}</span>
                   <div className="break-words" style={{ color: X.text }}>{r.text}</div>

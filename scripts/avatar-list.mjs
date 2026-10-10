@@ -8,11 +8,11 @@ const LOOK = 'square profile picture, centred subject, simple background, natura
 
 const NAMED = {
   orlavex: 'a vintage silver microphone on a stand lit by purple stage lights',
-  kenjiblaze: 'a gaming headset resting on a keyboard glowing blue',
+  kenjiblaze: 'a plain black headset hanging on a hook beside a monitor glowing blue',
   cheftamsin: 'a copper pan with a flame under it on a professional stove, close up',
   bigmilo: 'a basketball resting on a polished indoor court floor under arena lights',
   profquill: 'a round glass flask of blue liquid beside a feather quill on a cluttered wooden desk',
-  daxmarlowe: 'a plain white racing helmet on the bonnet of a racing car in a deserted pit lane',
+  daxmarlowe: 'a plain white racing helmet on a garage workbench, close up',
   globalwire: 'a globe on a desk in dark blue studio light',
   junopark: 'an empty folding canvas chair under a single spotlight on a dark stage',
   critterdispatch: 'a single paw print in wet sand, close up',
@@ -23,7 +23,7 @@ const NAMED = {
   snackgazette: 'a bowl of noodles seen from directly above',
   robotkitchen: 'a small friendly toy robot holding a wooden spoon on a kitchen counter',
   orbitwatch: 'a satellite dish against a starry night sky',
-  pixelattic: 'a small figure made of square green tiles on a black wall, like a block-built creature',
+  pixelattic: 'a shelf of old grey game cartridges with blank labels in a dusty attic',
   barnyardbulletin: 'a cow looking over the lower half of a red barn door',
   pondreport: 'a frog sitting on a lily pad',
   daybreakcourier: 'a rolled-up newspaper with blank pages on a doorstep at sunrise',
@@ -32,9 +32,9 @@ const NAMED = {
   techlantern: 'a glowing paper lantern in the dark',
   frogposting_daily: 'a small green frog looking straight at the camera, close up',
   the_duck_desk: 'a yellow rubber duck on an office desk',
-  ramen_inspector: 'chopsticks lifting noodles out of a bowl, close up',
+  ramen_inspector: 'a bowl of ramen with chopsticks resting across the rim, close up',
   retrobits_fm: 'an old portable radio with a long aerial on a shelf',
-  bakery_cam: 'croissants on a tray in a bakery window',
+  bakery_cam: 'croissants on a tray on a plain wooden counter, close up',
   moonwatcher_mae: 'a small telescope pointed at a crescent moon',
   cornershopcats: 'a ginger cat sitting on a shop counter',
   gadget_gran: 'knitting needles and a ball of wool beside a tablet with a dark screen',
@@ -52,7 +52,7 @@ const NAMED = {
   marketandmain: 'an old street corner with a stone clock tower, the clock face plain',
   maplestweekly: 'a single red maple leaf on a wet pavement',
   ferryroadgazette: 'a small ferry boat on calm water',
-  northgatecourier: 'a plain red pillar post box on a street corner',
+  northgatecourier: 'a bundle of plain brown envelopes tied with string on a doormat',
   littleharborherald: 'an old iron anchor on a stone quay',
   pinewooddaily: 'a pine forest in morning mist',
   canalstbulletin: 'a canoe moored on a quiet canal',
@@ -74,7 +74,7 @@ const POOL = [
   'a garden gnome in long grass', 'a single sock on a washing line', 'a teapot on a kitchen table', 'a pretzel on a napkin', 'a small lizard on a warm stone',
   'a ferret peeking out of a blanket', 'a wizard hat on a chair', 'a walnut cracked in half on a table', 'a radish freshly pulled from soil', 'a muffin on a plate',
   'a pebble beach at low tide', 'a foggy road lined with trees', 'a toy dinosaur on a desk', 'a bicycle leaning against a wall', 'a lit candle in a dark room',
-  'a waffle with syrup', 'a moth on a lamp shade', 'a bowl of baked beans on toast', 'a badger figurine on a shelf', 'a stack of pancakes with butter',
+  'a waffle with syrup on a plate, close up', 'a moth on a lamp shade', 'a bowl of baked beans on toast', 'a badger figurine on a shelf', 'a stack of pancakes with butter',
 ]
 
 export const AVATARS = [

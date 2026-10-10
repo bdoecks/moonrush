@@ -112,6 +112,7 @@ export interface SparkBy {
   avatar: string
   followers: number
   verified: boolean
+  face?: string // its profile picture: a file in public/faces (data/sparkFaces.ts). An impersonator copies it with the name
 }
 /**
  * A spark: a post or a news item (invented) that devs launch coins on. This is the PUBLIC part, what anybody reading

@@ -27,7 +27,7 @@
 //
 // Pure, and a leaf: the market engine imports this file, so nothing here may import the market engine.
 import { SPARK_TECH, TECH_NAMES, TECH_TEXT, TECH_TOOLS } from '../data/sparkPosts'
-import { hash01, styleText } from './feedFlavor'
+import { faceOf, hash01, styleText } from './feedFlavor'
 import { SPARK_PICS } from '../data/sparkPics'
 import { anonAccount, NEVER_SPELL, SPARK_ACCOUNTS, SPARK_NAMES, SPARK_TEXT, SPARK_TITLES, SUBJECTS, TYPE_THEME, VARIANT_POST, VARIANT_PRE, type SparkAccount } from '../data/sparkPosts'
 import { SAFE_THEMES } from '../data/themeWords'
@@ -121,7 +121,7 @@ const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1)
 /** A name as a ticker: its letters and digits, upper case, ten at the most (what the launchpads allow). */
 export const tickerOf = (name: string) => name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10)
 const lognormal = (rng: Rng, median: number, sigma: number) => median * Math.exp(sigma * rng.gauss())
-const byOf = (a: SparkAccount): SparkBy => ({ id: a.id, name: a.name, handle: a.handle, avatar: a.avatar, followers: a.followers, verified: a.verified })
+const byOf = (a: SparkAccount): SparkBy => ({ id: a.id, name: a.name, handle: a.handle, avatar: a.avatar, followers: a.followers, verified: a.verified, face: faceOf(a.handle) })
 
 /**
  * The picture a coin launched on a post carries: the post's own, or a plain picture of what the post is about. Every
