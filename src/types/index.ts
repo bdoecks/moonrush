@@ -477,6 +477,7 @@ export interface TokenSim {
   baseTurnover: number
   flow?: FlowState // realistic engine only
   demo?: DemoState // a tech coin: what the demo on its site really does (never sent to a World browser: it has to be tried)
+  rush?: number // a coin on a post: the slowest its clock runs (0..1), by the size of the account: a big post's coins trade in a rush
   watch?: number // a coin on a post the timeline has not settled yet: people keep an eye on it (the least attention it has, see sparks.ts)
 }
 

@@ -872,7 +872,9 @@ function stepFlow(t: Token, m: MarketState, rng: Rng, native: MarketState['nativ
   // curve in half a minute: nobody could trade it, and the final stretch was a list of coins flashing past.
   // (In the simulated market a coin high on its curve is slower again: the same trades over more seconds, so no
   // odds change, and the final stretch is somewhere a coin can be traded rather than a place it flashes through.)
-  const pace = Math.min(1, ((rules ? FLOW.hotPace : FLOW.ownPace) / Math.max(1e-9, f.att * heat)) ** FLOW.hotCurve) * (rules ? 1 - (1 - FLOW.stretchPace) * clamp((t.bondingProgress - 30) / 30, 0, 1) : 1)
+  const pace0 = Math.min(1, ((rules ? FLOW.hotPace : FLOW.ownPace) / Math.max(1e-9, f.att * heat)) ** FLOW.hotCurve) * (rules ? 1 - (1 - FLOW.stretchPace) * clamp((t.bondingProgress - 30) / 30, 0, 1) : 1)
+  // (A coin on a post trades in a rush: see SPARK.rush.)
+  const pace = t.sim.rush ? Math.max(pace0, t.sim.rush) : pace0
   // A cooked coin whose dev (and bundle) sit on a big share of the supply puts the crowd off, as the launch screen
   // says it will: fewer people show up at all.
   const crowd = FLOW.churn * f.att * (cooked ? Math.exp((-COOK_FLOW.perScore * Math.max(0, t.devPct + (t.bundlePct ?? 0) - 3)) / 50) : 1)
@@ -1645,6 +1647,7 @@ function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native
       }
       if (spark?.theme) t.narrative = spark.theme
       t.sim.watch = watchOf(sim.tier, sim.n)
+      t.sim.rush = SPARK.rush[sim.tier] || undefined
       // (Its risk tag as it will read from now on: the timeline goes by it, and so does anybody reading the card.)
       const risk = computeRisk(t, m.time)
       t.riskScore = risk.score
@@ -1752,6 +1755,7 @@ function settleSpark(m: MarketState, tokens: Token[], id: string, sim: SparkSim,
     }
     lost += Math.max(0, 1 - t.price / before)
     t.sim.flow!.att *= 0.05
+    t.sim.rush = undefined
     t.hype = Math.max(0, t.hype - 25)
     refreshChanges(t, m.time)
   }
@@ -1770,7 +1774,7 @@ function settleSpark(m: MarketState, tokens: Token[], id: string, sim: SparkSim,
   }
   const f = win.sim.flow!
   f.q = SPARK.tiers[sim.tier].q * sim.power // it is the coin now: the crowd it has from here is the story's
-  f.att += 2 + f.q
+  f.att += 3 + 2 * f.q
   f.lastTrade = m.time
   f.ema = win.price // (the crowd that came for it has only just bought: the run it may take profit on starts here)
   win.hype = clamp(win.hype + 30, 0, 100)

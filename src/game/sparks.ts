@@ -43,11 +43,11 @@ export const SPARK = {
   // timeline picks the story up, the snipers' money on the FIRST coin ($), the pull the picked coin has on the crowd
   // afterwards, the attention a coin on the post has while the story is open, and the seconds between launches.
   tiers: {
-    anon: { w: 0.5, coins: [1, 3], runs: 0.05, block: 180, q: 0.5, watch: 0.1, gap: 7 },
-    small: { w: 0.3, coins: [2, 6], runs: 0.1, block: 350, q: 0.8, watch: 0.18, gap: 5 },
-    mid: { w: 0.14, coins: [5, 12], runs: 0.2, block: 800, q: 1.1, watch: 0.3, gap: 3.5 },
-    big: { w: 0.05, coins: [10, 24], runs: 0.35, block: 1800, q: 1.6, watch: 0.5, gap: 2.2 },
-    mega: { w: 0.006, coins: [22, 45], runs: 0.45, block: 3000, q: 2.4, watch: 0.8, gap: 1.3 },
+    anon: { w: 0.5, coins: [1, 3], runs: 0.05, block: 180, q: 0.7, watch: 0.2, gap: 7 },
+    small: { w: 0.3, coins: [2, 6], runs: 0.1, block: 350, q: 1.1, watch: 0.45, gap: 5 },
+    mid: { w: 0.14, coins: [5, 12], runs: 0.2, block: 800, q: 1.7, watch: 1, gap: 3.5 },
+    big: { w: 0.05, coins: [10, 24], runs: 0.35, block: 1800, q: 2.6, watch: 2.2, gap: 2.2 },
+    mega: { w: 0.006, coins: [22, 45], runs: 0.45, block: 3000, q: 3.6, watch: 4, gap: 1.3 },
   } as Record<SparkTier, { w: number; coins: [number, number]; runs: number; block: number; q: number; watch: number; gap: number }>,
   titled: 0.22, // the share of meme posts whose right name is a title and the subject ("Mayor Otter", #MayorOtter)
   trend: 0.5, // the share of posts about a theme that is hot outside the game (while that list is fresh)
@@ -60,6 +60,9 @@ export const SPARK = {
   blockSigma: 0.4,
   watchDecay: 0.8, // the same for the attention a later coin gets while the story is open…
   watchMin: 0.35, // …down to this share of the first coin's
+  // The rush: a hot coin's clock is slowed so it can be traded (see `pace` in stepFlow). On a post it is slowed no
+  // further than this, by the size of the account: the same buying and selling in fewer seconds, so no odds change.
+  rush: { anon: 0, small: 0.12, mid: 0.3, big: 0.55, mega: 0.8 } as Record<SparkTier, number>,
   preQ: 0.25, // a coin's pull on the crowd while its story is open (it is watched, not believed in yet)
   // Who launches on a post: three kinds of dev, how many of each, and what their coin's audit shows (the dev's own
   // bag, the top ten holders, insiders: % of the supply). The ranges are set so the risk tag every card carries

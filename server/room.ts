@@ -968,7 +968,7 @@ export class Room {
       const watch = watchOf(ps.tier, n)
       const theme = this.market.sparks?.find((x) => x.id === onPost)?.theme
       story = { spark: { id: onPost, n }, ...(theme ? { narrative: theme } : {}) }
-      storySim = { ...fairSim, watch, flow: { ...fairSim.flow, q: SPARK.preQ, att: Math.max(fairSim.flow.att, watch), botDev: true } }
+      storySim = { ...fairSim, watch, rush: SPARK.rush[ps.tier] || undefined, flow: { ...fairSim.flow, q: SPARK.preQ, att: Math.max(fairSim.flow.att, watch), botDev: true } }
       postBlock = blockUsd(ps.tier, n, new Rng((Math.random() * 2 ** 32) >>> 0), ps.larp)
     }
     const token: NetToken = { ...built, ...story, sim: storySim, id, creator: 'you', creatorId: me.info.id, creatorName: me.info.name, devAddr: walletAddress(me.info.id, devWallet, 'sol'), status: 'bonding', creatorFees: 0 }
