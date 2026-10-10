@@ -51,7 +51,9 @@ export const SPARK = {
   } as Record<SparkTier, { w: number; coins: [number, number]; runs: number; block: number; q: number; watch: number; gap: number }>,
   titled: 0.22, // the share of meme posts whose right name is a title and the subject ("Mayor Otter", #MayorOtter)
   trend: 0.5, // the share of posts about a theme that is hot outside the game (while that list is fresh)
-  meta: 3, // subjects of the game's own hot narrative are this many times likelier
+  meta: 5, // subjects of the game's own hot narrative are this many times likelier
+  metaRun: 1_000_000, // a coin whose market cap passes this makes its kind the meta…
+  metaHold: 600, // …for at least this many seconds (then the meta moves on as it always did, or to the next runner)
   first: [1, 4] as [number, number], // seconds from the post to the first coin on it
   decide: { median: 45, sigma: 0.45, min: 18, max: 150 }, // seconds from the post until the timeline settles (or moves on): time to read it
   blockDecay: 0.7, // the snipers' money on each later coin of a post, as a share of the one before

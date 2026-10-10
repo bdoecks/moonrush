@@ -247,14 +247,14 @@ const made: { spark: Spark; sim: SparkSim }[] = []
 }
 
 // ─── 4. The engine ───────────────────────────────────────────────────────────
-type Run = { m: MarketState; posts: number; storyCoins: number; launches: number; liveMax: number; totalMax: number; keptMax: number; openMax: number; basket: number[]; settle: number[]; winUp: number; winN: number; loseUp: number; loseN: number; overGain: number; hiddenLeak: number; watchedDead: number; orderBad: number; themeMissing: number; watchAfter: number; simMismatch: number; pickedGone: number; beats: number; postsOnFeed: number }
+type Run = { m: MarketState; posts: number; storyCoins: number; launches: number; liveMax: number; totalMax: number; keptMax: number; openMax: number; basket: number[]; settle: number[]; winUp: number; winN: number; loseUp: number; loseN: number; overGain: number; hiddenLeak: number; watchedDead: number; orderBad: number; themeMissing: number; watchAfter: number; simMismatch: number; pickedGone: number; beats: number; postsOnFeed: number; metaRuns: number; metaWrong: number }
 function run(seed: number, ticks: number, dials: Partial<typeof SPARK> = {}): Run {
   const keep = { ...SPARK }
   Object.assign(SPARK, dials)
   let m = createMarket(seed, 1_760_000_000, 'realistic')
   setClock(1)
   const rng = new Rng(m.seed)
-  const r: Run = { m, posts: 0, storyCoins: 0, launches: 0, liveMax: 0, totalMax: 0, keptMax: 0, openMax: 0, basket: [], settle: [], winUp: 0, winN: 0, loseUp: 0, loseN: 0, overGain: 0, hiddenLeak: 0, watchedDead: 0, orderBad: 0, themeMissing: 0, watchAfter: 0, simMismatch: 0, pickedGone: 0, beats: 0, postsOnFeed: 0 }
+  const r: Run = { m, posts: 0, storyCoins: 0, launches: 0, liveMax: 0, totalMax: 0, keptMax: 0, openMax: 0, basket: [], settle: [], winUp: 0, winN: 0, loseUp: 0, loseN: 0, overGain: 0, hiddenLeak: 0, watchedDead: 0, orderBad: 0, themeMissing: 0, watchAfter: 0, simMismatch: 0, pickedGone: 0, beats: 0, postsOnFeed: 0, metaRuns: 0, metaWrong: 0 }
   const seen = new Set(m.tokens.map((t) => t.id))
   const first = new Map<string, number>() // a story coin's price when it was first seen
   let prev = new Map<string, number>()
@@ -263,6 +263,7 @@ function run(seed: number, ticks: number, dials: Partial<typeof SPARK> = {}): Ru
     const before = m
     const res = tickMarket(m, rng, { rugMult: 1, protectedIds: new Set(), sparks: true })
     m = res.market
+    for (const e of res.events) if (e.kind === 'meta' && e.tokenId) { r.metaRuns++; const t = m.tokens.find((x) => x.id === e.tokenId); if (!t || t.narrative !== m.meta || t.mcap < SPARK.metaRun) r.metaWrong++ }
     const posts = tickSocial(m, rng, [], res.events)
     r.postsOnFeed += posts.filter((p) => p.sparkId && p.by && m.sparks?.some((s) => s.id === p.sparkId && s.text === p.text)).length
     const beats = tickStories(m, { before, events: res.events, actions: [], posts, wallets: [] })
@@ -345,6 +346,7 @@ function run(seed: number, ticks: number, dials: Partial<typeof SPARK> = {}): Ru
   const slack = 1 / Math.sqrt(Math.max(1, r.basket.length))
   ok(avg(r.basket) < 0.01 + 0.15 * slack && avg(r.settle) < 0.005 + 0.04 * slack, `one of each coin on a post: ${pct(avg(r.settle))} in the second it settles, ${pct(avg(r.basket))} from first sight to then, on average over ${r.basket.length} posts (never a gain)`)
   ok(r.beats > 0 && r.postsOnFeed >= r.posts * 0.98, `every post is on the timeline as itself (${r.postsOnFeed} of ${r.posts}), and what the timeline did is on its coins' feeds (${r.beats} lines)`)
+  ok(r.metaWrong === 0, `a coin that runs past $1M makes its kind the meta (${r.metaRuns} times in this run)`)
   ok(r.liveMax <= FLOW.maxLive + 4 && r.totalMax < 320, `the market stays a steady size: at most ${r.liveMax} coins on a curve, ${r.totalMax} in all`)
   const live = new Set(r.m.tokens.filter((t) => t.spark && (t.status === 'bonding' || t.status === 'graduated')).map((t) => t.spark!.id))
   ok(r.keptMax <= SPARK.max + live.size + 30 && r.openMax < 40, `so does the list of posts: at most ${r.keptMax} kept, ${r.openMax} open at once`)

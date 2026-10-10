@@ -739,3 +739,7 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   the fees, creator fees, the bonus, the tiers or `gain`.
 - Not done: no Updates entry yet (write one when the owner opens Cooking), the form was not looked at on screen in
   the World, a player cannot launch on a tech post, and solo play has no launching on posts.
+
+- **A runner sets the meta** (the owner's ask, 2026-10-10; with the story market on): a coin whose market cap passes
+  `SPARK.metaRun` ($1M) makes its narrative the meta for at least `SPARK.metaHold` seconds, and posts are `SPARK.meta`
+  (5) times likelier to be about that kind, so coins like it follow. The meta moves no price.

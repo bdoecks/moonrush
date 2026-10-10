@@ -1521,7 +1521,19 @@ export function tickMarket(prev: MarketState, rng: Rng, opts: TickOptions): { ma
   // 8c. The story market: posts appear, devs launch coins on them, and the timeline settles on one coin or moves on.
   // (Switched off with stories still open: they are dropped, and their coins fade like any coin.)
   const storyMarket = realistic && !!opts.sparks
-  if (storyMarket) stepSparks(m, tokens, native, emit, !!opts.larps, !!opts.tech)
+  if (storyMarket) {
+    stepSparks(m, tokens, native, emit, !!opts.larps, !!opts.tech)
+    // A coin that runs into the millions makes its kind the meta, as in the real market: from then on posts lean
+    // towards that kind (`SPARK.meta`), so coins like it follow. (The meta moves no price: it is what gets posted about.)
+    const was = new Map(prev.tokens.map((t) => [t.id, t.mcap]))
+    const runner = tokens.filter((t) => t.narrative && t.narrative !== m.meta && (t.status === 'bonding' || t.status === 'graduated') && t.mcap >= SPARK.metaRun && (was.get(t.id) ?? t.mcap) < SPARK.metaRun).sort((a, b) => b.mcap - a.mcap)[0]
+    const kind = runner && NARRATIVES.find((n) => n.id === runner.narrative)
+    if (runner && kind) {
+      m.meta = kind.id
+      m.metaUntil = m.tick + SPARK.metaHold
+      emit({ kind: 'meta', tokenId: runner.id, ticker: runner.ticker, text: `New meta: $${runner.ticker} ran past $1M, and ${kind.label} ${kind.icon} coins are what everyone wants`, icon: '🔥', tone: 'info' })
+    }
+  }
   else if (m.sparks?.length || (m.sparkSim && Object.keys(m.sparkSim).length)) dropSparks(m, tokens)
 
   // 9. New launches keep the trenches fresh.
