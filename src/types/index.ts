@@ -535,6 +535,7 @@ export interface Token {
   feesPaid?: number // USD of all trading fees paid on this coin so far (protocol + creator + LP): pump.fun / Axiom's "Global Fees Paid"
   volMark?: number // volume at the end of the last tick (to catch trades that happen between ticks)
   image?: string // custom icon: small data URL or an https image link
+  pic?: string // a coin launched on a post: the post's picture (a file in public/posts), as devs lift a post's image for their coin
   narrative?: Narrative
   description?: string
   socials?: Socials

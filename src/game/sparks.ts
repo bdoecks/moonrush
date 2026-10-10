@@ -124,6 +124,16 @@ const lognormal = (rng: Rng, median: number, sigma: number) => median * Math.exp
 const byOf = (a: SparkAccount): SparkBy => ({ id: a.id, name: a.name, handle: a.handle, avatar: a.avatar, followers: a.followers, verified: a.verified })
 
 /**
+ * The picture a coin launched on a post carries: the post's own, or a plain picture of what the post is about. Every
+ * coin on a post gets the SAME one (devs all lift the same image), so a picture never tells the right coin from the
+ * rest. No dice.
+ */
+export function coinPic(sparkId: string, word: string, postPic?: string): string | undefined {
+  const any = SPARK_PICS[word]?.any ?? []
+  return postPic ?? (any.length ? any[Math.floor(hash01(sparkId + 'coin') * any.length) % any.length] : undefined)
+}
+
+/**
  * A new post. `taken` = the right names of the stories still open (two posts about a Waffles at once would be two
  * right coins with one name). Returns the public spark and its hidden side.
  */

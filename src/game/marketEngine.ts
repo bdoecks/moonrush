@@ -8,7 +8,7 @@ import { clamp, Rng } from '../utils/rng'
 import { LAUNCHPADS, padFromId, padsFor } from '../data/launchpads'
 import { addWin, getWin, setWinClock, stepWin } from './windows'
 import { creatorRate, tradeFee } from './tradingEngine'
-import { auditOf, blockUsd, coinFor, devFor, fitOf, keptSparks, makeSpark, pickCoin, SPARK, sparkRate, stakeOf, watchOf, type SparkDev } from './sparks'
+import { auditOf, blockUsd, coinFor, coinPic, devFor, fitOf, keptSparks, makeSpark, pickCoin, SPARK, sparkRate, stakeOf, watchOf, type SparkDev } from './sparks'
 import { curveAt, curveK, curveLiquidityUsd, gradMcapUsd, gradPriceNative, launchMcapUsd, migratedLiquidityUsd, migrationPriceNative, startPriceNative } from './curve'
 
 // ─── Clock ───────────────────────────────────────────────────────────────────
@@ -1646,6 +1646,9 @@ function stepSparks(m: MarketState, tokens: Token[], native: MarketState['native
         t.sim.demo = rng.weighted(SPARK.demos)
       }
       if (spark?.theme) t.narrative = spark.theme
+      // (Its picture is the post's, the same for every coin on it: see coinPic.)
+      const pic = sim.tool ? undefined : coinPic(id, sim.word, spark?.pic)
+      if (pic) t.pic = pic
       t.sim.watch = watchOf(sim.tier, sim.n)
       // (Its risk tag as it will read from now on: the timeline goes by it, and so does anybody reading the card.)
       const risk = computeRisk(t, m.time)

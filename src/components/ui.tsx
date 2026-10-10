@@ -7,13 +7,15 @@ import { useTweenText } from '../hooks/useTween'
 import type { RiskLevel, Token } from '../types'
 import { fmtPct } from '../utils/format'
 
-export function TokenIcon({ token, size = 28, className }: { token: Pick<Token, 'emoji' | 'hue' | 'status'> & { image?: string }; size?: number; className?: string }) {
+export function TokenIcon({ token, size = 28, className }: { token: Pick<Token, 'emoji' | 'hue' | 'status'> & { image?: string; pic?: string }; size?: number; className?: string }) {
   const dead = token.status === 'rugged' || token.status === 'dead'
   const [broken, setBroken] = useState<string | null>(null)
-  if (isSafeImageSrc(token.image) && broken !== token.image) {
+  // (A coin launched on a post wears the post's picture: one of the game's own files, see data/sparkPics.ts.)
+  const src = isSafeImageSrc(token.image) ? token.image : token.pic && /^[a-z0-9-]+$/.test(token.pic) ? `${import.meta.env.BASE_URL}posts/${token.pic}.webp` : undefined
+  if (src && broken !== src) {
     return (
       <div className={clsx('relative shrink-0 overflow-hidden rounded-md border border-white/10 bg-raise', dead && 'grayscale opacity-60', className)} style={{ width: size, height: size }}>
-        <img src={token.image} alt="" referrerPolicy="no-referrer" draggable={false} onError={() => setBroken(token.image!)} className="size-full object-cover" />
+        <img src={src} alt="" referrerPolicy="no-referrer" loading="lazy" draggable={false} onError={() => setBroken(src)} className="size-full object-cover" />
         {token.status === 'bonding' && <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-warn ring-2 ring-panel" />}
       </div>
     )
