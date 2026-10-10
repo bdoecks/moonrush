@@ -78,6 +78,7 @@ type R = { tick(): void; handle(pid: string, m: unknown): void; members: Map<str
   const tiers = SPARK.tiers as unknown as Record<string, { q: number; watch: number }>
   const rush = SPARK.rush as Record<string, number>
   const old: Record<string, [number, number]> = { anon: [0.5, 0.1], small: [0.8, 0.18], mid: [1.1, 0.3], big: [1.6, 0.5], mega: [2.4, 0.8] }
+  if (process.env.GAIN) (SPARK as unknown as { gain: number }).gain = Number(process.env.GAIN)
   for (const k of Object.keys(old)) {
     if (v.includes('norush')) rush[k] = 0
     if (v.includes('halfrush')) rush[k] /= 2

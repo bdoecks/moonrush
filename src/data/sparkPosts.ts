@@ -116,22 +116,37 @@ const DID: Record<SubjectType, string[]> = {
     'held up traffic for forty minutes and was thanked for it', 'joined a marching band uninvited', 'figured out the elevator', 'keeps bringing home shoes that are not his',
     'adopted a traffic cone', 'attended a wedding and caught the bouquet', 'has a favourite cashier', 'waited outside the library until it opened', 'photobombed a news report',
     'got banned from the buffet', 'stood in the rain looking betrayed', 'sat in a shopping cart and demanded to be pushed', 'finished a 5k by accident',
+    'walked into a pharmacy and waited in line', 'was found asleep on the photocopier', 'has been sitting on the same bench every day since march', 'chased a drone for two miles',
+    'got a library card', 'refused to get out of the pool at closing time', 'took the last seat on the train and would not move', 'was caught on the doorbell camera stealing a parcel',
+    'carried a stick too wide for the gate for ten minutes', 'fell in the fountain and acted like it was on purpose', 'walked through wet cement and left a signature',
+    'went viral for the face made at the vet', 'sat in the front row of a school play', 'pressed the crosswalk button and waited', 'has been greeting commuters every morning for a year',
+    'crashed a live interview and stayed for all of it', 'learned to ring the doorbell', 'got loose at the garden centre', 'stood on a roof for six hours for no reason',
+    'made friends with the delivery driver', 'brought a leaf to the shop as payment', 'ignored a very expensive bed to sleep in the box', 'queued for ice cream alone',
+    'outran three officers and then came back for snacks', 'screamed at a pumpkin', 'got stuck in a fence and looked proud of it', 'walked a full lap of the stadium during the match',
   ],
   food: [
     'has been on the counter for nine days and nobody dares eat it', 'has a face now and we are all responsible', 'won first prize and looked smug about it', 'sold out in nine minutes',
     'got its own chair at the dinner table', 'survived the office party untouched', 'was photographed more than the bride', 'is somehow still warm',
+    'was left on the bus and returned by a stranger', 'has a waiting list', 'fell on the floor and landed perfectly', 'got a standing ovation at the fair',
+    'was too pretty to cut so now it lives here', 'has been in the staff fridge since january', 'came out of the oven looking worried', 'has its own security guard',
   ],
   bot: [
     'apologised to the cat', 'got stuck under the same chair for the third time', 'learned to open the fridge', 'started a group chat with the toaster', 'refused a tip and bowed',
     'followed a stranger home and vacuumed their porch', 'drew a perfect circle and then just stood there', 'waited politely at a crosswalk for an hour', 'played dead when asked to do taxes',
+    'got lost in the car park and asked a pigeon for help', 'held the door for forty people', 'said good morning to a lamp', 'delivered one single fry and left',
+    'spun in a circle until someone clapped', 'took the stairs and regretted it', 'waved at every single car', 'was given a name tag and has not stopped looking at it',
   ],
   space: [
     'was spotted again last night and nobody can explain it', 'got named by a classroom of seven-year-olds', 'is on the mission patch now, officially', 'waved back',
     'has been circling for a week like it lost its keys', 'showed up in the background of every photo',
+    'was photographed from a back garden with a phone', 'got a round of applause in the control room', 'is brighter tonight than it has been all year',
+    'was drawn by an entire school', 'missed us by a lot and people still cheered', 'has a fan club with a newsletter',
   ],
   retro: [
     'still boots up after thirty years', 'has a save file with four hundred hours on it', 'was found at a garage sale for two dollars', 'only says HELLO and then your name',
     'beat the world record and nobody was playing', 'has one high score and it will never be beaten',
+    'was found in an attic still in the box', 'works perfectly if you hit it once on the left', 'has a sticker on it from 1994', 'was fixed by a twelve-year-old with a hairpin',
+    'still has the rental shop label on it', 'plays one song and it is a banger',
   ],
 }
 
@@ -161,7 +176,47 @@ const MEME: Record<SubjectType, string[]> = {
     'found an old {A} and it is called {N}. it {V}', '{N} the {A} {V}. i am not okay', 'this {A} is named {N} and it {V}',
   ],
 }
-const MEME_TITLED = ['#{H} is the only thing getting me through this week', 'somebody please explain #{H} to me. actually do not. i get it', '#{H} {V} and i think about it daily', 'we are all just living in the #{H} era']
+/**
+ * How each size of account writes (the same marks). A post is only as real as its voice: a celebrity is short and sure
+ * of being read, a big page writes captions, a mid account is a shitposter, a nobody types fast and badly. Every line
+ * names the thing ({N}) and says what it is ({A}): reading the post has to give the right name.
+ */
+const VOICE: Record<SparkTier, string[]> = {
+  mega: [
+    'ok who is {N} and why is everyone sending me this {A}', '{N} the {A} {V}. my whole team is obsessed', 'somebody get {N} the {A} on the show',
+    'i would like to formally announce that i am a fan of {N} the {A}', '{N}. the {A}. {V}. thats it thats the post', 'not doing anything today except watching {N} the {A}',
+    'dear {N} the {A}: call me', 'my kid just showed me {N}, a {A} that {V}. we have watched it 30 times', '{N} the {A} has more charisma than half this industry',
+    'whoever looks after {N} the {A}, i want to meet this legend. serious', 'woke up to {D} texts about a {A} named {N}. worth it', 'i have one question and it is about {N} the {A}',
+    'putting {N} the {A} on the tour poster. not joking', 'good morning to {N} the {A} and nobody else',
+  ],
+  big: [
+    '{N} the {A} {V} 😭', '{N} the {A} {V}. Sound on.', 'UPDATE: {N} the {A} {V}. More as we get it.', 'Your daily {N}. Today the {A} {V}.',
+    'Reminder that {N} the {A} {V} and nobody stopped it', 'Submitted by a follower: {N}, a {A} that {V}', '{N} appreciation post. The {A} {V} this week.',
+    'We have been asked {D} times today so yes, the {A} is called {N}', 'In case you missed it: {N} the {A} {V}', '{N} the {A}, everybody. That is the post.',
+    'Part {D} of the {N} saga: the {A} {V}', 'Meet {N}. A {A}. {V}. We are not accepting criticism.', 'Tag someone who needs to see {N} the {A} today',
+    'The {A} of the week is {N}, and it is not close',
+  ],
+  mid: [
+    '{N} the {A} {V} and honestly same', 'i have known about {N} the {A} for one (1) hour and i would do anything for this {A}', 'the {A} is called {N}. i repeat. the {A} is called {N}',
+    '{N} the {A} {V}. timeline cleansed', 'cannot believe the best thing on this app today is a {A} named {N}', '{N} the {A} {V} and you people are worried about the charts',
+    'if {N} the {A} has a million fans i am one of them', 'living rent free in my head: {N}, a {A} that {V}', 'screaming. {N} the {A} {V}',
+    'thread on {N} the {A} (1/{D}): {V}', '{N} the {A} {V}. this is the content i signed up for', 'nobody:\nabsolutely nobody:\n{N} the {A}: {V}',
+    'me explaining {N} the {A} to my family at dinner', 'bad day cancelled. {N} the {A} {V}',
+  ],
+  small: [
+    'ngl {N} the {A} {V} and it made my day', 'why is nobody talking about {N} the {A}. {V}!!', 'who is {N} the {A} and why is this all over my feed',
+    'my cousin sent me {N} the {A}. {V}. im done', 'i just found out about {N} the {A} and i need everyone to see this', 'day made. {N} the {A} {V}',
+    '{N} the {A} {V} lol', 'ok but {N} the {A} though', 'adding {N} the {A} to the list of things keeping me going', 'the way {N} the {A} {V} 😭',
+  ],
+  anon: [
+    'bro {N} the {A} {V} 😭😭', 'lmaooo {N} the {A} {V}', 'yo has anyone seen {N} the {A}??', 'cant sleep. thinking about {N} the {A}', '{N} the {A} >>>>',
+    'not me crying over a {A} named {N} at 3am', '{N} the {A} {V} lol', 'wait {N} the {A} is real??', 'i love {N} the {A} so much its not even funny',
+    'someone tell me more about {N} the {A} pls', '{N} the {A} {V} im crying', 'first time posting. it is about {N} the {A}',
+  ],
+}
+const MEME_TITLED = ['#{H} is the only thing getting me through this week', 'somebody please explain #{H} to me. actually do not. i get it', '#{H} {V} and i think about it daily', 'we are all just living in the #{H} era',
+  '#{H} for president of my street', 'i did not have #{H} on my list for this year but here we are', 'day {D} of #{H} and i am still not over it', 'if you do not know about #{H} yet, you will by tonight',
+  'the group chat has been nothing but #{H} since breakfast', '#{H} {V}. i need a minute', 'logging off. nothing will top #{H} today', '#{H} supremacy', 'how is #{H} not the top trend yet']
 
 /** News posts (invented outlets and invented places). Same marks as above; `{P}` = a place, `{J}` = a job. */
 const NEWS: Record<SubjectType, string[]> = {
@@ -184,10 +239,26 @@ const NEWS: Record<SubjectType, string[]> = {
     'A sealed {A} nicknamed {N} sells at auction for a record price', 'Museum puts a working {A} called {N} on show in {P}',
   ],
 }
-const PLACES = ['a small coastal town', 'the city aquarium', 'a mountain village', 'the central train station', 'the harbor district', 'a university library', 'the old town market', 'a suburban fire station']
-const JOBS = ['mayor', 'station master', 'harbor master', 'librarian', 'fire chief', 'postmaster', 'night watchman']
+/** How an outlet writes, by its size: a wire service and the big papers, or a local paper. (Never opens with {P}.) */
+const NEWS_VOICE: Record<'wire' | 'local', string[]> = {
+  wire: [
+    'JUST IN: A {A} named {N} has been made honorary {J} of {P}', 'BREAKING: {N}, the {A} that {V}, to be honoured at {P}', '{N} the {A} {V}, officials confirm',
+    'DEVELOPING: Crowds gather at {P} to see {N}, a {A} that {V}', 'Video of a {A} called {N} passes {D} million views in a day',
+    '"We did not plan this": how {N} the {A} became the most talked-about resident of {P}', 'Explainer: who is {N}, and why is a {A} trending everywhere?',
+    'Residents of {P} to vote on naming a street after {N} the {A}', 'WATCH: {N} the {A} {V}', 'Sales of {A} toys jump after {N} goes viral, shops say',
+  ],
+  local: [
+    'Local {A} {N} {V}, neighbours say', '{N} the {A} is back at {P}, and yes, you can visit', 'Letters: readers have a lot to say about {N} the {A}',
+    '{N}, a {A} well known around {P}, {V} on Tuesday', 'Council thanks {N} the {A} for "services to morale"', 'Photo of the week: {N} the {A} at {P}',
+    'Missing {A} {N} found safe near {P} after {D} hours', 'Bake sale raises record sum, thanks largely to a {A} called {N}', 'Opinion: it is time we talked about {N} the {A}',
+    'School names its new reading corner after {N} the {A}',
+  ],
+}
+const PLACES = ['a small coastal town', 'the city aquarium', 'a mountain village', 'the central train station', 'the harbor district', 'a university library', 'the old town market', 'a suburban fire station',
+  'the ferry terminal', 'a village post office', 'the botanical gardens', 'the public swimming pool', 'a motorway service station', 'the town bowling club', 'a seaside pier', 'the night bus depot']
+const JOBS = ['mayor', 'station master', 'harbor master', 'librarian', 'fire chief', 'postmaster', 'night watchman', 'lifeguard', 'head gardener', 'bus inspector', 'lighthouse keeper', 'chief taster', 'crossing guard']
 
-export const SPARK_TEXT = { DID, MEME, MEME_TITLED, NEWS, PLACES, JOBS }
+export const SPARK_TEXT = { DID, MEME, MEME_TITLED, NEWS, PLACES, JOBS, VOICE, NEWS_VOICE }
 
 /** The narrative (the game's own themes) a subject type belongs to when its word is not on the theme list by itself. */
 export const TYPE_THEME: Record<SubjectType, Narrative> = { creature: 'absurd', food: 'food', bot: 'ai', space: 'space', retro: 'retro' }
