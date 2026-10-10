@@ -163,4 +163,42 @@ const SCENES = [
   ['joystick', 'was fixed by a twelve-year-old with a hairpin', 'an old chunky joystick with one red button on a wooden desk, a hairpin lying beside it'],
 ].map(([word, did, what, look, name]) => ({ name: name ?? `${word}--${slug(did)}`, word, did, what, look: look ?? SNAP }))
 
-export const LIST = [...FIRST, ...SCENES, ...plain]
+// The second pass (2026-10-10): what came out wrong the first time (somebody in view, lettering, the wrong animal, a
+// toy, a gadget that looked like a real one) described again, and three of the test batch dropped for their second go.
+const REDO = {
+  "bot-a": "a small boxy six-wheeled delivery robot on a deserted pavement beside a plain brick wall at dawn",
+  "bot-c": "a small boxy six-wheeled delivery robot in a deserted lobby with a plain tiled floor and closed doors",
+  "cartridge-b": "a grey plastic game cartridge with a blank label standing upright on a windowsill",
+  "chicken-a": "a brown hen on the pavement in front of a plain shop window at dawn, deserted street",
+  "dog-bus-2": "a scruffy dog sitting alone on a bus seat by the window, seen from the aisle of a deserted parked bus, every other seat empty",
+  "koala-fountain-2": "a wet koala sitting on the stone rim of a small fountain in a deserted walled garden, looking unbothered",
+  "console-attic-2": "a wide flat beige plastic box with one slot on top and two round red buttons, an old home video game machine of an unfamiliar design with a wired controller, lying in an open plain cardboard box in a dusty attic",
+  "otter-station-master-2": "a river otter wearing a miniature railway conductor hat, a round flat-topped navy pillbox cap with a short stiff black visor and a thin gold band, sitting upright on a bench on a deserted train platform",
+  "waffle-b": "a waffle on a plate on a wooden cafe table beside a plain wall",
+  "waffle-c": "a waffle in an open plain cardboard box on a kitchen table",
+  "unicorn-a": "a real live small white pony with a natural coat and a single spiral horn on its forehead lying on the front doorstep of a brick house",
+  "unicorn-b": "a real live small white pony with a natural coat and a single spiral horn on its forehead standing beside a park bench in a deserted park",
+  "unicorn-c": "a real live small white pony with a natural coat and a single spiral horn on its forehead standing in a stable doorway",
+  "mink-a": "a mink, a small slender weasel-like wild animal with a long body, short legs, small round ears and glossy dark brown fur, standing in the aisle of a deserted corner shop with plain shelves",
+  "mink-b": "a mink, a small slender weasel-like wild animal with a long body, short legs, small round ears and glossy dark brown fur, on the front doorstep of a brick house",
+  "mink-c": "a mink, a small slender weasel-like wild animal with a long body, short legs, small round ears and glossy dark brown fur, on a park bench",
+  "sloth-b": "a three-toed sloth with very long curved claws, shaggy grey-brown fur and a dark stripe through each eye, hanging from the back of a park bench",
+  "sloth-c": "a three-toed sloth with very long curved claws, shaggy grey-brown fur and a dark stripe through each eye, sitting on a kitchen floor looking up at the camera",
+  "dragon-a": "a small scaly green dragon the size of a cat with little wings and tiny horns on the pavement outside a bakery window",
+  "pig-a": "a real live muddy farm pig with bristly skin standing in the aisle of a deserted corner shop with plain shelves",
+  "pig-b": "a real live muddy farm pig with bristly skin sitting on the front doorstep of a brick house",
+  "ufo-a": "a small dark metallic saucer-shaped craft with a faint ring of lights along its rim, hovering, slightly blurred, in the dusk sky above rooftops",
+  "ufo-b": "a small dark metallic saucer-shaped craft with a faint ring of lights along its rim, hovering, slightly blurred, in the dusk sky above a deserted field",
+  "ufo-c": "a small dark metallic saucer-shaped craft with a faint ring of lights along its rim, hovering, slightly blurred, in the dusk sky above a row of trees",
+  "arcade-a": "an old upright arcade cabinet of an invented design with plain wood-grain sides, a plain unlit black panel above a screen showing coloured blocks, and two round red buttons, in a bare garage",
+  "arcade-b": "an old upright arcade cabinet of an invented design with plain wood-grain sides, a plain unlit black panel above a screen showing coloured blocks, and two round red buttons, in the corner of a bare launderette with plain walls",
+  "arcade-c": "an old upright arcade cabinet of an invented design with plain wood-grain sides, a plain unlit black panel above a screen showing coloured blocks, and two round red buttons, in a bare hallway with plain walls",
+  "fox--stole-a-whole-pizza-and-showed-no-remorse": "a red fox trotting down a deserted alley at dawn carrying a whole pizza in its mouth",
+  "cat--has-been-greeting-commuters-every-morning-fo": "a tabby cat sitting on top of a ticket barrier in a deserted station hall at dawn, closed shutters behind",
+  "dog--pressed-the-crosswalk-button-and-waited": "a scruffy dog sitting at a deserted pedestrian crossing at dawn with one paw up on the button post, the road empty",
+  "planet--is-brighter-tonight-than-it-has-been-all-yea": "a single small bright point of light, a planet far smaller than a moon, shining steadily low in the deep blue evening sky above a row of chimneys",
+  "ufo--was-spotted-again-last-night-and-nobody-can-": "a small dark metallic saucer-shaped craft with a faint ring of lights along its rim, hovering, slightly blurred, in the dusk sky above the roofs of a quiet street",
+  "arcade--works-perfectly-if-you-hit-it-once-on-the-le": "an old upright arcade cabinet of an invented design with plain wood-grain sides, a plain unlit black panel above a screen showing coloured blocks, and two round red buttons, in a bare garage, seen slightly from the left"
+}
+const DROP = ["dog-bus","koala-fountain","console-attic"]
+export const LIST = [...FIRST, ...SCENES, ...plain].filter((p) => !DROP.includes(p.name)).map((p) => (REDO[p.name] ? { ...p, what: REDO[p.name] } : p))

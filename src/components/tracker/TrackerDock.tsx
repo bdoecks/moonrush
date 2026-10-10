@@ -12,6 +12,7 @@ import { fmtAge, fmtCompact, fmtUsd } from '../../utils/format'
 import { QuickBuyButton } from '../chain'
 import { EmptyState, Pct, TokenIcon } from '../ui'
 import { Composer, postAccount } from '../SocialTracker'
+import { Happening } from './FeedExtras'
 import { feedStyle, Tweet } from './Tweet'
 import { openRow, useFriendRows, type TrackerRow } from './friendRows'
 import { useOpenPlayer } from '../PlayerCard'
@@ -348,6 +349,7 @@ function SocialSection() {
         ? <div className="relative"><Composer /><button type="button" onClick={() => setWriting(false)} className="absolute right-2 top-1 text-[10px] text-dim hover:text-ink">Hide</button></div>
         : <button type="button" onClick={() => setWriting(true)} className="mx-2 my-1.5 shrink-0 rounded-md border border-line px-2 py-1.5 text-left text-[11px] text-dim hover:border-line2 hover:text-muted">✍️ Write a post…</button>)}
       <div className="min-h-0 flex-1 overflow-y-auto" style={scope === 'live' ? undefined : feedStyle}>
+        {scope !== 'live' && <Happening />}
         {scope === 'live' ? <LiveXFeed /> : !posts.length ? (
           <EmptyState icon="📣" title={scope === 'following' ? 'No posts from accounts you follow' : 'No posts yet'} hint={scope === 'following' ? 'Hit Follow on any post' : 'Posts appear as the market moves'} />
         ) : posts.slice(0, 60).map((p) => <OnScreen key={p.id} className="slide-in"><Tweet p={p} /></OnScreen>)}

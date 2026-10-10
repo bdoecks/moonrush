@@ -15,6 +15,7 @@ import { QuickBuyButton } from '../chain'
 import { Pct, TokenIcon } from '../ui'
 import { postAccount } from '../SocialTracker'
 import { VerifiedMark } from '../SparkPanel'
+import { useAccountCard } from './accountCard'
 
 /** The timeline's colours ("lights out"): background, text, quiet text, lines, and the blue of links and check marks. */
 export const X = { bg: '#000000', text: '#E7E9EA', dim: '#71767B', line: '#2F3336', blue: '#1D9BF0', hover: 'rgba(231,233,234,0.03)' }
@@ -51,6 +52,7 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
   // (A post of the story market: what kind it is, and whether it is a screenshot of somebody else's.)
   const spark = useGame((s) => (p.sparkId ? s.market.sparks?.find((x) => x.id === p.sparkId) : undefined))
   const [open, setOpen] = useState(false)
+  const showAccount = useAccountCard((s) => s.show)
   if (!acc) return null
   const since = t && p.mcapAtPost ? t.mcap / p.mcapAtPost - 1 : 0
   const look = sizeLook(acc.player ? 0 : acc.followers)
@@ -63,7 +65,7 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
       <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[#16181C] text-[20px]">{acc.avatar}</span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1 text-[15px] leading-5">
-          <span className="truncate font-bold" style={{ color: X.text }}>{acc.name}</span>
+          {p.by ? <button onClick={() => showAccount(p.by!)} className="truncate font-bold hover:underline" style={{ color: X.text }}>{acc.name}</button> : <span className="truncate font-bold" style={{ color: X.text }}>{acc.name}</span>}
           {acc.verified && <VerifiedMark size={16} />}
           <span className="min-w-0 shrink truncate" style={{ color: X.dim }}>@{acc.handle}</span>
           <span className="shrink-0" style={{ color: X.dim }}>· {fmtAge(age)}</span>
@@ -77,9 +79,27 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
           {spark?.kind === 'news' && <span className="rounded bg-[#1D9BF0]/15 px-1.5 py-px text-[#1D9BF0]">NEWS</span>}
           {spark?.kind === 'tech' && <span className="rounded bg-[#8fd14f]/15 px-1.5 py-px text-[#8fd14f]">TECH</span>}
         </div>
-        <p className="mt-1.5 whitespace-pre-line break-words text-[15px] leading-5" style={{ color: X.text }}>
+        <p className={clsx('mt-1.5 whitespace-pre-line break-words text-[15px] leading-5', spark?.fake && 'line-through')} style={{ color: spark?.fake ? X.dim : X.text }}>
           {p.text.split(/(\$[A-Z0-9]+|#[A-Za-z0-9]+|@[A-Za-z0-9_]+)/g).map((part, i) => (/^[$#@][A-Za-z0-9_]+$/.test(part) ? <span key={i} style={{ color: X.blue }}>{part}</span> : <span key={i}>{part}</span>))}
         </p>
+        {spark?.pic && (spark.kind === 'news' ? (
+          <div className="mt-2.5 overflow-hidden rounded-2xl border" style={{ borderColor: X.line }}>
+            <img src={`${import.meta.env.BASE_URL}posts/${spark.pic}.webp`} alt="Made-up picture with the post" loading="lazy" className="block aspect-[4/3] w-full object-cover" />
+            <div className="px-3 py-2 text-[13px]" style={{ color: X.dim }}>{acc.handle}.news · made-up outlet</div>
+          </div>
+        ) : (
+          <img src={`${import.meta.env.BASE_URL}posts/${spark.pic}.webp`} alt="Made-up picture with the post" loading="lazy" className="mt-2.5 block aspect-[4/3] w-full rounded-2xl border object-cover" style={{ borderColor: X.line }} />
+        ))}
+        {spark?.fake && (
+          <div className="mt-2.5 rounded-xl border px-3 py-2.5 text-[13px] leading-[18px]" style={{ borderColor: 'rgba(244,33,46,0.5)', background: 'rgba(244,33,46,0.1)', color: X.text }}>
+            <div className="font-bold" style={{ color: '#F4212E' }}>{spark.fake.kind === 'fake' ? 'Fake account' : spark.fake.kind === 'shot' ? 'Made-up screenshot' : 'Hacked account'}</div>
+            <div>
+              {spark.fake.kind === 'fake' ? `The real ${spark.fake.real?.name ?? 'account'}${spark.fake.real ? ` (@${spark.fake.real.handle})` : ''} says this was not them. Look at the handle, @${acc.handle}, and there is no check mark.`
+                : spark.fake.kind === 'shot' ? `${spark.quote?.name ?? 'That account'} never posted this. A screenshot is not a post: it came from @${acc.handle}.`
+                : `${acc.name} has its account back and says to ignore this post. Nothing on the post gave it away.`}
+            </div>
+          </div>
+        )}
         {spark?.quote && (
           <div className="mt-2.5 rounded-2xl border px-3 py-2.5 text-[13px]" style={{ borderColor: X.line }}>
             <div className="flex items-center gap-1 font-bold" style={{ color: X.text }}>🖼 Screenshot <span className="font-normal" style={{ color: X.dim }}>of a post by</span> {spark.quote.name}{spark.quote.verified && <VerifiedMark size={13} />}</div>

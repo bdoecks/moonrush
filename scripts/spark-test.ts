@@ -312,7 +312,7 @@ function run(seed: number, ticks: number, dials: Partial<typeof SPARK> = {}): Ru
       }
     }
     for (const s of m.sparks ?? []) {
-      if (Object.keys(s).some((k) => !['id', 'seq', 'tick', 'time', 'kind', 'by', 'text', 'theme', 'picked', 'over'].includes(k))) r.hiddenLeak++
+      if (Object.keys(s).some((k) => !['id', 'seq', 'tick', 'time', 'kind', 'by', 'text', 'theme', 'pic', 'picked', 'over'].includes(k))) r.hiddenLeak++
       const open = !s.picked && s.over === undefined
       if (open !== !!m.sparkSim?.[s.id]) r.simMismatch++
       const old = before.sparks?.find((x) => x.id === s.id)

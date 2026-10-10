@@ -30,6 +30,7 @@ import { WatchBanner } from './components/Multiplayer'
 import { BrokeBanner } from './components/WorldBoard'
 import { PlayerCardDrawer } from './components/PlayerCard'
 import { SparkDrawer } from './components/SparkPanel'
+import { AccountCardHost } from './components/tracker/FeedExtras'
 import { AdminFloat } from './components/AdminFloat'
 import { LAB_VIEWS, setCookingVisible, setLabsVisible, setLarpsVisible, setSparksVisible, setTechVisible, useFlags, watchFlags } from './game/flags'
 import { useCooking, useLabs, useLarps, useSparks, useTech } from './hooks/useLabs'
@@ -183,6 +184,7 @@ export default function App() {
       <Modals />
       <PlayerCardDrawer />
       <SparkDrawer />
+      <AccountCardHost />
       <SwapModal />
       <WalletManager />
       <PnlCard />

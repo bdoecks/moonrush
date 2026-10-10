@@ -743,3 +743,34 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
 - **A runner sets the meta** (the owner's ask, 2026-10-10; with the story market on): a coin whose market cap passes
   `SPARK.metaRun` ($1M) makes its narrative the meta for at least `SPARK.metaHold` seconds, and posts are `SPARK.meta`
   (5) times likelier to be about that kind, so coins like it follow. The meta moves no price.
+
+## The timeline: voices, replies, reposts, pictures (story market, 2026-10-10)
+
+- **Flavour, never a signal.** `src/data/sparkFlavor.ts` (the words) and `src/game/feedFlavor.ts` (pure, NO DICE:
+  everything comes from the post's own id with `hash01`) make the timeline read like one: each named account's own
+  way of writing (`ACCOUNT_STYLE`, `styleText`), an open story's account following up and other accounts reposting it
+  (`flavorPosts`, called from `tickSocial`: ordinary feed posts with `by`, a repost carries `quote`), and the replies
+  under a post (`repliesOf`, worked out in the browser, never sent). None of it may name a coin, say whether a story
+  runs or whether a post is what it looks like: a reply about the ending is written only from what the post already
+  shows (`picked`, `over`, `fake`). `spark-test` holds this; keep it when adding lines. Because there are no dice,
+  the fairness numbers do not move when words are added.
+- **Voices by size** (`VOICE`, `NEWS_VOICE` in `sparkPosts.ts`): a celebrity, a big page, a mid account, a nobody,
+  a wire service and a local paper each have their own lines. Every line names the thing and says what it is.
+- **Pictures** are made ahead of time, never while the game runs: `scripts/picture-list.mjs` (what to make, and the
+  subject and happening each goes with), `scripts/make-pictures.mjs` (the owner's Replicate token in `.env`, FLUX
+  Dev, into `bot-data/pictures/flux-dev`, private), then every picture is LOOKED AT and a bad one moved to
+  `bot-data/pictures/rejected` (somebody in view, lettering, a gadget that looks like a real product, the wrong
+  animal), then `scripts/build-pictures.mjs` shrinks the kept ones into `public/posts` and writes
+  `src/data/sparkPics.ts`. A post's picture is `Spark.pic` (no dice: the picture of exactly what happened when there
+  is one, else a plain picture of the subject for `SPARK.pics` of posts). Descriptions say what IS there ("deserted",
+  "plain unmarked"): "no people" draws people, "phone photo" draws a hand holding a phone.
+- **On screen**: `components/tracker/Tweet.tsx` (the post, its picture, the news card, the repost box, the replies,
+  and the red box that says why once a fake has come out), `FeedExtras.tsx` ("What is happening": the meta and what
+  recent posts are about; the account page behind a click on a name: size and its own posts, never a track record,
+  the owner's call).
+- **The rush is the picked coin's alone, after the pick** (`SPARK.rush`), and `SPARK.gain` is 0.6. With the rush on
+  every coin of an open post, careful reading lost 7% on big accounts; with gain 0.7 and the winner's rush, careful
+  reading at $1,000 a trade had started to pay. Measured after both (World with bots, 96 World hours at $100):
+  careful reading about +3% on accounts of 500K to 20M, about 0 over all posts and at $1,000; the first coin -3.7%,
+  the biggest -4.4%, the picked coin bought on the news -21%; launching on a post -$46 to -$93 a launch on accounts
+  of 20K and up, +$2 with no dev buy on 500K and up; every rule of `fair-test` loses or is flat with it on.

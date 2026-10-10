@@ -11,6 +11,7 @@ import { STYLE_META } from '../data/wallets'
 import { useTokenMap } from '../hooks/useDerived'
 import { SIM_SEC_PER_TICK } from '../game/marketEngine'
 import { ACCOUNTS } from '../game/socialEngine'
+import { Happening } from '../components/tracker/FeedExtras'
 import { feedStyle, Tweet } from '../components/tracker/Tweet'
 import { alertText, useGame } from '../game/store'
 import { useFriends } from '../net/friends'
@@ -376,6 +377,7 @@ function SocialPanel() {
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto" style={feedStyle}>
+        <Happening />
         {posts.length === 0 ? (
           <EmptyState icon={platform === 'x' ? <AtSign /> : <Send />} title={scope === 'mine' ? "No posts from accounts you follow" : 'Nothing posted yet'} hint={scope === 'mine' ? 'Follow accounts from Recommended' : 'Posts appear as the market moves'} />
         ) : posts.slice(0, 60).map((p) => <Tweet key={p.id} p={p} roomy />)}

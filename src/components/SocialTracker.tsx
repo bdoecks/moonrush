@@ -6,6 +6,7 @@ import { playerAuthor, socialNow, useGame } from '../game/store'
 import type { SocialPost } from '../types'
 import { fmtCompact } from '../utils/format'
 import { EmptyState, TokenIcon } from './ui'
+import { Happening } from './tracker/FeedExtras'
 import { feedStyle, Tweet } from './tracker/Tweet'
 
 const byId = new Map(ACCOUNTS.map((a) => [a.id, a]))
@@ -140,6 +141,7 @@ export function SocialTracker() {
       </div>
       <Composer compact />
       <div className="min-h-0 flex-1 overflow-y-auto" style={feedStyle}>
+        <Happening />
         {posts.length === 0 ? (
           <EmptyState icon="📣" title={scope === 'following' ? 'No posts from accounts you follow' : 'No posts yet'} hint={scope === 'following' ? 'Follow accounts here or on the Track tab' : 'Posts appear as the market moves'} />
         ) : (

@@ -27,7 +27,8 @@
 //
 // Pure, and a leaf: the market engine imports this file, so nothing here may import the market engine.
 import { SPARK_TECH, TECH_NAMES, TECH_TEXT, TECH_TOOLS } from '../data/sparkPosts'
-import { styleText } from './feedFlavor'
+import { hash01, styleText } from './feedFlavor'
+import { SPARK_PICS } from '../data/sparkPics'
 import { anonAccount, NEVER_SPELL, SPARK_ACCOUNTS, SPARK_NAMES, SPARK_TEXT, SPARK_TITLES, SUBJECTS, TYPE_THEME, VARIANT_POST, VARIANT_PRE, type SparkAccount } from '../data/sparkPosts'
 import { SAFE_THEMES } from '../data/themeWords'
 import type { DemoState, DemoTool, MarketState, RiskLevel, Spark, SparkBy, SparkLarp, SparkSim, SparkTier, Token } from '../types'
@@ -66,6 +67,8 @@ export const SPARK = {
   // the picked coin, and only after the pick: on every coin of an open post it took the reader's edge away
   // (careful reading on big accounts read -7% where it had been +4%; post-test, 2026-10-10).
   rush: { anon: 0, small: 0.12, mid: 0.3, big: 0.55, mega: 0.8 } as Record<SparkTier, number>,
+  // How many of the posts with no picture of their own happening carry a plain picture of what they are about.
+  pics: 0.5,
   preQ: 0.25, // a coin's pull on the crowd while its story is open (it is watched, not believed in yet)
   // Who launches on a post: three kinds of dev, how many of each, and what their coin's audit shows (the dev's own
   // bag, the top ten holders, insiders: % of the supply). The ranges are set so the risk tag every card carries
@@ -157,10 +160,15 @@ export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trend
   const T = SPARK_TEXT
   // (Its words: the lines for that kind of thing, and the lines in the voice of that size of account.)
   const line = titled ? rng.pick(T.MEME_TITLED) : rng.pick(kind === 'news' ? [...T.NEWS[subject.type], ...T.NEWS_VOICE[tier === 'mega' || tier === 'big' ? 'wire' : 'local']] : [...T.MEME[subject.type], ...T.VOICE[tier]])
-  const plain = line.replaceAll('{N}', name).replaceAll('{A}', subject.word).replaceAll('{V}', rng.pick(T.DID[subject.type])).replaceAll('{D}', String(rng.int(2, 40)))
+  const did = rng.pick(T.DID[subject.type])
+  const plain = line.replaceAll('{N}', name).replaceAll('{A}', subject.word).replaceAll('{V}', did).replaceAll('{D}', String(rng.int(2, 40)))
     .replaceAll('{H}', name.replace(/[^A-Za-z0-9]/g, '')).replaceAll('{P}', rng.pick(T.PLACES)).replaceAll('{J}', rng.pick(T.JOBS))
     .replace(/\b([aA]) (?=[aeioAEIO])/g, '$1n ') // "a owl" → "an owl" (not before a u: a ufo, a unicorn)
   const text = styleText(account.handle, plain, id, name) // (in that account's own way of writing: no dice, see feedFlavor.ts)
+  // Its picture (no dice either): the one of exactly what happened when the post says it and there is one, else, for
+  // about half the posts, a plain picture of what it is about. A timeline is not all pictures.
+  const pics = SPARK_PICS[subject.word]
+  const pic = !pics ? undefined : line.includes('{V}') && pics.did[did] ? pics.did[did] : pics.any.length && hash01(id + 'pic?') < SPARK.pics ? pics.any[Math.floor(hash01(id + 'pic') * pics.any.length) % pics.any.length] : undefined
 
   // A tech post? (Only asked with that switch on.) A builder announces a tool: the post, the name and who posts are replaced.
   if (tech && (tier === 'mid' || tier === 'big') && rng.chance(SPARK.tech)) {
@@ -216,7 +224,7 @@ export function makeSpark(m: Pick<MarketState, 'tick' | 'time' | 'meta' | 'trend
     due.push(at)
     at += Math.max(1, Math.round(-Math.log(1 - rng.next()) * t.gap))
   }
-  const spark: Spark = { id, seq, tick: m.tick, time: m.time, kind, by, text: said, theme: SAFE_THEMES.get(subject.word) ?? TYPE_THEME[subject.type], ...(quote ? { quote } : {}) }
+  const spark: Spark = { id, seq, tick: m.tick, time: m.time, kind, by, text: said, theme: SAFE_THEMES.get(subject.word) ?? TYPE_THEME[subject.type], ...(quote ? { quote } : pic ? { pic } : {}) }
   const runs = rng.chance(t.runs)
   const sim: SparkSim = { tier, name, ticker, word: subject.word, emoji: subject.emoji, runs: runs && !larp, power: Math.exp(0.4 * rng.gauss()), decideAt, due, n: 0, ...(larp ? { larp, real: byOf(account) } : {}) }
   return { spark, sim }

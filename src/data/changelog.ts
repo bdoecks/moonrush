@@ -36,6 +36,30 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-10-10-timeline',
+    flag: 'sparks',
+    date: 'October 10, 2026',
+    title: 'A timeline that feels alive',
+    added: [
+      'Pictures on posts. Many posts now come with a photo of what they are about. Every picture is made up, like the accounts.',
+      'Replies under a post, and "Show more replies" to read the rest. They are chatter, not tips: nobody in the replies knows which coin is the right one.',
+      'Accounts follow up on their own posts, and other accounts repost them with a line of their own.',
+      'Every known account now writes in its own way, so you can tell them apart by how they talk.',
+      'A "What is happening" box on top of the feed: the meta right now and what the timeline is talking about.',
+      'Click an account\'s name to open its page: who it says it is, how many followers, and its latest posts.',
+    ],
+    changed: [
+      'Far more variety in what posts say, and each size of account sounds different: a celebrity, a big page, a small account and a local paper no longer write the same sentences.',
+      'When the timeline settles on a coin, that coin now trades in a rush, the way a winner does.',
+    ],
+  },
+  {
+    id: '2026-10-10-one-feed-look',
+    date: 'October 10, 2026',
+    title: 'One look for every feed',
+    changed: ['The Social Tracker at the bottom of the screen and the feed on the Track page now look like the one in the side panel: the same timeline everywhere.'],
+  },
+  {
     id: '2026-10-09-social-tracker-look',
     date: 'October 9, 2026',
     title: 'A Social Tracker you can read',

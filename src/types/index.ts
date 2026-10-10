@@ -127,6 +127,7 @@ export interface Spark {
   by: SparkBy
   text: string
   theme?: Narrative
+  pic?: string // the picture with the post: a file in public/posts (data/sparkPics.ts). Made up, like the post
   picked?: { tokenId: string; ticker: string; time: number } // the coin the timeline settled on, said once it has happened
   over?: number // market time the timeline moved on without settling on any coin
   quote?: { name: string; handle: string; verified: boolean } // a "screenshot": the post says THIS account posted it (it may never have)
