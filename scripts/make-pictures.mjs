@@ -62,12 +62,18 @@ if (!TOKEN) {
 mkdirSync(OUT, { recursive: true })
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-async function make(prompt) {
+async function make(prompt, tries = 0) {
   const res = await fetch(`https://api.replicate.com/v1/models/${MODEL}/predictions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json', Prefer: 'wait' },
     body: JSON.stringify({ input: { prompt, aspect_ratio: '4:3', output_format: 'webp', output_quality: 80, num_outputs: 1 } }),
   })
+  // (Replicate lets a small account make 6 pictures a minute: told to wait, wait as long as it says and ask again.)
+  if (res.status === 429 && tries < 8) {
+    const wait = Number((await res.json().catch(() => ({}))).retry_after ?? 10)
+    await sleep((wait + 1) * 1000)
+    return make(prompt, tries + 1)
+  }
   if (!res.ok) throw new Error(`Replicate said ${res.status}: ${(await res.text()).slice(0, 300)}`)
   let p = await res.json()
   // (Not ready within the wait: ask again every two seconds, for two minutes at most.)
@@ -92,6 +98,6 @@ for (const [name, what, look] of todo) {
     console.error(`  FAILED ${name}: ${e.message}`)
     if (/401|402|403/.test(e.message)) { console.error('Stopping: the token was refused or the account has no credit.'); break }
   }
-  await sleep(500)
+  await sleep(10_500) // (six a minute)
 }
 console.log(`Done: ${made} made, about $${(made * PRICE).toFixed(2)} spent. They are in ${OUT}. Tell Claude, who looks at every one before any goes into the game.`)
