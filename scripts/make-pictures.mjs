@@ -2,6 +2,7 @@
 //   node scripts/make-pictures.mjs            the test batch: the first 20 on the list
 //   node scripts/make-pictures.mjs --all      every picture on the list that is not made yet
 //   node scripts/make-pictures.mjs --avatars  the accounts' profile pictures (scripts/avatar-list.mjs), all of them
+//   node scripts/make-pictures.mjs --emoji    photos for the emoji the market's own coins wear (scripts/emoji-list.mjs)
 //   node scripts/make-pictures.mjs --list     what would be made, and what it would cost (asks nobody anything)
 //   node scripts/make-pictures.mjs --schnell  the same with the cheaper model (flux-schnell), into its own folder
 // Setup: put your Replicate token in the file called .env in this folder (never in the game, a commit or a chat):
@@ -15,6 +16,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { LIST as POSTS } from './picture-list.mjs'
 import { AVATARS } from './avatar-list.mjs'
+import { EMOJI } from './emoji-list.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 if (existsSync(join(ROOT, '.env'))) process.loadEnvFile(join(ROOT, '.env'))
@@ -24,12 +26,14 @@ const PRICE = MODEL.endsWith('schnell') ? 0.003 : MODEL.endsWith('dev') ? 0.025 
 // (A folder for each model, so the same list can be made with two of them and compared side by side.)
 // (--avatars: the accounts' profile pictures instead, square, into their own folder.)
 const FACES = process.argv.includes('--avatars')
-const LIST = FACES ? AVATARS : POSTS
-const OUT = join(ROOT, 'bot-data', 'pictures', FACES ? 'avatars' : MODEL.split('/').pop())
+// (--emoji: photos for the emoji the market's own coins wear, into their own folder.)
+const COINS = process.argv.includes('--emoji')
+const LIST = FACES ? AVATARS : COINS ? EMOJI : POSTS
+const OUT = join(ROOT, 'bot-data', 'pictures', FACES ? 'avatars' : COINS ? 'emoji' : MODEL.split('/').pop())
 
 // The list is in scripts/picture-list.mjs (about 300; each entry says which subject and happening it goes with).
 const args = process.argv.slice(2)
-const todo = (args.includes('--all') || FACES ? LIST : LIST.slice(0, 20)).filter((p) => !existsSync(join(OUT, `${p.name}.webp`)))
+const todo = (args.includes('--all') || FACES || COINS ? LIST : LIST.slice(0, 20)).filter((p) => !existsSync(join(OUT, `${p.name}.webp`)))
 console.log(`${LIST.length} pictures on the list, ${todo.length} to make with ${MODEL}: about $${(todo.length * PRICE).toFixed(2)}`)
 if (args.includes('--list')) {
   for (const p of todo) console.log(`  ${p.name}: ${p.what}, ${p.look}`)

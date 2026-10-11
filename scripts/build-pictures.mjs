@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { LIST } from './picture-list.mjs'
 import { AVATARS } from './avatar-list.mjs'
+import { EMOJI } from './emoji-list.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const FROM = join(ROOT, 'bot-data', 'pictures', 'flux-dev')
@@ -46,6 +47,30 @@ for (const p of pics) {
   bytes += buf.length
   writeFileSync(join(TO, `${p.file}.webp`), buf)
 }
+// The photos for the emoji the market's own coins wear: the kept ones, at the same size, beside the posts' pictures.
+const EMOJI_FROM = join(ROOT, 'bot-data', 'pictures', 'emoji')
+const emojiPics = {}
+for (const p of EMOJI.filter((p) => existsSync(join(EMOJI_FROM, `${p.name}.webp`)))) {
+  const src = `data:image/webp;base64,${readFileSync(join(EMOJI_FROM, `${p.name}.webp`)).toString('base64')}`
+  const out = await page.evaluate(async ({ src, w, h, q }) => {
+    const img = new Image()
+    img.src = src
+    await img.decode()
+    const c = document.createElement('canvas')
+    c.width = w
+    c.height = h
+    const k = Math.max(w / img.width, h / img.height)
+    c.getContext('2d').drawImage(img, (w - img.width * k) / 2, (h - img.height * k) / 2, img.width * k, img.height * k)
+    return c.toDataURL('image/webp', q).split(',')[1]
+  }, { src, w: WIDTH, h: HEIGHT, q: QUALITY })
+  writeFileSync(join(TO, `${p.name}.webp`), Buffer.from(out, 'base64'))
+  ;(emojiPics[p.emoji] ??= []).push(p.name)
+}
+writeFileSync(join(ROOT, 'src', 'data', 'emojiPics.ts'), `// MADE BY scripts/build-pictures.mjs from scripts/emoji-list.mjs: do not edit by hand.
+// Photos (public/posts/<file>.webp) for the emoji the market's own coins wear that are not one of the story market's subjects.
+export const EMOJI_PICS: Record<string, string[]> = ${JSON.stringify(emojiPics)}
+`)
+console.log(`${Object.keys(emojiPics).length} emoji photos in public/posts`)
 // The accounts' profile pictures: the kept ones, small and square, into public/faces under the account's handle
 // (or pool-1, pool-2... for the ones the nobodies share: numbered again here, so a rejected one leaves no gap).
 const FACES_FROM = join(ROOT, 'bot-data', 'pictures', 'avatars')

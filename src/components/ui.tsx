@@ -1,4 +1,5 @@
 import clsx from 'clsx'
+import { emojiPic } from '../game/coinFace'
 import { ArrowDown, ArrowUp, X } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { isSafeImageSrc } from '../utils/image'
@@ -7,11 +8,14 @@ import { useTweenText } from '../hooks/useTween'
 import type { RiskLevel, Token } from '../types'
 import { fmtPct } from '../utils/format'
 
-export function TokenIcon({ token, size = 28, className }: { token: Pick<Token, 'emoji' | 'hue' | 'status'> & { image?: string; pic?: string }; size?: number; className?: string }) {
+export function TokenIcon({ token, size = 28, className }: { token: Pick<Token, 'emoji' | 'hue' | 'status'> & { image?: string; pic?: string; id?: string; creator?: 'you'; creatorId?: string }; size?: number; className?: string }) {
   const dead = token.status === 'rugged' || token.status === 'dead'
   const [broken, setBroken] = useState<string | null>(null)
   // (A coin launched on a post wears the post's picture: one of the game's own files, see data/sparkPics.ts.)
-  const src = isSafeImageSrc(token.image) ? token.image : token.pic && /^[a-z0-9-]+$/.test(token.pic) ? `${import.meta.env.BASE_URL}posts/${token.pic}.webp` : undefined
+  // One of the market's own coins (not a player's, which keeps what its maker chose) shows a photo of what its emoji
+  // is when the game has one: see game/coinFace.ts.
+  const pic = token.pic || (token.id && !token.creator && !token.creatorId ? emojiPic(token.emoji, token.id) : undefined)
+  const src = isSafeImageSrc(token.image) ? token.image : pic && /^[a-z0-9-]+$/.test(pic) ? `${import.meta.env.BASE_URL}posts/${pic}.webp` : undefined
   if (src && broken !== src) {
     return (
       <div className={clsx('relative shrink-0 overflow-hidden rounded-md border border-white/10 bg-raise', dead && 'grayscale opacity-60', className)} style={{ width: size, height: size }}>
