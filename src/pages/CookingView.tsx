@@ -10,12 +10,15 @@ import { useWallets } from '../hooks/useWallets'
 import { BUNDLE_WALLET_FEE, bundleDetectChance, STAGGER_FEE } from '../game/devTools'
 import { EmptyState, Segmented, TokenIcon } from '../components/ui'
 import { COOK_EMOJIS, narrativeLabel } from '../data/narratives'
-import { feedStyle, Tweet, X } from '../components/tracker/Tweet'
+import { Face, feedStyle, X } from '../components/tracker/Tweet'
+import { VerifiedMark } from '../components/SparkPanel'
+import { faceOf } from '../game/feedFlavor'
+import { DEV_EMOJI } from '../game/accounts'
 import { postLaunchFee } from '../game/sparks'
 import { COOK_FEE, cookAllowance, cookQuality, secPerTickOf, SUPPLY, vampBoost } from '../game/marketEngine'
 import { COOK_COOLDOWN_TICKS, GRAD_BONUS, selectSpeed, useGame, validateCook } from '../game/store'
-import { CREATOR_CUT, creatorRate, previewBuy, SWAP_FEE } from '../game/tradingEngine'
-import { curveAt, curveLiquidityUsd, gradMcapUsd, gradRaise, launchMcapUsd } from '../game/curve'
+import { creatorRate, previewBuy, SWAP_FEE } from '../game/tradingEngine'
+import { curveAt, curveLiquidityUsd, gradMcapUsd, launchMcapUsd } from '../game/curve'
 import { defaultPad, LAUNCHPADS, padsFor } from '../data/launchpads'
 import { PadBadge } from '../components/pad'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
@@ -77,7 +80,6 @@ export function CookingView() {
 
   const chainFilter = useGame((s) => s.chainFilter)
   const native = useGame((s) => s.market.native)
-  const balances = useGame((s) => s.portfolio.balances)
   const wallets = useWallets()
   const autoSwap = useGame((s) => s.settings.autoSwap)
   const setSwapOpen = useGame((s) => s.setSwapOpen)
@@ -175,6 +177,11 @@ export function CookingView() {
   const [showEmojis, setShowEmojis] = useState(false)
   const sideCount = (spec.sideBuys ?? []).filter((x) => x.walletId !== devAcc?.id).length
   const [advanced, setAdvanced] = useState(() => bundleOn)
+  const [walletsShown, setWalletsShown] = useState(false)
+  const [customBuy, setCustomBuy] = useState(false)
+  const devWallets = wallets.all.filter((w) => w.emoji === DEV_EMOJI)
+  // (Three sizes of own buy for this chain: the middle row of its quick amounts.)
+  const buyChips = (chainMeta.presets[1] ?? chainMeta.quick).slice(0, 3)
 
   const submit = () => {
     const id = cook(spec)
@@ -237,31 +244,42 @@ export function CookingView() {
             }}
           />
         ) : (
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_320px]">
+        <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)_300px]">
           {/* ① What to launch on: a post the timeline has not settled yet, or nothing (the player's own idea). */}
-          <section data-tut="cook-posts" className="overflow-hidden rounded-md border lg:col-span-2 xl:sticky xl:top-3 xl:col-span-1 xl:self-start" style={{ ...feedStyle, borderColor: X.line }}>
-            <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5 text-[12px] font-bold" style={{ borderColor: X.line, color: X.dim }}>
-              <span>1 · Pick what to launch on</span>
-              {openPosts.length > 0 && <span className="font-normal">a post leaves when the timeline settles</span>}
+          <section data-tut="cook-posts" className="flex max-h-[calc(100vh-190px)] min-h-[420px] flex-col overflow-hidden rounded-xl border lg:col-span-2 xl:col-span-1" style={{ ...feedStyle, borderColor: X.line }}>
+            <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5 text-[13px] font-bold" style={{ borderColor: X.line, color: X.dim }}>
+              <span>1. Pick what to launch on</span>
+              {openPosts.length > 0 && <span className="text-[12px] font-normal">posts leave this list when the timeline settles</span>}
             </div>
-            <button onClick={() => pickPost(undefined)} aria-pressed={!onPost} className={clsx('flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-white/[0.03]', !onPost && 'bg-accent/5 shadow-[inset_3px_0_0_var(--accent)]')} style={{ borderColor: X.line }}>
-              <span className="grid size-10 shrink-0 place-items-center rounded-full border border-dashed text-[20px]" style={{ borderColor: '#536471', color: X.dim }}>+</span>
+            <button onClick={() => pickPost(undefined)} aria-pressed={!onPost} className={clsx('flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-white/[0.03]', !onPost && 'bg-accent/[0.06] shadow-[inset_3px_0_0_var(--accent)]')} style={{ borderColor: X.line }}>
+              <span className="grid size-9 shrink-0 place-items-center rounded-full border border-dashed text-[18px]" style={{ borderColor: '#536471', color: X.dim }}>+</span>
               <span className="min-w-0">
-                <span className="block text-[15px] font-bold" style={{ color: X.text }}>No post: my own idea</span>
+                <span className="block text-[14px] font-bold" style={{ color: X.text }}>No post: my own idea</span>
                 <span className="block text-[13px]" style={{ color: X.dim }}>Your name, your picture. Nobody is waiting for it.</span>
               </span>
             </button>
-            <div className="max-h-[68vh] overflow-y-auto">
-              {openPosts.map((x) => (
-                <div
-                  key={x.id} role="button" tabIndex={0} aria-pressed={onPost?.id === x.id}
-                  onClick={() => pickPost(x.id)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickPost(x.id) } }}
-                  className={clsx('cursor-pointer outline-none focus-visible:bg-white/[0.04]', onPost?.id === x.id && 'bg-accent/5 shadow-[inset_3px_0_0_var(--accent)]')}
-                >
-                  <Tweet p={{ id: x.tick * 1000 + 700, tick: x.tick, time: x.time, accountId: x.by.id, by: x.by, sparkId: x.id, text: x.text, isCall: false }} quiet thread={false} />
-                </div>
-              ))}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {openPosts.map((x) => {
+                const f = x.by.followers
+                const badge = f >= 20_000_000 ? { bg: 'rgba(192,132,252,0.2)', fg: '#d8b4fe' } : f >= 500_000 ? { bg: 'rgba(255,176,32,0.18)', fg: '#ffb020' } : f >= 20_000 ? { bg: 'rgba(29,155,240,0.15)', fg: X.blue } : { bg: 'rgba(231,233,234,0.08)', fg: X.dim }
+                const on = onPost?.id === x.id
+                return (
+                  <button key={x.id} onClick={() => pickPost(x.id)} aria-pressed={on} className={clsx('flex w-full gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-white/[0.03]', on && 'bg-accent/[0.06] shadow-[inset_3px_0_0_var(--accent)]')} style={{ borderColor: X.line }}>
+                    <Face face={x.by.face ?? faceOf(x.by.handle)} emoji={x.by.avatar} size={36} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1 text-[14px] leading-5">
+                        <span className="truncate font-bold" style={{ color: X.text }}>{x.by.name}</span>
+                        {x.by.verified && <VerifiedMark size={14} />}
+                        <span className="min-w-0 shrink truncate" style={{ color: X.dim }}>@{x.by.handle} · {fmtAge(Math.max(0, now - x.time))}</span>
+                        <span className="num ml-auto shrink-0 rounded px-1.5 py-px text-[11px] font-bold" style={{ background: badge.bg, color: badge.fg }}>{fmtCompact(f, '')}</span>
+                      </span>
+                      <span className="mt-1 block whitespace-pre-line break-words text-[14px] leading-[19px]" style={{ color: X.text }}>{x.text}</span>
+                      {x.quote && <span className="mt-1.5 block rounded-lg border px-2.5 py-1.5 text-[12px]" style={{ borderColor: X.line, color: X.dim }}>Screenshot of a post by <b style={{ color: X.text }}>{x.quote.name}</b> · not posted from that account</span>}
+                      {x.pic && <img src={`${import.meta.env.BASE_URL}posts/${x.pic}.webp`} alt="The post's picture" loading="lazy" className="mt-2 block h-[120px] w-full rounded-xl border object-cover" style={{ borderColor: X.line }} />}
+                    </span>
+                  </button>
+                )
+              })}
               {openPosts.length === 0 && (
                 <p className="px-4 py-6 text-[13px] leading-5" style={{ color: X.dim }}>
                   {inWorld ? 'No post is open right now. A new one comes every few seconds.' : 'Launching on a post happens in the World, where everybody sees the same timeline. Here you can launch your own idea.'}
@@ -270,167 +288,148 @@ export function CookingView() {
             </div>
           </section>
 
-          <div className="space-y-3">
-            {/* ② Coin */}
-            <Step n={2} title="Your coin" hint={onPost ? 'You type the name. One wrong letter is a different coin' : 'Name, ticker, picture'} right={!onPost ? (
-              <button onClick={() => up(randomIdentity(spec.narrative, tokens))} className="flex items-center gap-1 rounded border border-line2 px-2 py-0.5 text-[11px] text-muted hover:border-accent/50 hover:text-accent">
-                <Dices size={12} /> Randomize
-              </button>
-            ) : undefined}>
-              {spec.vampOf && (
-                <div className={clsx('mb-3 flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-2 text-[12px]', vampLift > 0 ? 'border-accent/40 bg-accent/5' : 'border-warn/40 bg-warn/5')}>
-                  <span className="text-[16px]">🧛</span>
-                  {vampOrig ? (
-                    <>
-                      <span>
-                        Vamping <b>${vampOrig.ticker}</b> <span className="num text-dim">{fmtCompact(vampOrig.mcap)} MC · 1h <span className={toneClass(vampOrig.change['1h'] ?? 0)}>{fmtPct(vampOrig.change['1h'] ?? 0)}</span></span>
-                      </span>
-                      <span className={clsx('num text-[11px] font-semibold', vampLift > 0 ? 'text-up' : 'text-warn')}>
-                        {vampLift > 0 ? 'riding its hype' : vampOrig.status === 'dead' || vampOrig.status === 'rugged' ? `it is ${vampOrig.status}: nothing to ride` : 'not much hype to ride right now'}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-muted">The coin you were vamping is gone.</span>
-                  )}
-                  <span className="text-[10px] text-dim">Your coin will be tagged as a vamp.</span>
-                  <button onClick={() => up({ vampOf: undefined })} className="ml-auto rounded border border-line2 px-2 py-0.5 text-[11px] text-muted hover:text-ink">Stop vamping</button>
-                </div>
-              )}
-              <div className="grid gap-3 sm:grid-cols-[auto_1fr]">
-                {onPost ? (
-                  <div className="w-[132px]">
-                    {onPost.pic
-                      ? <img src={`${import.meta.env.BASE_URL}posts/${onPost.pic}.webp`} alt="The post's picture" className="aspect-square w-full rounded-lg border border-line2 object-cover" />
-                      : <div className="grid aspect-square w-full place-items-center rounded-lg border border-dashed border-line2 px-2 text-center text-[11px] text-dim">The picture every coin on this post gets</div>}
-                    <p className="mt-1.5 text-[10px] leading-snug text-dim">Devs lift the post's picture: every coin on it looks the same.</p>
-                  </div>
-                ) : (
-                  <ImagePicker image={spec.image} emoji={spec.emoji} hue={spec.hue} onChange={(image) => up({ image })} onHue={(hue) => up({ hue })} />
-                )}
-                <div className="space-y-2">
-                  <div className="grid gap-2 sm:grid-cols-[1fr_150px]">
-                    <Field label="Name">
-                      <input value={spec.name} maxLength={24} onChange={(e) => up({ name: e.target.value })} placeholder={onPost ? 'Type the name' : 'Based Pup'} className={inputCls} />
-                    </Field>
-                    <Field label="Ticker">
-                      <div className="flex items-center rounded-md border border-line2 bg-bg pl-2 focus-within:border-accent/60">
-                        <span className="text-dim">$</span>
-                        <input value={spec.ticker} maxLength={10} onChange={(e) => up({ ticker: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} placeholder={onPost ? 'TICKER' : 'PUP'} className="num h-8 w-full bg-transparent px-1 text-[13px] font-bold outline-none" />
-                      </div>
-                    </Field>
-                  </div>
-                  {onPost ? (
-                    <p className="text-[11px] leading-snug text-muted">
-                      Your coin joins the coins launched on <b className="text-ink">@{onPost.by.handle}</b>'s post. The timeline favours the coin spelled exactly as the post has it, with a clean risk tag. Other coins on the post may carry the same ticker. If the post settles before you launch, the launch is refused and costs nothing.
-                    </p>
-                  ) : (
-                    <button onClick={() => setShowEmojis((v) => !v)} aria-expanded={showEmojis} className="flex items-center gap-1.5 text-[11px] text-muted hover:text-ink">
-                      <span className="grid size-6 place-items-center rounded bg-raise text-[15px]">{spec.emoji}</span>
-                      {spec.image ? 'Fallback emoji' : 'Emoji icon'} · <span className="text-accent">{showEmojis ? 'Done' : 'Change'}</span>
-                      <ChevronDown size={12} className={clsx('transition-transform', showEmojis && 'rotate-180')} />
-                    </button>
-                  )}
-                </div>
-              </div>
-              {showEmojis && !onPost && (
-                <div className="mt-2 grid grid-cols-10 gap-1 rounded-md border border-line2 bg-bg p-1.5 sm:grid-cols-[repeat(20,minmax(0,1fr))]">
-                  {COOK_EMOJIS.map((e) => (
-                    <button key={e} onClick={() => up({ emoji: e })} className={clsx('grid aspect-square place-items-center rounded text-[16px] transition-colors', spec.emoji === e ? 'bg-accent/20 ring-1 ring-accent' : 'hover:bg-raise')} aria-label={`Icon ${e}`}>
-                      {e}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </Step>
-
-            {/* ③ Chain + launchpad */}
-            <Step n={3} title="Chain & launchpad" hint={`Earn ${creatorPct}% of volume · ${fmtUsd(GRAD_BONUS, 0)} bonus if it migrates`}>
-              <div role="radiogroup" aria-label="Chain" className="grid grid-cols-3 gap-1.5">
-                {CHAIN_IDS.map((c) => {
-                  const m = CHAINS[c]
-                  const on = spec.chain === c
-                  return (
-                    <button key={c} role="radio" aria-checked={on} onClick={() => setChain(c)} className={clsx('rounded-md border px-2.5 py-1.5 text-left transition-colors', on ? 'bg-raise' : 'border-line2 hover:bg-panel2')} style={on ? { borderColor: m.color } : undefined}>
-                      <div className="truncate text-[12px] font-bold" style={{ color: m.color }}>{m.glyph} {m.name}</div>
-                      <div className="num truncate text-[10px] text-dim">pay in {m.native} · hold {fmtNative(balances?.[c] ?? 0, c)}</div>
-                    </button>
-                  )
-                })}
-              </div>
-              <div role="radiogroup" aria-label="Launchpad" className="mt-2 overflow-hidden rounded-md border border-line2">
-                <div className="hidden grid-cols-[minmax(0,1.3fr)_1fr_1fr_0.7fr_0.8fr] gap-2 border-b border-line2 bg-bg px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wider text-dim sm:grid">
-                  <span>Launchpad</span><span className="text-right">Starts at</span><span className="text-right">Migrates at</span><span className="text-right">Fee</span><span className="text-right">You earn</span>
-                </div>
-                {padsFor(spec.chain).map((p) => {
-                  const on = spec.pad === p.id
-                  return (
-                    <button
-                      key={p.id}
-                      role="radio"
-                      aria-checked={on}
-                      onClick={() => up({ pad: p.id })}
-                      className={clsx('num grid w-full grid-cols-2 items-center gap-x-2 border-b border-line/50 px-2.5 py-1.5 text-left text-[11px] last:border-b-0 sm:grid-cols-[minmax(0,1.3fr)_1fr_1fr_0.7fr_0.8fr]', on ? 'bg-raise shadow-[inset_3px_0_0_var(--pc)]' : 'hover:bg-panel2')}
-                      style={{ ['--pc' as string]: p.color }}
-                    >
-                      <span className="flex min-w-0 items-center gap-1.5 font-sans text-[12px] font-bold" style={{ color: p.color }}><PadBadge pad={p.id} size={16} /><span className="truncate">{p.name}</span></span>
-                      <span className="text-right text-muted">{fmtCompact(launchMcapUsd(p.id, px))}</span>
-                      <span className="text-right text-muted">{fmtCompact(gradMcapUsd(p.id, px))} <span className="text-dim">→ {p.dex}</span></span>
-                      <span className="text-right text-dim">{fmtFee(p.fee)}</span>
-                      <span className="text-right text-up" title={p.pumpSwap ? `On the curve, then a dynamic creator fee after migrating (${fmtFee(0.0095 * CREATOR_CUT)}, tapering to ${fmtFee(0.0005 * CREATOR_CUT)} as the coin grows)` : undefined}>{p.tax ? 'tax' : p.pumpSwap ? `${fmtFee(p.creatorFee * CREATOR_CUT)}→${fmtFee(0.0095 * CREATOR_CUT)}` : fmtFee(p.creatorFee * CREATOR_CUT)}</span>
-                    </button>
-                  )
-                })}
-              </div>
-              <p className="mt-1.5 text-[11px] text-muted">{pad.blurb} <span className="text-dim">· {fmtNative(gradRaise(pad.id), spec.chain)} raise to migrate. Curve numbers are game approximations.</span></p>
-              {pad.tax && (
-                <div className="mt-2 grid gap-3 rounded-md border border-warn/30 bg-warn/5 p-2 sm:grid-cols-2">
-                  {(['buy', 'sell'] as const).map((side) => (
-                    <div key={side}>
-                      <div className="flex justify-between text-[11px]"><span className="text-dim">{side === 'buy' ? 'Buy tax' : 'Sell tax'}</span><span className="num font-bold text-warn">{Math.round(spec.tax[side] * 100)}%</span></div>
-                      <input type="range" min={0} max={0.1} step={0.01} value={spec.tax[side]} onChange={(e) => up({ tax: { ...spec.tax, [side]: Number(e.target.value) } })} className="w-full accent-[var(--accent)]" aria-label={`${side} tax`} />
-                    </div>
-                  ))}
-                  <p className="text-[10px] text-dim sm:col-span-2">Taxes are paid to you on every trade, but high taxes scare buyers off.</p>
-                </div>
-              )}
-            </Step>
-
-            {/* ④ Dev wallet (deployer) + side buys */}
-            <Step n={4} title="Dev wallet" hint="Which wallet deploys it (everyone can track it)">
-              <SideWalletsSection spec={spec} onChange={up} />
-            </Step>
-
-            {/* ⑤ Dev buy + advanced */}
-            <Step n={5} title="Dev buy" hint="Your own bag at launch" right={<span className="num text-[13px] font-bold" style={{ color: chainMeta.color }}>{fmtNative(spec.devBuy, spec.chain)} <span className="text-[10px] font-normal text-dim">≈{fmtUsd(devUsd, 0)}</span></span>}>
-              <div data-tut="cook-devbuy">
-                <input type="range" min={0} max={Math.max(maxDev, spec.devBuy)} step={devStep} value={spec.devBuy} onChange={(e) => up({ devBuy: Number(e.target.value) })} className="w-full accent-[var(--accent)]" aria-label={`Dev buy amount in ${chainMeta.native}`} />
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                  <span className={clsx('num font-bold', est.devPct > 15 ? 'text-down' : est.devPct > 6 ? 'text-warn' : 'text-up')} title="Estimate: the exact launch price varies a little">≈{est.devPct.toFixed(1)}% of supply</span>
-                  <span className="text-dim">
-                    You hold {fmtNative(nativeBal, spec.chain)}{devShortUsd > 0 && (autoSwap ? <span className="text-info"> · auto-swaps {fmtUsd(devShortUsd / (1 - SWAP_FEE))}</span> : <span className="text-warn"> · short</span>)}
-                  </span>
-                  <button onClick={() => setSwapOpen(true)} className="ml-auto rounded bg-raise px-1.5 py-px text-[10px] font-bold text-accent">Swap</button>
-                </div>
-              </div>
-              {est.devPct > 8 && (
-                <p className="mt-1 flex items-start gap-1 text-[10px] text-warn"><AlertTriangle size={11} className="mt-px shrink-0" />Buyers can see a big dev bag in the audit, and it scares them off. Selling it later hits the price hard.</p>
-              )}
-
-              <div className="mt-3 rounded-md border border-line2">
-                <button onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced} className="flex w-full items-center gap-2 px-2.5 py-2 text-left">
-                  <span className="text-[12px] font-bold">Advanced</span>
-                  <span className="text-[11px] text-dim">bundle wallets</span>
-                  {bundleOn && <span className="rounded bg-info/15 px-1.5 text-[10px] font-bold text-info">📦 Bundle ×{spec.bundle.wallets}</span>}
-                  <ChevronDown size={14} className={clsx('ml-auto text-dim transition-transform', advanced && 'rotate-180')} />
+          {/* ② to ④: the coin, where it launches, who launches it. One panel, as short as it can be. */}
+          <section className="space-y-3.5 rounded-xl border border-line bg-panel p-4">
+            <div className="flex items-center justify-between">
+              <Head>2. Your coin</Head>
+              {!onPost && (
+                <button onClick={() => up(randomIdentity(spec.narrative, tokens))} className="flex items-center gap-1 rounded border border-line2 px-2 py-0.5 text-[11px] text-muted hover:border-accent/50 hover:text-accent">
+                  <Dices size={12} /> Randomize
                 </button>
-                {advanced && (
-                  <div className="space-y-2 border-t border-line2 p-2">
-                    <BundlerSection spec={spec} onChange={(bundle) => up({ bundle: { ...spec.bundle, ...bundle } })} est={est} detect={detect} bundleUsd={bundleUsd} bundleFees={bundleFees} maxPerWallet={maxPerWallet} />
+              )}
+            </div>
+            {spec.vampOf && (
+              <div className={clsx('flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-2 text-[12px]', vampLift > 0 ? 'border-accent/40 bg-accent/5' : 'border-warn/40 bg-warn/5')}>
+                <span className="text-[16px]">🧛</span>
+                {vampOrig ? <span>Vamping <b>${vampOrig.ticker}</b> <span className="num text-dim">{fmtCompact(vampOrig.mcap)} MC · 1h <span className={toneClass(vampOrig.change['1h'] ?? 0)}>{fmtPct(vampOrig.change['1h'] ?? 0)}</span></span></span> : <span className="text-muted">The coin you were vamping is gone.</span>}
+                <span className="text-[10px] text-dim">Your coin will be tagged as a vamp.</span>
+                <button onClick={() => up({ vampOf: undefined })} className="ml-auto rounded border border-line2 px-2 py-0.5 text-[11px] text-muted hover:text-ink">Stop vamping</button>
+              </div>
+            )}
+            <div className="flex gap-3">
+              {onPost ? (
+                onPost.pic
+                  ? <img src={`${import.meta.env.BASE_URL}posts/${onPost.pic}.webp`} alt="The post's picture" className="size-[86px] shrink-0 rounded-lg border border-line2 object-cover" />
+                  : <div className="grid size-[86px] shrink-0 place-items-center rounded-lg border border-dashed border-line2 px-1 text-center text-[10px] leading-tight text-dim">the post's picture</div>
+              ) : (
+                <ImagePicker image={spec.image} emoji={spec.emoji} hue={spec.hue} onChange={(image) => up({ image })} onHue={(hue) => up({ hue })} />
+              )}
+              <div className="min-w-0 flex-1 space-y-2">
+                <Field label={onPost ? 'Name (you type it: one wrong letter is a different coin)' : 'Name'}>
+                  <input value={spec.name} maxLength={24} onChange={(e) => up({ name: e.target.value })} placeholder={onPost ? 'Type the name' : 'Based Pup'} className={clsx(inputCls, 'h-10 text-[15px]')} />
+                </Field>
+                <Field label="Ticker">
+                  <div className="flex items-center rounded-md border border-line2 bg-bg pl-2.5 focus-within:border-accent/60">
+                    <span className="text-dim">$</span>
+                    <input value={spec.ticker} maxLength={10} onChange={(e) => up({ ticker: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} placeholder={onPost ? 'TICKER' : 'PUP'} className="num h-10 w-full bg-transparent px-1 text-[15px] font-bold outline-none" />
                   </div>
+                </Field>
+                {!onPost && (
+                  <button onClick={() => setShowEmojis((v) => !v)} aria-expanded={showEmojis} className="flex items-center gap-1.5 text-[11px] text-muted hover:text-ink">
+                    <span className="grid size-6 place-items-center rounded bg-raise text-[15px]">{spec.emoji}</span>
+                    {spec.image ? 'Fallback emoji' : 'Emoji icon'} · <span className="text-accent">{showEmojis ? 'Done' : 'Change'}</span>
+                    <ChevronDown size={12} className={clsx('transition-transform', showEmojis && 'rotate-180')} />
+                  </button>
                 )}
               </div>
-            </Step>
-          </div>
+            </div>
+            {showEmojis && !onPost && (
+              <div className="grid grid-cols-10 gap-1 rounded-md border border-line2 bg-bg p-1.5 sm:grid-cols-[repeat(20,minmax(0,1fr))]">
+                {COOK_EMOJIS.map((e) => (
+                  <button key={e} onClick={() => up({ emoji: e })} className={clsx('grid aspect-square place-items-center rounded text-[16px] transition-colors', spec.emoji === e ? 'bg-accent/20 ring-1 ring-accent' : 'hover:bg-raise')} aria-label={`Icon ${e}`}>
+                    {e}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <Head>3. Where it launches</Head>
+            <div role="radiogroup" aria-label="Chain" className="flex flex-wrap gap-1.5">
+              {CHAIN_IDS.map((c) => {
+                const m = CHAINS[c]
+                const on = spec.chain === c
+                return <button key={c} role="radio" aria-checked={on} onClick={() => setChain(c)} className={clsx(chipCls, on ? 'bg-raise' : 'border-line2 text-muted hover:text-ink')} style={on ? { borderColor: m.color, color: m.color } : undefined}>{m.glyph} {m.name}</button>
+              })}
+            </div>
+            <div role="radiogroup" aria-label="Launchpad" className="flex flex-wrap gap-1.5">
+              {padsFor(spec.chain).map((p) => {
+                const on = spec.pad === p.id
+                return (
+                  <button key={p.id} role="radio" aria-checked={on} onClick={() => up({ pad: p.id })} className={clsx(chipCls, on ? 'bg-raise' : 'border-line2 text-muted hover:text-ink')} style={on ? { borderColor: p.color, color: p.color } : undefined}>
+                    <PadBadge pad={p.id} size={14} /> {p.name} <span className="num text-dim">· {fmtFee(p.fee)}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="num text-[11px] leading-snug text-dim">
+              Starts at {fmtCompact(launchMcapUsd(pad.id, px))}, migrates at {fmtCompact(gradMcapUsd(pad.id, px))} to {pad.dex}. You earn <span className="text-up">{pad.tax ? 'the tax you set' : `${creatorPct}% of volume`}</span>, and {fmtUsd(GRAD_BONUS, 0)} if it migrates.
+            </p>
+            {pad.tax && (
+              <div className="grid gap-3 rounded-md border border-warn/30 bg-warn/5 p-2 sm:grid-cols-2">
+                {(['buy', 'sell'] as const).map((side) => (
+                  <div key={side}>
+                    <div className="flex justify-between text-[11px]"><span className="text-dim">{side === 'buy' ? 'Buy tax' : 'Sell tax'}</span><span className="num font-bold text-warn">{Math.round(spec.tax[side] * 100)}%</span></div>
+                    <input type="range" min={0} max={0.1} step={0.01} value={spec.tax[side]} onChange={(e) => up({ tax: { ...spec.tax, [side]: Number(e.target.value) } })} className="w-full accent-[var(--accent)]" aria-label={`${side} tax`} />
+                  </div>
+                ))}
+                <p className="text-[10px] text-dim sm:col-span-2">Taxes are paid to you on every trade, but high taxes scare buyers off.</p>
+              </div>
+            )}
+
+            <Head>4. Who launches it</Head>
+            <div data-tut="cook-deploy" className="flex flex-wrap gap-1.5">
+              {devWallets.map((a) => {
+                const on = a.id === (spec.devWallet ?? devWallets[0]?.id)
+                return (
+                  <button key={a.id} onClick={() => up({ devWallet: a.id, sideBuys: (spec.sideBuys ?? []).filter((x) => x.walletId !== a.id) })} aria-pressed={on} className={clsx(chipCls, 'min-w-[150px] flex-1 justify-between', on ? 'border-accent/70 bg-accent/[0.08] text-accent' : 'border-line2 text-muted hover:text-ink')}>
+                    <span className="truncate">{a.emoji} {a.name} <span className="num text-dim">· {fmtNative(a.balances[spec.chain] ?? 0, spec.chain)}</span></span>
+                    <span className="text-[11px]">{on ? 'deploys' : 'use'}</span>
+                  </button>
+                )
+              })}
+              <button onClick={() => setWalletsShown((v) => !v)} aria-expanded={walletsShown} className={clsx(chipCls, 'justify-between border-line2 text-muted hover:text-ink')}>
+                <span>Side buys{sideCount ? ` · ${sideCount}` : ''} and wallets</span>
+                <ChevronDown size={13} className={clsx('transition-transform', walletsShown && 'rotate-180')} />
+              </button>
+            </div>
+            {/* (Kept in the page even when folded away: it makes the first dev wallet and keeps the form pointed at one.) */}
+            <div className={walletsShown ? '' : 'hidden'}><SideWalletsSection spec={spec} onChange={up} /></div>
+
+            <div data-tut="cook-devbuy">
+              <div className="mb-1 text-[12px] text-muted">Your own buy at launch <span className="text-dim">(a big bag puts snipers off)</span></div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[0, ...buyChips].map((v) => (
+                  <button key={v} onClick={() => { setCustomBuy(false); up({ devBuy: v }) }} aria-pressed={!customBuy && spec.devBuy === v} className={clsx(chipCls, !customBuy && spec.devBuy === v ? 'border-accent/70 bg-accent/[0.08] text-accent' : 'border-line2 text-muted hover:text-ink')}>
+                    {v === 0 ? 'None' : fmtNative(v, spec.chain)}
+                  </button>
+                ))}
+                <button onClick={() => setCustomBuy(true)} aria-pressed={customBuy} className={clsx(chipCls, customBuy ? 'border-accent/70 bg-accent/[0.08] text-accent' : 'border-line2 text-muted hover:text-ink')}>Custom</button>
+                {customBuy && <input type="number" min={0} max={Math.max(maxDev, spec.devBuy)} step={devStep} value={spec.devBuy} onChange={(e) => up({ devBuy: Math.max(0, Number(e.target.value) || 0) })} aria-label={`Dev buy amount in ${chainMeta.native}`} className={clsx(inputCls, 'num h-[34px] w-24')} />}
+              </div>
+              {spec.devBuy > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                  <span className={clsx('num font-bold', est.devPct > 15 ? 'text-down' : est.devPct > 6 ? 'text-warn' : 'text-up')} title="Estimate: the exact launch price varies a little">≈{est.devPct.toFixed(1)}% of supply · ≈{fmtUsd(devUsd, 0)}</span>
+                  <span className="text-dim">The dev wallet holds {fmtNative(nativeBal, spec.chain)}{devShortUsd > 0 && (autoSwap ? <span className="text-info"> · auto-swaps {fmtUsd(devShortUsd / (1 - SWAP_FEE))}</span> : <span className="text-warn"> · short</span>)}</span>
+                  <button onClick={() => setSwapOpen(true)} className="rounded bg-raise px-1.5 py-px text-[10px] font-bold text-accent">Swap</button>
+                </div>
+              )}
+              {est.devPct > 8 && <p className="mt-1 flex items-start gap-1 text-[10px] text-warn"><AlertTriangle size={11} className="mt-px shrink-0" />Buyers can see a big dev bag in the audit, and it scares them off. Selling it later hits the price hard.</p>}
+            </div>
+
+            <div className="rounded-md border border-line2">
+              <button onClick={() => setAdvanced((v) => !v)} aria-expanded={advanced} className="flex w-full items-center gap-2 px-2.5 py-2 text-left">
+                <span className="text-[12px] font-bold">Advanced</span>
+                <span className="text-[11px] text-dim">bundle wallets</span>
+                {bundleOn && <span className="rounded bg-info/15 px-1.5 text-[10px] font-bold text-info">📦 Bundle ×{spec.bundle.wallets}</span>}
+                <ChevronDown size={14} className={clsx('ml-auto text-dim transition-transform', advanced && 'rotate-180')} />
+              </button>
+              {advanced && (
+                <div className="space-y-2 border-t border-line2 p-2">
+                  <BundlerSection spec={spec} onChange={(bundle) => up({ bundle: { ...spec.bundle, ...bundle } })} est={est} detect={detect} bundleUsd={bundleUsd} bundleFees={bundleFees} maxPerWallet={maxPerWallet} />
+                </div>
+              )}
+            </div>
+          </section>
 
           {/* Summary: preview, cost, launch */}
           <aside className="overflow-hidden rounded-md border border-line bg-panel lg:sticky lg:top-3 lg:self-start">
@@ -471,21 +470,11 @@ export function CookingView() {
   )
 }
 
-function Step({ n, title, hint, right, children }: { n: number; title: string; hint?: string; right?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="rounded-md border border-line bg-panel p-3">
-      <div className="mb-2.5 flex items-center gap-2">
-        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-warn/15 text-[11px] font-bold text-warn">{n}</span>
-        <h2 className="text-[13px] font-bold">{title}</h2>
-        {hint && <span className="hidden truncate text-[11px] text-dim sm:inline">{hint}</span>}
-        <span className="ml-auto">{right}</span>
-      </div>
-      {children}
-    </section>
-  )
+function Head({ children }: { children: ReactNode }) {
+  return <div className="text-[13px] font-bold text-muted">{children}</div>
 }
 
-/** One labelled row inside a step: label on the left, control on the right (stacks on phones). */
+const chipCls = 'flex min-h-[34px] items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-semibold transition-colors'
 const inputCls = 'h-8 w-full rounded-md border border-line2 bg-bg px-2 text-[13px] outline-none placeholder:text-dim focus:border-accent/60'
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
