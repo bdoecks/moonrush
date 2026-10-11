@@ -2035,7 +2035,14 @@ export function vampBoost(orig: Token | undefined) {
   return clamp(hot, -0.05, 0.25)
 }
 
+/**
+ * What a launch with no hype settings scores (`CookSpec.plain`, the Cooking page since 2026-10-11): the same for every
+ * coin, so a coin nobody is waiting for is a long shot whoever makes it, and launching on a post is the game. Only
+ * what it copies (a vamp) and the dev's own bag still move it. Measure with scripts/cook-report.ts (`plain`).
+ */
+export const COOK_PLAIN = 0.5
 export function cookQuality(spec: CookSpec, meta: MarketState['meta'], devPct: number, orig?: Token) {
+  if (spec.plain) return clamp(COOK_PLAIN + vampBoost(orig) - Math.max(0, devPct - 3) / 50, 0, 1)
   const socials = Number(spec.socials.x) + Number(spec.socials.tg) + Number(spec.socials.web)
   return clamp(
     0.22 +

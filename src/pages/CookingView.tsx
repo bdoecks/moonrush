@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { AlertTriangle, Bot, Check, ChefHat, ChevronDown, Dices, Flame, Globe, Search, Send, Timer, AtSign } from 'lucide-react'
+import { AlertTriangle, Bot, ChefHat, ChevronDown, Dices, Flame, Search, Timer } from 'lucide-react'
 import { ChainBadge } from '../components/chain'
 import { load, save } from '../utils/storage'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -9,7 +9,8 @@ import { AirdropPanel, BundlerSection, SideWalletsSection, VolumeBotPanel } from
 import { useWallets } from '../hooks/useWallets'
 import { BUNDLE_WALLET_FEE, bundleDetectChance, STAGGER_FEE } from '../game/devTools'
 import { EmptyState, Segmented, TokenIcon } from '../components/ui'
-import { COOK_EMOJIS, NARRATIVES, narrativeLabel } from '../data/narratives'
+import { COOK_EMOJIS, narrativeLabel } from '../data/narratives'
+import { feedStyle, Tweet, X } from '../components/tracker/Tweet'
 import { postLaunchFee } from '../game/sparks'
 import { COOK_FEE, cookAllowance, cookQuality, secPerTickOf, SUPPLY, vampBoost } from '../game/marketEngine'
 import { COOK_COOLDOWN_TICKS, GRAD_BONUS, selectSpeed, useGame, validateCook } from '../game/store'
@@ -18,7 +19,7 @@ import { curveAt, curveLiquidityUsd, gradMcapUsd, gradRaise, launchMcapUsd } fro
 import { defaultPad, LAUNCHPADS, padsFor } from '../data/launchpads'
 import { PadBadge } from '../components/pad'
 import { CHAIN_IDS, CHAINS, fmtNative } from '../data/chains'
-import type { Chain, CookSpec, LaunchStyle, Narrative, Token } from '../types'
+import type { Chain, CookSpec, Narrative, Token } from '../types'
 import { fmtAge, fmtClock, fmtCompact, fmtPct, fmtUsd, toneClass } from '../utils/format'
 
 const PREFIXES = ['Baby', 'Based', 'Turbo', 'Sir', 'Mega', 'Lil', 'Super', 'Dark', 'Giga', 'Sleepy', 'Angry', 'Rich', 'Tiny', 'Cosmic']
@@ -35,12 +36,8 @@ const NOUNS: Record<Narrative, string[]> = {
 const EMOJI_FOR: Record<Narrative, string[]> = {
   dogs: ['🐶', '🦊'], cats: ['🐱', '🐼'], frogs: ['🐸', '🍄'], ai: ['🤖', '🧠'], food: ['🍕', '🌮', '🍩'], space: ['🚀', '🌙', '👽'], absurd: ['🫠', '🗿', '🤡'], retro: ['👾', '🎲'],
 }
-const STYLES: { value: LaunchStyle; label: string; hint: string }[] = [
-  { value: 'fair', label: 'Fair', hint: 'Balanced: some snipers, normal holder spread.' },
-  { value: 'hyped', label: 'Hyped', hint: 'Big splash and early momentum, but snipers and insiders pile in and dump on you.' },
-  { value: 'stealth', label: 'Stealth', hint: 'Quiet launch: almost no snipers, clean holders, slower start.' },
-]
-const MARKETING = [0, 100, 250, 500, 1000, 2500]
+// What a launch on a post costs, by the size of the account (see postLaunchFee), as the page says it.
+const POST_FEE_TEXT = [[1_000, 'small'], [100_000, 'mid-size'], [1_000_000, 'big'], [50_000_000, 'huge']].map(([f, w]) => `$${postLaunchFee(f as number)} ${w}`).join(', ')
 const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)]
 
 function randomIdentity(n: Narrative, tokens: Token[] = []) {
@@ -87,9 +84,12 @@ export function CookingView() {
   const [spec, setSpec] = useState<CookSpec>(() => {
     const n = meta ?? 'dogs'
     const chain: Chain = chainFilter === 'all' ? 'sol' : chainFilter
-    return { ...randomIdentity(n, tokens), chain, description: '', narrative: n, socials: { x: true, tg: false, web: false }, style: 'fair', marketing: 250, devBuy: CHAINS[chain].quick[1], pad: defaultPad(chain), tax: { buy: 0.03, sell: 0.03 }, bundle: { wallets: 0, perWallet: CHAINS[chain].quick[0], stagger: false } }
+    return { ...randomIdentity(n, tokens), chain, description: '', narrative: n, socials: { x: false, tg: false, web: false }, style: 'fair', marketing: 0, plain: true, devBuy: 0, pad: defaultPad(chain), tax: { buy: 0.03, sell: 0.03 }, bundle: { wallets: 0, perWallet: CHAINS[chain].quick[0], stagger: false } }
   })
   const up = (patch: Partial<CookSpec>) => setSpec((s) => ({ ...s, ...patch }))
+  // Picking a post empties the name and ticker: typing them is the player's part (the owner's call: nothing fills them
+  // in). Going back to "no post" suggests a name again if there is none.
+  const pickPost = (id?: string) => setSpec((s) => (id === s.onPost ? s : id ? { ...s, onPost: id, name: '', ticker: '', image: undefined, vampOf: undefined } : { ...s, onPost: undefined, ...(s.name ? {} : randomIdentity(s.narrative, tokens)) }))
   // Launching on a post (the story market, in the World): the posts the timeline has not settled yet, newest first.
   // (Not a tool's post: those coins need a site.) A post that settles while the form is open is let go of.
   const inWorld = useGame((s) => !!s.online?.round.world)
@@ -158,14 +158,14 @@ export function CookingView() {
   const maxPerWallet = Math.max(0, Math.min(500 / px, (spendable - spec.devBuy) / Math.max(1, spec.bundle.wallets || 1)))
 
   const preview: Token = useMemo(() => ({
-    id: 'preview', chain: spec.chain, pad: spec.pad, tax, image: spec.image, name: spec.name || 'Your Token', ticker: spec.ticker || 'TICKER', emoji: spec.emoji, hue: spec.hue, createdAt: now, price: est.mcap / SUPPLY, supply: SUPPLY,
+    id: 'preview', chain: spec.chain, pad: spec.pad, tax, image: onPost ? undefined : spec.image, pic: onPost?.pic, name: spec.name || 'Your Token', ticker: spec.ticker || 'TICKER', emoji: spec.emoji, hue: spec.hue, createdAt: now, price: est.mcap / SUPPLY, supply: SUPPLY,
     mcap: est.mcap, ath: est.mcap, liquidity: curveLiquidityUsd(spec.pad, est.mcap / SUPPLY / px, px), volume: devUsd + bundleUsd, buys: (spec.devBuy > 0 ? 1 : 0) + spec.bundle.wallets, sells: 0, holders: (spec.devBuy > 0 ? 1 : 0) + spec.bundle.wallets,
     momentum: 0, momentumScore: 50, hype: 20 + quality * 70, volatility: 0.015, top10Pct: spec.style === 'stealth' ? 15 : spec.style === 'hyped' ? 35 : 22,
     devPct: est.devPct, bundlePct: est.bundlePct || undefined, snipers: spec.style === 'hyped' ? 14 : spec.style === 'stealth' ? 1 : 5, insidersPct: spec.style === 'hyped' ? 10 : 2, rugProb: 0,
     riskScore: 0, riskLevel: est.devPct > 15 ? 'HIGH' : est.devPct > 6 ? 'MEDIUM' : 'LOW', status: 'bonding', bondingProgress: curveAt(spec.pad, est.mcap / SUPPLY / px).progress,
     change: { '1m': 0, '5m': 0, '1h': 0, '24h': 0 }, tape: [], creator: 'you',
     sim: { archetype: 'runner', regime: 'sideways', regimeTicks: 0, drift: 0, volMult: 1, anchor: 0, meanRev: 0, beta: 0, pressure: 0, volBoost: 0, rugAt: null, baseTurnover: 0 },
-  }), [spec, est, now, quality, devUsd, bundleUsd, px, tax])
+  }), [spec, est, now, quality, devUsd, bundleUsd, px, tax, onPost])
 
   const [tab, setTab0] = useState<CookTab>(() => load<CookTab>('cookTab') ?? 'create')
   const setTab = (t: CookTab) => {
@@ -180,16 +180,14 @@ export function CookingView() {
     const id = cook(spec)
     if (id) {
       const n = spec.narrative
-      setSpec((s) => ({ ...s, ...randomIdentity(n, tokens), description: '', image: undefined, vampOf: undefined }))
+      setSpec((s) => ({ ...s, ...randomIdentity(n, tokens), description: '', image: undefined, vampOf: undefined, onPost: undefined }))
       setTab('launches') // see it go live
     }
   }
 
   const metaInfo = narrativeLabel(meta)
-  const vibe = quality < 0.3 ? { label: 'Mid', icon: '😐', cls: 'text-muted' } : quality < 0.5 ? { label: 'Decent', icon: '🙂', cls: 'text-info' } : quality < 0.7 ? { label: 'Cooking', icon: '🔥', cls: 'text-warn' } : { label: 'Absolute banger', icon: '🚀', cls: 'text-up' }
   const totalEarned = launches.reduce((a, r) => a + r.fees, 0)
 
-  const socialsOn = Object.values(spec.socials).filter(Boolean).length
   const creatorPct = (creatorRate({ pad: spec.pad, tax }) * 100).toFixed(1)
   const fmtFee = (f: number) => `${(f * 100).toFixed(2).replace(/\.?0+$/, '')}%`
 
@@ -203,7 +201,7 @@ export function CookingView() {
             <h1 className="font-display text-[17px] font-bold">Cooking</h1>
           </div>
           <div role="tablist" className="flex gap-1 rounded-md border border-line2 bg-bg p-0.5">
-            {([['create', 'Create coin'], ['vamp', '🧛 Vamp coin'], ['launches', `My launches${launches.length ? ` · ${launches.length}` : ''}`]] as const).map(([k, label]) => (
+            {([['create', 'Launch a coin'], ['vamp', '🧛 Vamp coin'], ['launches', `My launches${launches.length ? ` · ${launches.length}` : ''}`]] as const).map(([k, label]) => (
               <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={clsx('rounded px-3 py-1 text-[12px] font-bold transition-colors', tab === k ? 'bg-raise text-ink' : 'text-dim hover:text-muted')}>
                 {label}
               </button>
@@ -239,26 +237,46 @@ export function CookingView() {
             }}
           />
         ) : (
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_320px]">
+          {/* ① What to launch on: a post the timeline has not settled yet, or nothing (the player's own idea). */}
+          <section data-tut="cook-posts" className="overflow-hidden rounded-md border lg:col-span-2 xl:sticky xl:top-3 xl:col-span-1 xl:self-start" style={{ ...feedStyle, borderColor: X.line }}>
+            <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5 text-[12px] font-bold" style={{ borderColor: X.line, color: X.dim }}>
+              <span>1 · Pick what to launch on</span>
+              {openPosts.length > 0 && <span className="font-normal">a post leaves when the timeline settles</span>}
+            </div>
+            <button onClick={() => pickPost(undefined)} aria-pressed={!onPost} className={clsx('flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-white/[0.03]', !onPost && 'bg-accent/5 shadow-[inset_3px_0_0_var(--accent)]')} style={{ borderColor: X.line }}>
+              <span className="grid size-10 shrink-0 place-items-center rounded-full border border-dashed text-[20px]" style={{ borderColor: '#536471', color: X.dim }}>+</span>
+              <span className="min-w-0">
+                <span className="block text-[15px] font-bold" style={{ color: X.text }}>No post: my own idea</span>
+                <span className="block text-[13px]" style={{ color: X.dim }}>Your name, your picture. Nobody is waiting for it.</span>
+              </span>
+            </button>
+            <div className="max-h-[68vh] overflow-y-auto">
+              {openPosts.map((x) => (
+                <div
+                  key={x.id} role="button" tabIndex={0} aria-pressed={onPost?.id === x.id}
+                  onClick={() => pickPost(x.id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickPost(x.id) } }}
+                  className={clsx('cursor-pointer outline-none focus-visible:bg-white/[0.04]', onPost?.id === x.id && 'bg-accent/5 shadow-[inset_3px_0_0_var(--accent)]')}
+                >
+                  <Tweet p={{ id: x.tick * 1000 + 700, tick: x.tick, time: x.time, accountId: x.by.id, by: x.by, sparkId: x.id, text: x.text, isCall: false }} quiet thread={false} />
+                </div>
+              ))}
+              {openPosts.length === 0 && (
+                <p className="px-4 py-6 text-[13px] leading-5" style={{ color: X.dim }}>
+                  {inWorld ? 'No post is open right now. A new one comes every few seconds.' : 'Launching on a post happens in the World, where everybody sees the same timeline. Here you can launch your own idea.'}
+                </p>
+              )}
+            </div>
+          </section>
+
           <div className="space-y-3">
-            {/* ① Coin */}
-            <Step n={1} title="Your coin" hint="Name, ticker, picture" right={
+            {/* ② Coin */}
+            <Step n={2} title="Your coin" hint={onPost ? 'You type the name. One wrong letter is a different coin' : 'Name, ticker, picture'} right={!onPost ? (
               <button onClick={() => up(randomIdentity(spec.narrative, tokens))} className="flex items-center gap-1 rounded border border-line2 px-2 py-0.5 text-[11px] text-muted hover:border-accent/50 hover:text-accent">
                 <Dices size={12} /> Randomize
               </button>
-            }>
-              {openPosts.length > 0 && (
-                <div className="mb-3 rounded-md border border-info/40 bg-info/5 px-2.5 py-2 text-[12px]">
-                  <label className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-ink">Launch on a post</span>
-                    <select value={spec.onPost ?? ''} onChange={(e) => up({ onPost: e.target.value || undefined })} className="min-w-0 flex-1 rounded border border-line2 bg-bg px-1.5 py-1 text-[12px] text-ink">
-                      <option value="">No post: a coin of my own</option>
-                      {openPosts.map((x) => <option key={x.id} value={x.id}>@{x.by.handle} ({fmtCompact(x.by.followers, '')}): {x.text.slice(0, 60)}</option>)}
-                    </select>
-                  </label>
-                  {onPost && <p className="mt-1.5 text-muted"><b className="text-ink">@{onPost.by.handle}:</b> {onPost.text}<br /><span className="text-dim">Your coin joins the coins launched on this post. Type the name and ticker yourself: the timeline favours the coin spelled exactly as the post has it, with a clean risk tag. Other coins on the post may carry the same ticker. The launch fee on this post is <b className="text-ink">{fmtUsd(postLaunchFee(onPost.by.followers), 0)}</b>: the bigger the account, the more it costs. If the post is settled before you launch, the launch is refused and costs nothing.</span></p>}
-                </div>
-              )}
+            ) : undefined}>
               {spec.vampOf && (
                 <div className={clsx('mb-3 flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-2 text-[12px]', vampLift > 0 ? 'border-accent/40 bg-accent/5' : 'border-warn/40 bg-warn/5')}>
                   <span className="text-[16px]">🧛</span>
@@ -268,7 +286,7 @@ export function CookingView() {
                         Vamping <b>${vampOrig.ticker}</b> <span className="num text-dim">{fmtCompact(vampOrig.mcap)} MC · 1h <span className={toneClass(vampOrig.change['1h'] ?? 0)}>{fmtPct(vampOrig.change['1h'] ?? 0)}</span></span>
                       </span>
                       <span className={clsx('num text-[11px] font-semibold', vampLift > 0 ? 'text-up' : 'text-warn')}>
-                        {vampLift > 0 ? `riding its hype: +${Math.round(vampLift * 100)} vibe` : vampOrig.status === 'dead' || vampOrig.status === 'rugged' ? `it's ${vampOrig.status}: ${Math.round(vampLift * 100)} vibe` : 'not much hype to ride right now'}
+                        {vampLift > 0 ? 'riding its hype' : vampOrig.status === 'dead' || vampOrig.status === 'rugged' ? `it is ${vampOrig.status}: nothing to ride` : 'not much hype to ride right now'}
                       </span>
                     </>
                   ) : (
@@ -279,30 +297,42 @@ export function CookingView() {
                 </div>
               )}
               <div className="grid gap-3 sm:grid-cols-[auto_1fr]">
-                <ImagePicker image={spec.image} emoji={spec.emoji} hue={spec.hue} onChange={(image) => up({ image })} onHue={(hue) => up({ hue })} />
+                {onPost ? (
+                  <div className="w-[132px]">
+                    {onPost.pic
+                      ? <img src={`${import.meta.env.BASE_URL}posts/${onPost.pic}.webp`} alt="The post's picture" className="aspect-square w-full rounded-lg border border-line2 object-cover" />
+                      : <div className="grid aspect-square w-full place-items-center rounded-lg border border-dashed border-line2 px-2 text-center text-[11px] text-dim">The picture every coin on this post gets</div>}
+                    <p className="mt-1.5 text-[10px] leading-snug text-dim">Devs lift the post's picture: every coin on it looks the same.</p>
+                  </div>
+                ) : (
+                  <ImagePicker image={spec.image} emoji={spec.emoji} hue={spec.hue} onChange={(image) => up({ image })} onHue={(hue) => up({ hue })} />
+                )}
                 <div className="space-y-2">
                   <div className="grid gap-2 sm:grid-cols-[1fr_150px]">
                     <Field label="Name">
-                      <input value={spec.name} maxLength={24} onChange={(e) => up({ name: e.target.value })} placeholder="Based Pup" className={inputCls} />
+                      <input value={spec.name} maxLength={24} onChange={(e) => up({ name: e.target.value })} placeholder={onPost ? 'Type the name' : 'Based Pup'} className={inputCls} />
                     </Field>
                     <Field label="Ticker">
                       <div className="flex items-center rounded-md border border-line2 bg-bg pl-2 focus-within:border-accent/60">
                         <span className="text-dim">$</span>
-                        <input value={spec.ticker} maxLength={10} onChange={(e) => up({ ticker: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} placeholder="PUP" className="num h-8 w-full bg-transparent px-1 text-[13px] font-bold outline-none" />
+                        <input value={spec.ticker} maxLength={10} onChange={(e) => up({ ticker: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} placeholder={onPost ? 'TICKER' : 'PUP'} className="num h-8 w-full bg-transparent px-1 text-[13px] font-bold outline-none" />
                       </div>
                     </Field>
                   </div>
-                  <Field label={`Description · optional (${spec.description.length}/140)`}>
-                    <textarea value={spec.description} maxLength={140} rows={2} onChange={(e) => up({ description: e.target.value })} placeholder="The only pup that understands the chart. A good story adds a little trust." className={clsx(inputCls, 'h-auto resize-none py-1.5')} />
-                  </Field>
-                  <button onClick={() => setShowEmojis((v) => !v)} aria-expanded={showEmojis} className="flex items-center gap-1.5 text-[11px] text-muted hover:text-ink">
-                    <span className="grid size-6 place-items-center rounded bg-raise text-[15px]">{spec.emoji}</span>
-                    {spec.image ? 'Fallback emoji' : 'Emoji icon'} · <span className="text-accent">{showEmojis ? 'Done' : 'Change'}</span>
-                    <ChevronDown size={12} className={clsx('transition-transform', showEmojis && 'rotate-180')} />
-                  </button>
+                  {onPost ? (
+                    <p className="text-[11px] leading-snug text-muted">
+                      Your coin joins the coins launched on <b className="text-ink">@{onPost.by.handle}</b>'s post. The timeline favours the coin spelled exactly as the post has it, with a clean risk tag. Other coins on the post may carry the same ticker. If the post settles before you launch, the launch is refused and costs nothing.
+                    </p>
+                  ) : (
+                    <button onClick={() => setShowEmojis((v) => !v)} aria-expanded={showEmojis} className="flex items-center gap-1.5 text-[11px] text-muted hover:text-ink">
+                      <span className="grid size-6 place-items-center rounded bg-raise text-[15px]">{spec.emoji}</span>
+                      {spec.image ? 'Fallback emoji' : 'Emoji icon'} · <span className="text-accent">{showEmojis ? 'Done' : 'Change'}</span>
+                      <ChevronDown size={12} className={clsx('transition-transform', showEmojis && 'rotate-180')} />
+                    </button>
+                  )}
                 </div>
               </div>
-              {showEmojis && (
+              {showEmojis && !onPost && (
                 <div className="mt-2 grid grid-cols-10 gap-1 rounded-md border border-line2 bg-bg p-1.5 sm:grid-cols-[repeat(20,minmax(0,1fr))]">
                   {COOK_EMOJIS.map((e) => (
                     <button key={e} onClick={() => up({ emoji: e })} className={clsx('grid aspect-square place-items-center rounded text-[16px] transition-colors', spec.emoji === e ? 'bg-accent/20 ring-1 ring-accent' : 'hover:bg-raise')} aria-label={`Icon ${e}`}>
@@ -313,8 +343,8 @@ export function CookingView() {
               )}
             </Step>
 
-            {/* ② Chain + launchpad */}
-            <Step n={2} title="Chain & launchpad" hint={`Earn ${creatorPct}% of volume · ${fmtUsd(GRAD_BONUS, 0)} bonus if it migrates`}>
+            {/* ③ Chain + launchpad */}
+            <Step n={3} title="Chain & launchpad" hint={`Earn ${creatorPct}% of volume · ${fmtUsd(GRAD_BONUS, 0)} bonus if it migrates`}>
               <div role="radiogroup" aria-label="Chain" className="grid grid-cols-3 gap-1.5">
                 {CHAIN_IDS.map((c) => {
                   const m = CHAINS[c]
@@ -360,47 +390,9 @@ export function CookingView() {
                       <input type="range" min={0} max={0.1} step={0.01} value={spec.tax[side]} onChange={(e) => up({ tax: { ...spec.tax, [side]: Number(e.target.value) } })} className="w-full accent-[var(--accent)]" aria-label={`${side} tax`} />
                     </div>
                   ))}
-                  <p className="text-[10px] text-dim sm:col-span-2">Taxes are paid to you on every trade, but high taxes scare buyers off and hurt the vibe.</p>
+                  <p className="text-[10px] text-dim sm:col-span-2">Taxes are paid to you on every trade, but high taxes scare buyers off.</p>
                 </div>
               )}
-            </Step>
-
-            {/* ③ Hype */}
-            <Step n={3} title="Hype" hint="What makes buyers show up">
-              <Row label="Narrative">
-                <div className="flex flex-wrap gap-1">
-                  {NARRATIVES.map((n) => (
-                    <button key={n.id} onClick={() => up({ narrative: n.id })} className={clsx('flex items-center gap-1 rounded-md border px-2 py-0.5 text-[12px] font-semibold transition-colors', spec.narrative === n.id ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')}>
-                      {n.icon} {n.label}
-                      {n.id === meta && <span className="rounded bg-warn/20 px-1 text-[9px] text-warn">🔥 META</span>}
-                    </button>
-                  ))}
-                </div>
-              </Row>
-              <Row label="Launch style" hint={STYLES.find((s) => s.value === spec.style)!.hint}>
-                <Segmented value={spec.style} onChange={(v) => up({ style: v })} options={STYLES.map((s) => ({ value: s.value, label: s.label }))} />
-              </Row>
-              <Row label="Socials" hint="Each adds hype and trust. Fictional, nothing gets posted.">
-                <div className="flex flex-wrap gap-1">
-                  {([['x', 'X', <AtSign size={12} key="x" />], ['tg', 'Telegram', <Send size={12} key="tg" />], ['web', 'Website', <Globe size={12} key="w" />]] as const).map(([k, label, icon]) => {
-                    const on = spec.socials[k]
-                    return (
-                      <button key={k} aria-pressed={on} onClick={() => up({ socials: { ...spec.socials, [k]: !on } })} className={clsx('flex items-center gap-1 rounded-md border px-2 py-0.5 text-[12px] font-semibold transition-colors', on ? 'border-up/50 bg-up/10 text-up' : 'border-line2 text-dim hover:text-ink')}>
-                        {icon}{label}{on && <Check size={11} />}
-                      </button>
-                    )
-                  })}
-                </div>
-              </Row>
-              <Row label="Marketing" hint="Spent on fictional shills: early buy pressure, diminishing returns.">
-                <div className="flex flex-wrap gap-1">
-                  {MARKETING.map((m) => (
-                    <button key={m} onClick={() => up({ marketing: m })} className={clsx('num min-w-[44px] rounded-md border px-1.5 py-0.5 text-[11px] font-semibold', spec.marketing === m ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')}>
-                      {m === 0 ? 'None' : `$${m >= 1000 ? `${m / 1000}K` : m}`}
-                    </button>
-                  ))}
-                </div>
-              </Row>
             </Step>
 
             {/* ④ Dev wallet (deployer) + side buys */}
@@ -410,13 +402,15 @@ export function CookingView() {
 
             {/* ⑤ Dev buy + advanced */}
             <Step n={5} title="Dev buy" hint="Your own bag at launch" right={<span className="num text-[13px] font-bold" style={{ color: chainMeta.color }}>{fmtNative(spec.devBuy, spec.chain)} <span className="text-[10px] font-normal text-dim">≈{fmtUsd(devUsd, 0)}</span></span>}>
-              <input type="range" min={0} max={Math.max(maxDev, spec.devBuy)} step={devStep} value={spec.devBuy} onChange={(e) => up({ devBuy: Number(e.target.value) })} className="w-full accent-[var(--accent)]" aria-label={`Dev buy amount in ${chainMeta.native}`} />
-              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                <span className={clsx('num font-bold', est.devPct > 15 ? 'text-down' : est.devPct > 6 ? 'text-warn' : 'text-up')} title="Estimate: the exact launch price varies a little">≈{est.devPct.toFixed(1)}% of supply</span>
-                <span className="text-dim">
-                  You hold {fmtNative(nativeBal, spec.chain)}{devShortUsd > 0 && (autoSwap ? <span className="text-info"> · auto-swaps {fmtUsd(devShortUsd / (1 - SWAP_FEE))}</span> : <span className="text-warn"> · short</span>)}
-                </span>
-                <button onClick={() => setSwapOpen(true)} className="ml-auto rounded bg-raise px-1.5 py-px text-[10px] font-bold text-accent">Swap</button>
+              <div data-tut="cook-devbuy">
+                <input type="range" min={0} max={Math.max(maxDev, spec.devBuy)} step={devStep} value={spec.devBuy} onChange={(e) => up({ devBuy: Number(e.target.value) })} className="w-full accent-[var(--accent)]" aria-label={`Dev buy amount in ${chainMeta.native}`} />
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                  <span className={clsx('num font-bold', est.devPct > 15 ? 'text-down' : est.devPct > 6 ? 'text-warn' : 'text-up')} title="Estimate: the exact launch price varies a little">≈{est.devPct.toFixed(1)}% of supply</span>
+                  <span className="text-dim">
+                    You hold {fmtNative(nativeBal, spec.chain)}{devShortUsd > 0 && (autoSwap ? <span className="text-info"> · auto-swaps {fmtUsd(devShortUsd / (1 - SWAP_FEE))}</span> : <span className="text-warn"> · short</span>)}
+                  </span>
+                  <button onClick={() => setSwapOpen(true)} className="ml-auto rounded bg-raise px-1.5 py-px text-[10px] font-bold text-accent">Swap</button>
+                </div>
               </div>
               {est.devPct > 8 && (
                 <p className="mt-1 flex items-start gap-1 text-[10px] text-warn"><AlertTriangle size={11} className="mt-px shrink-0" />Buyers can see a big dev bag in the audit, and it scares them off. Selling it later hits the price hard.</p>
@@ -438,31 +432,13 @@ export function CookingView() {
             </Step>
           </div>
 
-          {/* Summary: preview, vibe, cost, cook */}
+          {/* Summary: preview, cost, launch */}
           <aside className="overflow-hidden rounded-md border border-line bg-panel lg:sticky lg:top-3 lg:self-start">
             <div className="border-b border-line px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-muted">Preview · how it shows in New Pairs</div>
             <Card t={preview} now={now} preview />
 
-            <div data-tut="cook-vibe" className="border-t border-line p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted">Vibe check</span>
-                <span className={clsx('text-[13px] font-bold', vibe.cls)}>{vibe.icon} {vibe.label}</span>
-              </div>
-              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-line2">
-                <div className="h-full bg-gradient-to-r from-down via-warn to-up transition-all duration-300" style={{ width: `${quality * 100}%` }} />
-              </div>
-              <ul className="mt-2 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px]">
-                <Factor ok={spec.narrative === meta}>{spec.narrative === meta ? 'On meta' : 'Off meta'}</Factor>
-                <Factor ok={socialsOn >= 2}>{socialsOn}/3 socials</Factor>
-                <Factor ok={spec.marketing >= 250}>{spec.marketing ? `${fmtUsd(spec.marketing, 0)} marketing` : 'No marketing'}</Factor>
-                <Factor ok={est.devPct <= 6}>Dev bag {est.devPct.toFixed(1)}%</Factor>
-                {bundleOn && <Factor ok={detect < 0.3}>Bundle {Math.round(detect * 100)}% spot risk</Factor>}
-                {spec.vampOf && <Factor ok={vampLift > 0}>{vampLift > 0 ? `Vamp riding $${vampOrig?.ticker}` : 'Vamp of a cold coin'}</Factor>}
-              </ul>
-            </div>
-
             <div className="border-t border-line p-3 text-[12px]">
-              <Line label={onPost ? 'Launch fee (on a post) + marketing' : 'Launch fee + marketing'}>{fmtUsd(launchFee + spec.marketing, 0)}</Line>
+              <Line label={onPost ? `Launch fee (${onPost.by.followers >= 20_000_000 ? 'huge' : onPost.by.followers >= 500_000 ? 'big' : onPost.by.followers >= 20_000 ? 'mid-size' : 'small'} account)` : 'Launch fee'}>{fmtUsd(launchFee, 0)}</Line>
               <Line label={`Dev buy · ${est.devPct.toFixed(1)}%`}>{fmtNative(spec.devBuy, spec.chain)} <span className="text-dim">≈{fmtUsd(devUsd, 0)}</span></Line>
               {bundleOn && <Line label={`Bundle ×${spec.bundle.wallets} · ${est.bundlePct.toFixed(1)}%`}>{fmtNative(bundleNative, spec.chain)} <span className="text-dim">+{fmtUsd(bundleFees, 0)} fees</span></Line>}
               {sideNative > 0 && <Line label={`Side buys · ${sideCount} wallet${sideCount > 1 ? 's' : ''}${spec.sideDelay ? ' (over 1 min)' : ''}`}>{fmtNative(sideNative, spec.chain)} <span className="text-dim">≈{fmtUsd(sideNative * px, 0)}</span></Line>}
@@ -472,19 +448,20 @@ export function CookingView() {
                 <span>After: {fmtUsd(cash - cost, 0)} USD</span>
                 <span>{fmtNative(Math.max(0, nativeBal - spec.devBuy - bundleNative), spec.chain)} in dev wallet</span>
               </div>
+              <p className="mt-2 text-[10px] leading-snug text-dim">A launch on a post costs more the bigger the account: {POST_FEE_TEXT}. With no post it is {fmtUsd(COOK_FEE, 0)}.</p>
               {running ? (
                 <button
                   data-tut="cook-button"
                   disabled={!!blocker}
                   onClick={submit}
-                  className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-md bg-warn text-[14px] font-extrabold text-black transition-all hover:brightness-110 hover:shadow-[0_0_24px_-6px_#ffb020] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-warn px-2 py-2 text-center text-[14px] font-extrabold text-black transition-all hover:brightness-110 hover:shadow-[0_0_24px_-6px_#ffb020] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  🍳 {blocker ?? `COOK $${spec.ticker}`}
+                  🍳 {blocker ?? (onPost ? `LAUNCH $${spec.ticker} ON THIS POST` : `COOK $${spec.ticker}`)}
                 </button>
               ) : (
                 <button onClick={() => setModal('mode')} className="mt-3 h-11 w-full rounded-md border border-accent/40 bg-accent/10 text-[13px] font-bold text-accent hover:bg-accent/20">Start a round to cook</button>
               )}
-              <p className="mt-2 text-center text-[10px] text-dim">Luck still matters: a banger can flop and a mid launch can moon.</p>
+              <p className="mt-2 text-center text-[10px] text-dim">{onPost ? 'Most launches lose their fee. It is a bet that the timeline picks your coin.' : 'Nobody is waiting for a coin with no post: it is a long shot.'}</p>
             </div>
           </aside>
         </div>
@@ -509,18 +486,6 @@ function Step({ n, title, hint, right, children }: { n: number; title: string; h
 }
 
 /** One labelled row inside a step: label on the left, control on the right (stacks on phones). */
-function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className="grid gap-1 border-t border-line/60 py-2 first:border-t-0 first:pt-0 last:pb-0 sm:grid-cols-[120px_minmax(0,1fr)] sm:gap-3">
-      <div className="pt-0.5 text-[12px] font-semibold text-muted">{label}</div>
-      <div>
-        {children}
-        {hint && <p className="mt-1 text-[10px] text-dim">{hint}</p>}
-      </div>
-    </div>
-  )
-}
-
 const inputCls = 'h-8 w-full rounded-md border border-line2 bg-bg px-2 text-[13px] outline-none placeholder:text-dim focus:border-accent/60'
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -547,10 +512,6 @@ function Line({ label, children }: { label: ReactNode; children: ReactNode }) {
     </div>
   )
 }
-function Factor({ ok, children }: { ok: boolean; children: ReactNode }) {
-  return <li className={clsx('flex items-center gap-1.5', ok ? 'text-up' : 'text-muted')}>{ok ? '✓' : '·'} {children}</li>
-}
-
 // ─── Vamp coin: clone a live coin to ride its hype ───────────────────────────
 type CookTab = 'create' | 'vamp' | 'launches'
 type VampStyle = 'exact' | 'baby' | 'two' | 'inu'
@@ -643,7 +604,7 @@ function VampPicker({ tokens, now, onVamp }: { tokens: Token[]; now: number; onV
                   </div>
                 </div>
                 <span className={clsx('num w-20 text-right text-[11px] font-semibold', lift >= 0.1 ? 'text-up' : lift > 0.03 ? 'text-warn' : 'text-dim')} title="How much hype your launch borrows">
-                  {lift >= 0.1 ? '🔥 ' : ''}+{Math.round(Math.max(0, lift) * 100)} vibe
+                  {lift >= 0.1 ? '🔥 ' : ''}+{Math.round(Math.max(0, lift) * 100)} hype
                 </span>
                 <button onClick={() => onVamp(t, style)} className="flex items-center gap-1 rounded-md bg-accent/15 px-2.5 py-1 text-[12px] font-bold text-accent hover:bg-accent/25" title={`Fill the launch form as ${next.name} ($${next.ticker})`}>
                   Vamp → ${next.ticker}
@@ -653,7 +614,7 @@ function VampPicker({ tokens, now, onVamp }: { tokens: Token[]; now: number; onV
           })}
         </div>
       )}
-      <p className="px-3 py-2 text-[10px] text-dim">Vamping copies the name, ticker (or a spin-off), picture, story, socials and launchpad. You still set the dev buy, marketing and style, and can tweak anything before cooking.</p>
+      <p className="px-3 py-2 text-[10px] text-dim">Vamping copies the name, ticker (or a spin-off), picture and launchpad. You still set the dev buy and can change anything before launching.</p>
     </div>
   )
 }
@@ -677,7 +638,7 @@ function MyLaunches({ onCreate }: { onCreate: () => void }) {
     <div className="rounded-md border border-line bg-panel">
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
         <div className="text-[12px] font-bold">Your launches</div>
-        <div className="text-[10px] text-dim">Net = creator earnings + bag + sells − fees, marketing, buys and bot costs</div>
+        <div className="text-[10px] text-dim">Net = creator earnings + bag + sells − fees, buys and bot costs</div>
         <button disabled={!(unclaimedUsd > 0.001)} onClick={() => claim()} title="Creator fees wait in the vault until you claim them (anything left is paid out when the round ends)" className="ml-auto flex items-center gap-1 rounded-md bg-up px-2.5 py-1 text-[11px] font-extrabold text-black hover:brightness-110 disabled:opacity-40">
           💰 Claim all creator fees · {fmtUsd(unclaimedUsd, unclaimedUsd < 10 ? 2 : 0)}
         </button>

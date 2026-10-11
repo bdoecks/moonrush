@@ -579,6 +579,7 @@ export interface TrenchDisplay {
 }
 
 export interface CookSpec {
+  plain?: boolean // the launch has no hype settings (the Cooking page since 2026-10-11): its pull on the crowd is the same for every coin
   chain: Chain
   pad: PadId
   tax: Tax // only used on tax pads

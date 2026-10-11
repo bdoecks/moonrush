@@ -3,7 +3,7 @@
 // cooking, airdrops, bots, creator fees and cashback all run here (the game just shows the result instantly).
 import type { WebSocket } from 'ws'
 import { createHash } from 'node:crypto'
-import { blockUsd, demoAnswer, postLaunchFee, SPARK, watchOf } from '../src/game/sparks'
+import { blockUsd, coinPic, demoAnswer, postLaunchFee, SPARK, watchOf } from '../src/game/sparks'
 import { adminMarket, type AdminMarketAction, rebuildCandlesFor, shortTfsFrom1m, createMarket, candleStore, COOK_COOLDOWN_TICKS, COOK_FEE, cookAllowance, cookToken, GRAD_BONUS, launchBlock, secPerTickOf, setCandleLog, setClock, SUPPLY, tickMarket, walletName, type CandlePoint } from '../src/game/marketEngine'
 import { BOT_BUST_USD, BOT_BY_ID, BOT_RESTART_USD, BOT_ROSTER, chatLine, freshBrain, inVoice, mirrorWallet, pickCoin, STYLE, type BotBrain, type BotSpec } from './bots'
 import { tickStories } from '../src/game/storyEngine'
@@ -929,7 +929,8 @@ export class Room {
     const b = money.bundle && money.bundle.wallets > 0 ? { wallets: Math.min(50, Math.round(money.bundle.wallets)), perWallet: Math.max(0, Number(money.bundle.perWallet) || 0), stagger: !!money.bundle.stagger } : null
     const bundleUsd = b ? b.wallets * b.perWallet * px : 0
     const bundleFees = bundleUsd > 0 ? b!.wallets * BUNDLE_WALLET_FEE + (b!.stagger ? bundleUsd * STAGGER_FEE : 0) : 0
-    const marketing = Math.max(0, Number(money.marketing) || 0)
+    // (No marketing any more, and nothing else that used to buy a launch a crowd: see COOK_PLAIN in the market engine.)
+    const marketing = 0
     // (On a post the launch fee goes by the size of the account that posted: see postLaunchFee.)
     const launchFee = onPost ? postLaunchFee(this.market.sparks?.find((x) => x.id === onPost)?.by.followers ?? 0) : COOK_FEE
     const usdCosts = launchFee + marketing + bundleFees
@@ -945,7 +946,7 @@ export class Room {
     const c0 = msg.token
     const taxPct = (n: unknown) => (Number.isFinite(n) ? Math.min(0.1, Math.max(0, Number(n))) : 0)
     const spec: CookSpec = {
-      chain, pad: c0.pad, tax: { buy: taxPct(c0.tax?.buy), sell: taxPct(c0.tax?.sell) }, image: look.image,
+      chain, pad: c0.pad, tax: { buy: taxPct(c0.tax?.buy), sell: taxPct(c0.tax?.sell) }, image: onPost ? undefined : look.image, plain: true,
       name: look.name, ticker: look.ticker, emoji: look.emoji, hue: look.hue, description: look.description,
       narrative: c0.narrative as Narrative, socials: { x: !!c0.socials?.x, tg: !!c0.socials?.tg, web: !!c0.socials?.web },
       style: money.style === 'hyped' || money.style === 'stealth' ? money.style : 'fair', marketing, devBuy: Math.max(0, Number(money.devBuy) || 0),
@@ -967,7 +968,9 @@ export class Room {
       this.market = { ...this.market, sparkSim: { ...this.market.sparkSim, [onPost]: { ...ps, n } } }
       const watch = watchOf(ps.tier, n)
       const theme = this.market.sparks?.find((x) => x.id === onPost)?.theme
-      story = { spark: { id: onPost, n }, ...(theme ? { narrative: theme } : {}) }
+      // (It wears the picture every coin on the post wears: see coinPic.)
+      const pic = coinPic(onPost, ps.word, this.market.sparks?.find((x) => x.id === onPost)?.pic)
+      story = { spark: { id: onPost, n }, ...(theme ? { narrative: theme } : {}), ...(pic ? { pic } : {}) }
       storySim = { ...fairSim, watch, flow: { ...fairSim.flow, q: SPARK.preQ, att: Math.max(fairSim.flow.att, watch), botDev: true } }
       postBlock = blockUsd(ps.tier, n, new Rng((Math.random() * 2 ** 32) >>> 0), ps.larp)
     }

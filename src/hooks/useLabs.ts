@@ -10,7 +10,7 @@ export function useLabs() {
 
 /** The Cooking page is behind its own switch (`cooking`): off, only admins see it and nobody can launch a coin. */
 export function useCooking() {
-  const on = useFlags((s) => s.cooking || (import.meta.env.DEV && !!s.labsDev))
+  const on = useFlags((s) => s.cooking || (import.meta.env.DEV && (!!s.labsDev || !!s.sparksDev)))
   const admin = useAccount((s) => s.admin)
   return on || admin
 }

@@ -55,7 +55,7 @@ const cnt = (n: number) => (n < 1000 ? String(Math.round(n)) : fmtCompact(n, '')
  * `quiet`: the post as it was when it went up, to be read and nothing more (the leaf on a Trenches card): no Follow
  * button, nothing about how its story ended, the newest three replies and no way to open the rest.
  */
-export function Tweet({ p, roomy, quiet }: { p: SocialPost; roomy?: boolean; quiet?: boolean }) {
+export function Tweet({ p, roomy, quiet, thread: showThread = true }: { p: SocialPost; roomy?: boolean; quiet?: boolean; thread?: boolean }) {
   const acc = postAccount(p)
   const you = useGame((s) => (s.online ? p.author?.pid === s.online.you : p.accountId === 'player'))
   const tick = useGame((s) => s.market.tick)
@@ -74,7 +74,7 @@ export function Tweet({ p, roomy, quiet }: { p: SocialPost; roomy?: boolean; qui
   const n = postCounts(p, acc.followers, age)
   // (The replies under a story's post: made up from the post itself, the same for everybody. See feedFlavor.ts.)
   const fake = quiet ? undefined : spark?.fake
-  const thread = spark ? repliesOf(quiet ? { ...spark, picked: undefined, over: undefined, fake: undefined } : spark, age) : []
+  const thread = spark && showThread ? repliesOf(quiet ? { ...spark, picked: undefined, over: undefined, fake: undefined } : spark, age) : []
   return (
     <article className={clsx('flex gap-3 border-b px-4 transition-colors hover:bg-white/[0.03]', roomy ? 'py-3.5' : 'py-3')} style={{ borderColor: X.line }}>
       <Face face={p.by ? (p.by.face ?? faceOf(p.by.handle)) : acc.player ? undefined : faceOf(acc.handle)} emoji={acc.avatar} size={40} />
