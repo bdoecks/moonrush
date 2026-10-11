@@ -51,7 +51,11 @@ function postCounts(p: SocialPost, followers: number, ageSec: number) {
 }
 const cnt = (n: number) => (n < 1000 ? String(Math.round(n)) : fmtCompact(n, ''))
 
-export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
+/**
+ * `quiet`: the post as it was when it went up, to be read and nothing more (the leaf on a Trenches card): no Follow
+ * button, nothing about how its story ended, the newest three replies and no way to open the rest.
+ */
+export function Tweet({ p, roomy, quiet }: { p: SocialPost; roomy?: boolean; quiet?: boolean }) {
   const acc = postAccount(p)
   const you = useGame((s) => (s.online ? p.author?.pid === s.online.you : p.accountId === 'player'))
   const tick = useGame((s) => s.market.tick)
@@ -69,7 +73,8 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
   const age = (tick - p.tick) * SIM_SEC_PER_TICK
   const n = postCounts(p, acc.followers, age)
   // (The replies under a story's post: made up from the post itself, the same for everybody. See feedFlavor.ts.)
-  const thread = spark ? repliesOf(spark, age) : []
+  const fake = quiet ? undefined : spark?.fake
+  const thread = spark ? repliesOf(quiet ? { ...spark, picked: undefined, over: undefined, fake: undefined } : spark, age) : []
   return (
     <article className={clsx('flex gap-3 border-b px-4 transition-colors hover:bg-white/[0.03]', roomy ? 'py-3.5' : 'py-3')} style={{ borderColor: X.line }}>
       <Face face={p.by ? (p.by.face ?? faceOf(p.by.handle)) : acc.player ? undefined : faceOf(acc.handle)} emoji={acc.avatar} size={40} />
@@ -79,7 +84,7 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
           {acc.verified && <VerifiedMark size={16} />}
           <span className="min-w-0 shrink truncate" style={{ color: X.dim }}>@{acc.handle}</span>
           <span className="shrink-0" style={{ color: X.dim }}>· {fmtAge(age)}</span>
-          {!acc.player && <button onClick={() => toggleFollow(acc.id)} className={clsx('ml-auto shrink-0 rounded-full px-3.5 py-1 text-[12px] font-bold', followed ? 'border text-[#E7E9EA]' : 'bg-[#EFF3F4] text-black hover:bg-[#D7DBDC]')} style={followed ? { borderColor: '#536471' } : undefined}>{followed ? 'Following' : 'Follow'}</button>}
+          {!acc.player && !quiet && <button onClick={() => toggleFollow(acc.id)} className={clsx('ml-auto shrink-0 rounded-full px-3.5 py-1 text-[12px] font-bold', followed ? 'border text-[#E7E9EA]' : 'bg-[#EFF3F4] text-black hover:bg-[#D7DBDC]')} style={followed ? { borderColor: '#536471' } : undefined}>{followed ? 'Following' : 'Follow'}</button>}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] font-bold">
           <span className={clsx('num rounded px-1.5 py-px', look.badge)} title="Followers">{look.word ? `${look.word} · ` : ''}{fmtCompact(acc.followers, '')} followers</span>
@@ -89,7 +94,7 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
           {spark?.kind === 'news' && <span className="rounded bg-[#1D9BF0]/15 px-1.5 py-px text-[#1D9BF0]">NEWS</span>}
           {spark?.kind === 'tech' && <span className="rounded bg-[#8fd14f]/15 px-1.5 py-px text-[#8fd14f]">TECH</span>}
         </div>
-        <p className={clsx('mt-1.5 whitespace-pre-line break-words text-[15px] leading-5', spark?.fake && 'line-through')} style={{ color: spark?.fake ? X.dim : X.text }}>
+        <p className={clsx('mt-1.5 whitespace-pre-line break-words text-[15px] leading-5', fake && 'line-through')} style={{ color: fake ? X.dim : X.text }}>
           {p.text.split(/(\$[A-Z0-9]+|#[A-Za-z0-9]+|@[A-Za-z0-9_]+)/g).map((part, i) => (/^[$#@][A-Za-z0-9_]+$/.test(part) ? <span key={i} style={{ color: X.blue }}>{part}</span> : <span key={i}>{part}</span>))}
         </p>
         {spark?.pic && (spark.kind === 'news' ? (
@@ -100,12 +105,12 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
         ) : (
           <img src={`${import.meta.env.BASE_URL}posts/${spark.pic}.webp`} alt="Made-up picture with the post" loading="lazy" className="mt-2.5 block aspect-[4/3] w-full rounded-2xl border object-cover" style={{ borderColor: X.line }} />
         ))}
-        {spark?.fake && (
+        {spark && fake && (
           <div className="mt-2.5 rounded-xl border px-3 py-2.5 text-[13px] leading-[18px]" style={{ borderColor: 'rgba(244,33,46,0.5)', background: 'rgba(244,33,46,0.1)', color: X.text }}>
-            <div className="font-bold" style={{ color: '#F4212E' }}>{spark.fake.kind === 'fake' ? 'Fake account' : spark.fake.kind === 'shot' ? 'Made-up screenshot' : 'Hacked account'}</div>
+            <div className="font-bold" style={{ color: '#F4212E' }}>{fake.kind === 'fake' ? 'Fake account' : fake.kind === 'shot' ? 'Made-up screenshot' : 'Hacked account'}</div>
             <div>
-              {spark.fake.kind === 'fake' ? `The real ${spark.fake.real?.name ?? 'account'}${spark.fake.real ? ` (@${spark.fake.real.handle})` : ''} says this was not them. Look at the handle, @${acc.handle}, and there is no check mark.`
-                : spark.fake.kind === 'shot' ? `${spark.quote?.name ?? 'That account'} never posted this. A screenshot is not a post: it came from @${acc.handle}.`
+              {fake.kind === 'fake' ? `The real ${fake.real?.name ?? 'account'}${fake.real ? ` (@${fake.real.handle})` : ''} says this was not them. Look at the handle, @${acc.handle}, and there is no check mark.`
+                : fake.kind === 'shot' ? `${spark.quote?.name ?? 'That account'} never posted this. A screenshot is not a post: it came from @${acc.handle}.`
                 : `${acc.name} has its account back and says to ignore this post. Nothing on the post gave it away.`}
             </div>
           </div>
@@ -148,7 +153,7 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
         {!!p.replies?.length && <div className="mt-1 truncate text-[12px] italic" style={{ color: X.dim }}>{p.replies.map((r) => `“${r}”`).join('  ')}</div>}
         {thread.length > 0 && (
           <div className="mt-2.5 border-l-2 pl-3" style={{ borderColor: X.line }}>
-            {(open ? thread : thread.slice(-2)).map((r, i) => (
+            {(quiet ? thread.slice(-3) : open ? thread : thread.slice(-2)).map((r, i) => (
               <div key={i} className="flex gap-2 py-1">
                 <Face face={r.face} emoji={r.avatar} size={24} />
                 <div className="min-w-0 text-[13px] leading-[18px]">
@@ -157,7 +162,7 @@ export function Tweet({ p, roomy }: { p: SocialPost; roomy?: boolean }) {
                 </div>
               </div>
             ))}
-            {thread.length > 2 && <button onClick={() => setOpen(!open)} className="py-1 text-[13px] hover:underline" style={{ color: X.blue }}>{open ? 'Show fewer replies' : `Show ${thread.length - 2} more ${thread.length - 2 === 1 ? 'reply' : 'replies'}`}</button>}
+            {thread.length > 2 && !quiet && <button onClick={() => setOpen(!open)} className="py-1 text-[13px] hover:underline" style={{ color: X.blue }}>{open ? 'Show fewer replies' : `Show ${thread.length - 2} more ${thread.length - 2 === 1 ? 'reply' : 'replies'}`}</button>}
           </div>
         )}
       </div>

@@ -24,7 +24,6 @@ export const WORKING_ON: { what: string; why?: string; until?: 'sparks' | 'larps
   { until: 'sparks', what: 'Coins that come from a story', why: 'A post or a news item appears on the timeline, devs rush to launch coins on it, and you work out which coin is the real one. It is being tested before it opens to everyone.' },
   { what: 'Cooking (launching your own coin)', why: 'It is being rebuilt so that launching a coin is a real bet, not a way to print money.' },
   { what: 'CopyTrade, Sniper and Monitor', why: 'They work, but not well enough yet. They come back when they are worth using.' },
-  { what: 'Real pictures for coins', why: 'So the market looks less like emoji and more like the real thing.' },
 ]
 
 /** Things that are switched off right now. `flag`: the owner's switch that brings it back (it leaves this list by itself when that is on). */
@@ -35,6 +34,13 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 
 /** Newest first. */
 export const UPDATES: Update[] = [
+  {
+    id: '2026-10-11-coin-photos',
+    date: 'October 11, 2026',
+    title: 'Photos on coins',
+    added: ['Most coins now show a photo of what they are (a frog, a rocket, a bowl of noodles) where they used to show an emoji. Every photo is made up. A coin a player launched keeps the picture its maker chose.'],
+    changed: ['The leaf on Trenches cards has been taken off for now. It comes back with "Coins that come from a story", where it will show the post a coin was launched on.'],
+  },
   {
     id: '2026-10-10-timeline',
     flag: 'sparks',
@@ -47,6 +53,7 @@ export const UPDATES: Update[] = [
       'Replies under a post, and "Show more replies" to read the rest. They are chatter, not tips: nobody in the replies knows which coin is the right one.',
       'Accounts follow up on their own posts, and other accounts repost them with a line of their own.',
       'Every known account now writes in its own way, so you can tell them apart by how they talk.',
+      'The leaf on a Trenches card is back, on coins launched on a post only: hover it to read that post, with its picture and the newest replies. That is all it shows. The rest is yours to look up.',
       'A "What is happening" box on top of the feed: the meta right now and what the timeline is talking about.',
       'Click an account\'s name to open its page: who it says it is, how many followers, and its latest posts.',
     ],

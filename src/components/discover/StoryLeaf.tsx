@@ -1,82 +1,48 @@
-// The leaf on a Trenches card: hover it (tap it on a phone) to read what a coin is about before opening it. Its
-// theme, what it says about itself, and the latest lines of its story feed, each marked with where it comes from, as
-// on the coin page's Story tab. Green while the coin has a story running, grey when nobody is talking about it.
-// A coin that was launched on a post (the story market, see game/sparks.ts) shows that post first.
-import clsx from 'clsx'
+// The leaf on a Trenches card: a coin that was launched on a post (the story market, see game/sparks.ts) wears one,
+// and hovering it (tapping it on a phone) shows that post as the X tracker shows it: who posted, the words, the
+// picture and the newest replies. Nothing else (the owner's call, 2026-10-11): not the coin's theme, not its story
+// feed, not how the story ended, and no way from here to the list of the post's other coins. The rest is for the
+// player to look up. A coin with no post behind it has no leaf.
 import { Leaf } from 'lucide-react'
 import { useState, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { NARRATIVES } from '../../data/narratives'
-import { storyLines, storyLive } from '../../game/coinCrowd'
 import { useGame } from '../../game/store'
-import type { Token } from '../../types'
-import { fmtAge } from '../../utils/format'
-import { ARC_LABEL, BEAT_ICON, SRC_META } from '../token/beatMeta'
-import { SparkSource } from '../SparkPanel'
+import type { SocialPost, Token } from '../../types'
+import { feedStyle, Tweet, X } from '../tracker/Tweet'
 
-const W = 280
-export function StoryLeaf({ t, now }: { t: Token; now: number }) {
+const W = 380
+const TALL = 560 // (about what a post with a picture and three replies takes: used to keep the box on screen)
+export function StoryLeaf({ t }: { t: Token; now: number }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null)
-  const meta = useGame((s) => s.market.meta)
-  const openSpark = useGame((s) => s.openSpark)
-  // (With a mouse the leaf is read by hovering, so a click is free to do more: it opens the post's coins. On a
-  // touch screen a tap is the only way to read it.)
-  const mouse = typeof window !== 'undefined' && !!window.matchMedia?.('(hover: hover)').matches
-  // (A coin launched on a post in the last ten minutes: that post is its story.)
-  const live = storyLive(t, now) || (!!t.spark && now - t.createdAt < 600)
-  const tall = t.spark ? 360 : 220
+  const spark = useGame((s) => (t.spark ? s.market.sparks?.find((x) => x.id === t.spark!.id) : undefined))
+  // (The post as it sits on the timeline, when it is still there: its likes and counts are that one's.)
+  const posted = useGame((s) => (t.spark && at ? s.socialFeed.find((p) => p.sparkId === t.spark!.id) : undefined))
+  if (!t.spark || !spark) return null
   const open = (e: MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
-    // Beside the leaf, kept on screen: below it when there is room, above it when there is not.
+    // Beside the leaf, kept on screen: below it when there is room, else as high as it has to go.
     const x = Math.min(Math.max(8, r.left - 12), window.innerWidth - W - 8)
-    setAt({ x, y: r.bottom + 6 > window.innerHeight - tall ? Math.max(8, r.top - tall - 6) : r.bottom + 6 })
+    setAt({ x, y: Math.max(8, Math.min(r.bottom + 6, window.innerHeight - TALL - 8)) })
   }
-  const theme = NARRATIVES.find((n) => n.id === t.narrative)
-  const lines = at ? storyLines(t) : []
-  const arc = at ? (t.beats ?? []).find((b) => b.arc)?.arc : undefined
+  const post: SocialPost = posted ?? { id: spark.tick * 1000 + 700, tick: spark.tick, time: spark.time, accountId: spark.by.id, by: spark.by, sparkId: spark.id, text: spark.text, isCall: false }
   return (
     <>
       <button
-        type="button" aria-label={`What $${t.ticker} is about`} aria-expanded={!!at}
+        type="button" aria-label={`The post $${t.ticker} was launched on`} aria-expanded={!!at}
         onMouseEnter={open} onMouseLeave={() => setAt(null)} onBlur={() => setAt(null)}
+        // (A click only matters on a touch screen, where it is the way to read the leaf. It never opens the coin.)
         onClick={(e) => {
           e.stopPropagation()
-          if (t.spark && mouse) {
-            setAt(null)
-            openSpark(t.spark.id)
-          } else if (at) setAt(null)
+          if (at) setAt(null)
           else open(e)
         }}
-        className={clsx('flex shrink-0 items-center', live ? 'text-[#8fd14f]' : 'text-dim hover:text-muted')}
+        className="flex shrink-0 items-center text-[#8fd14f]"
       >
         <Leaf size={11} />
       </button>
       {at && createPortal(
-        <div role="tooltip" className="pointer-events-none fixed z-50 rounded-lg border border-line2 bg-panel p-2.5 text-[11px] shadow-2xl" style={{ left: at.x, top: at.y, width: W }}>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[12px] font-bold text-ink">${t.ticker}</span>
-            <span className="min-w-0 truncate text-dim">{t.name}</span>
-            {theme && <span className={clsx('ml-auto shrink-0 rounded border px-1 text-[10px] font-semibold', t.narrative === meta ? 'border-warn/50 text-warn' : 'border-line2 text-muted')}>{theme.icon} {theme.label}{t.narrative === meta ? ' · the meta' : ''}</span>}
-          </div>
-          {t.spark && <div className="mt-1.5"><SparkSource t={t} now={now} /></div>}
-          {t.description && <p className="mt-1.5 text-muted">“{t.description}”</p>}
-          {arc && <div className="mt-1.5 font-semibold text-[#8fd14f]">{ARC_LABEL[arc]}</div>}
-          {lines.length ? (
-            <ul className="mt-1.5 space-y-1.5">
-              {lines.map((b) => (
-                <li key={b.id} className="leading-snug">
-                  <span className="mr-1">{BEAT_ICON[b.kind]}</span>
-                  <span className="text-ink">{b.by ? <b>{b.by.name}: </b> : null}{b.text}</span>
-                  <span className="ml-1 whitespace-nowrap text-[9px] text-dim">{fmtAge(Math.max(0, now - b.time))} ago</span>
-                  <span className={clsx('ml-1 rounded px-1 text-[8px] font-bold', SRC_META[b.src].cls)}>{SRC_META[b.src].label}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            !t.spark && <p className="mt-1.5 text-dim">No story yet: nobody is talking about this coin.</p>
-          )}
-          {t.spark && mouse && <p className="mt-1.5 text-[10px] font-semibold text-info">Click the leaf to see every coin launched on this post.</p>}
-          <p className="mt-1.5 border-t border-line pt-1 text-[9px] text-dim">Story lines are generated and their accounts are invented. A line shows a few seconds after it was posted: its fastest readers are already in.</p>
+        <div role="tooltip" className="pointer-events-none fixed z-50 overflow-hidden rounded-2xl border shadow-2xl" style={{ ...feedStyle, borderColor: X.line, left: at.x, top: at.y, width: W, maxHeight: 'calc(100vh - 16px)' }}>
+          <Tweet p={post} quiet />
         </div>,
         document.body,
       )}
