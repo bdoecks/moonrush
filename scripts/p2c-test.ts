@@ -38,7 +38,8 @@ ok(!!tok && (tok as { creatorId?: string }).creatorId === 'p1', 'coin is on the 
 ok((tok as { devAddr?: string } | undefined)?.devAddr === walletAddress('p1', main().id, 'sol'), `coin carries its dev wallet's real address (trackable): ${(tok as { devAddr?: string } | undefined)?.devAddr}`)
 ok(w1.ref === 2 && (w1.fills ?? []).length === 2, `server ran dev buy + bundle: ${(w1.fills ?? []).length} fills, ${(w1.failures ?? []).join(',')}`)
 ok((w1.fills ?? [])[1]?.via === 'Bundle ×3', 'bundle fill labelled')
-const fees = COOK_FEE + 50 + 3 * 0.4
+// (A launch buys no marketing any more: money sent for it is neither spent nor charged. See COOK_PLAIN.)
+const fees = COOK_FEE + 3 * 0.4
 ok(Math.abs(cashBefore - me().wallet.cash - fees) < 1e-6, `charged launch fees ${fees}: ${(cashBefore - me().wallet.cash).toFixed(2)}`)
 ok(Math.abs(main().balances.sol - (sol0 - 2.5)) < 1e-6, `dev wallet paid 2.5 SOL: ${(sol0 - main().balances.sol).toFixed(4)}`)
 const bag = main().positions[cooked.token.id]?.qty ?? 0
