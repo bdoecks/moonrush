@@ -671,7 +671,7 @@ function MyLaunches({ onCreate }: { onCreate: () => void }) {
                   <tr key={r.tokenId} className={clsx('hover:bg-panel2', expanded && 'bg-info/[0.04]')}>
                     <td className={td}>
                       <button onClick={() => t && select(t.id)} className="flex items-center gap-2 disabled:cursor-default" disabled={!t}>
-                        <TokenIcon token={{ emoji: r.emoji, hue: r.hue, image: r.image, status: status === 'rugged' || status === 'dead' ? status : 'graduated' }} size={24} />
+                        <TokenIcon token={{ emoji: r.emoji, hue: r.hue, image: r.image, pic: t?.pic, status: status === 'rugged' || status === 'dead' ? status : 'graduated' }} size={24} />
                         <span className="font-bold">{r.ticker}</span>
                         <span className="text-[11px] text-dim">{r.name}</span>
                       </button>

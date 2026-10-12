@@ -774,3 +774,25 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   careful reading about +3% on accounts of 500K to 20M, about 0 over all posts and at $1,000; the first coin -3.7%,
   the biggest -4.4%, the picked coin bought on the news -21%; launching on a post -$46 to -$93 a launch on accounts
   of 20K and up, +$2 with no dev buy on 500K and up; every rule of `fair-test` loses or is flat with it on.
+
+## Photos on coins, the leaf, and the Cooking page (2026-10-11)
+
+- **A coin's photo.** A coin launched on a post wears that post's picture (`Token.pic`, `coinPic` in `sparks.ts`: the SAME
+  picture for every coin on a post, so it never tells the right one apart). Every other coin of the market's own shows a
+  photo of what its emoji is when the game has one (`game/coinFace.ts`: worked out in the browser from the coin's id,
+  nothing sent, no dice; `scripts/emoji-list.mjs`, `data/emojiPics.ts`). A coin a player made keeps what its maker chose.
+  Accounts have profile pictures (`public/faces`, `SparkBy.face`; none is a face: a generated face can look like somebody).
+- **The leaf** (`components/discover/StoryLeaf.tsx`, the owner's call): only on a coin launched on a post, and hovering it
+  shows only that post as the X tracker has it, with its picture and the newest three replies (`<Tweet quiet />`). Not the
+  theme, not the story feed, not how the story ended, and no click through to the post's other coins: nothing in the game
+  opens that list now (`SparkDrawer` is still there for the bots). Ask before bringing any of it back.
+- **Cooking is "post first"** (design board 7, `pages/CookingView.tsx`): the open posts on the left (or "No post: my own
+  idea"), one compact panel (the coin, chain and launchpad, dev wallet, own buy), cost and Launch on the right. Picking a
+  post empties the name and ticker: the player types them (nothing fills them in, the owner's call). **The hype settings
+  are gone** (narrative, launch style, socials, marketing, the vibe check): a launch scores `COOK_PLAIN` whoever makes it
+  (`CookSpec.plain`; the server makes every launch plain and charges no marketing). Measured (World with bots, 360 launches
+  a recipe, good to about $50 either way): with no post, no dev buy -$7 a launch, 1 SOL sold after 30 s -$33, 1 SOL held
+  -$120, 10 SOL dumped on the snipers -$53; on a post from an account of 20K and up, the right name -$48, with a bag held
+  -$52. Launching on a post is the World's only (solo play shows "no post" alone). Cooking is still closed by its switch.
+  On a test copy, `?stories` in the address opens the story market and the Cooking tab; `node scripts/world-dev.mjs
+  stories` (launch config `moonrush-server-stories`) is the World to try it in ("Watch the World": guests play locally).
