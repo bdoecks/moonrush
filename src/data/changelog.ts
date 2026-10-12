@@ -35,6 +35,15 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-10-12-tracker-sides',
+    date: 'October 12, 2026',
+    title: 'Put each tracker where you want it',
+    added: [
+      'The Wallet Tracker and the Social Tracker can sit on opposite sides of the screen. The arrows button in a tracker\u2019s title bar moves it to the other side.',
+      'You can show just one of them: the X in a tracker\u2019s title bar hides it, and its button on the edge of the screen brings it back.',
+    ],
+  },
+  {
     id: '2026-10-11-coin-photos',
     date: 'October 11, 2026',
     title: 'Photos on coins',
@@ -54,7 +63,7 @@ export const UPDATES: Update[] = [
       'Accounts follow up on their own posts, and other accounts repost them with a line of their own.',
       'Every known account now writes in its own way, so you can tell them apart by how they talk.',
       'The leaf on a Trenches card is back, on coins launched on a post only: hover it to read that post, with its picture and the newest replies. That is all it shows. The rest is yours to look up.',
-      'A "What is happening" box on top of the feed: the meta right now and what the timeline is talking about.',
+      '"What is happening" is a tab of the Social Tracker: the meta right now and what the timeline is talking about. It no longer sits on top of the posts.',
       'Click an account\'s name to open its page: who it says it is, how many followers, and its latest posts.',
     ],
     changed: [

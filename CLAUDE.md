@@ -796,3 +796,14 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   -$52. Launching on a post is the World's only (solo play shows "no post" alone). Cooking is still closed by its switch.
   On a test copy, `?stories` in the address opens the story market and the Cooking tab; `node scripts/world-dev.mjs
   stories` (launch config `moonrush-server-stories`) is the World to try it in ("Watch the World": guests play locally).
+
+## A side for each tracker (2026-10-12)
+
+- The owner's ask: the X tracker on one side and the Wallet Tracker on the other, or just one of them. `TrackerDockPrefs`
+  has `at` (a side for each tracker; without it both are on `side`) and `off` (a tracker put away). `TrackerDock` draws
+  a dock on each side that has a tracker showing, and a thin rail at the edge for a tracker that is put away. A tracker's
+  title bar has: move to the other side, pop out (floating panel, as before), hide. `open: false` still means "all put
+  away" (the top bar's button); showing one tracker from there shows that one alone.
+- "What is happening" is a TAB of the Social Tracker in the dock (`<Happening full />`): as a box over the feed it left
+  one post in view. On the Track page and in the bottom panel it is one folded line that opens on a click.
+

@@ -1,6 +1,6 @@
 import clsx from 'clsx'
-import { ArrowLeftRight, AtSign, ChevronDown, ChevronRight, ExternalLink, GripHorizontal, PanelLeftClose, PanelRightClose, PictureInPicture2, Radio, Send, UserPlus, Wallet, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ArrowLeftRight, AtSign, ChevronDown, ChevronRight, ExternalLink, Flame, GripHorizontal, PictureInPicture2, Radio, Send, UserPlus, Wallet, X } from 'lucide-react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTokenMap } from '../../hooks/useDerived'
 import { OnScreen } from '../OnScreen'
 import { useLiveFeed } from '../../game/liveSocial'
@@ -29,51 +29,48 @@ export function useDockPrefs(): [TrackerDockPrefs, (patch: Partial<TrackerDockPr
   return [p, (patch) => update({ trackerDock: { ...p, ...patch } })]
 }
 
+type Which = 'wallet' | 'social'
+type Side = 'left' | 'right'
+const TITLE: Record<Which, string> = { wallet: 'Wallet Tracker', social: 'Social Tracker' }
+
 /**
- * GMGN-style side dock: Wallet Tracker on top, Social Tracker below. Docks to the left or right edge, drag its inner
- * edge to resize, drag the divider to share the height, or collapse it to a thin rail. Desktop only.
- * Either tracker can be popped out into a floating panel (the button in its title bar) that drags by its top bar and
- * resizes from its corner, like Instant Trade; its dock button puts it back.
+ * GMGN-style side docks for the Wallet Tracker and the Social Tracker. Each tracker sits on the side it was put on
+ * (`at`): both on one side (one above the other, drag the divider to share the height), one on each side, or only
+ * one of them, the other hidden (`off`) until its button on the rail brings it back. Drag a dock's inner edge to
+ * resize. Desktop only. Either tracker can also be popped out into a floating panel (the button in its title bar)
+ * that drags by its top bar and resizes from its corner, like Instant Trade; its dock button puts it back.
  */
 export function TrackerDock() {
   const [p, set] = useDockPrefs()
   const [live, setLive] = useState<{ width: number; split: number } | null>(null) // while dragging
-  const [front, setFront] = useState<'wallet' | 'social'>('wallet') // of two floating panels, the one touched last is on top
+  const [front, setFront] = useState<Which>('wallet') // of two floating panels, the one touched last is on top
   const width = live?.width ?? p.width
   const split = live?.split ?? p.split
-  const left = p.side === 'left'
-  // A tracker that has been popped out floats over the page; the dock holds only the ones still in it.
+  const sideOf = (k: Which): Side => p.at?.[k] ?? p.side
+  // (`open: false` is how a dock used to be folded away whole: read it as both trackers hidden.)
+  const hidden = (k: Which) => !p.open || !!p.off?.[k]
   const fw = p.float?.wallet
   const fs = p.float?.social
-  const setFloat = (which: 'wallet' | 'social', box: FloatBox | undefined) => set({ float: { ...p.float, [which]: box }, ...(box ? {} : { open: true, [which]: true }) })
-  const popOut = (which: 'wallet' | 'social') => setFloat(which, clampBox({ x: left ? width + 24 : window.innerWidth - width - 384, y: which === 'wallet' ? 110 : 190, w: 360, h: 440 }))
+  const setFloat = (which: Which, box: FloatBox | undefined) => set({ float: { ...p.float, [which]: box }, ...(box ? {} : show(which)) })
+  // Showing one tracker: it alone if the docks were folded away whole, else it besides whatever is showing.
+  const show = (k: Which): Partial<TrackerDockPrefs> => ({ open: true, [k]: true, off: p.open ? { ...p.off, [k]: false } : { wallet: k !== 'wallet', social: k !== 'social' } })
+  const hide = (k: Which) => set({ off: { ...p.off, [k]: true } })
+  const moveTo = (k: Which, side: Side) => set({ at: { wallet: sideOf('wallet'), social: sideOf('social'), [k]: side } })
+  const popOut = (which: Which) => setFloat(which, clampBox({ x: sideOf(which) === 'left' ? width + 24 : window.innerWidth - width - 384, y: which === 'wallet' ? 110 : 190, w: 360, h: 440 }))
   const floats = (
     <>
       {fw && <FloatPanel title="Wallet Tracker" icon={<Wallet size={12} />} box={fw} onBox={(b) => setFloat('wallet', b)} onDock={() => setFloat('wallet', undefined)} front={front === 'wallet'} onFront={() => setFront('wallet')}><WalletSection /></FloatPanel>}
       {fs && <FloatPanel title="Social Tracker" icon={<AtSign size={12} />} box={fs} onBox={(b) => setFloat('social', b)} onDock={() => setFloat('social', undefined)} front={front === 'social'} onFront={() => setFront('social')}><SocialSection /></FloatPanel>}
     </>
   )
-  if (fw && fs) return floats // both are floating: the dock has nothing left to hold
 
-  if (!p.open) {
-    return (
-      <>
-      {floats}
-      <div className={clsx('hidden w-9 shrink-0 flex-col items-center gap-1 bg-panel py-2 lg:flex', left ? 'order-first border-r border-line' : 'order-last border-l border-line')}>
-        <RailButton title="Open wallet tracker" onClick={() => set({ open: true, wallet: true })}><Wallet size={15} /></RailButton>
-        <RailButton title="Open social tracker" onClick={() => set({ open: true, social: true })}><AtSign size={15} /></RailButton>
-      </div>
-      </>
-    )
-  }
-
-  const dragWidth = (e: React.PointerEvent) => {
+  const dragWidth = (side: Side) => (e: React.PointerEvent) => {
     e.preventDefault()
     const startX = e.clientX
     const startW = width
     let last = startW
     const move = (ev: PointerEvent) => {
-      last = Math.round(Math.min(MAX_W, Math.max(MIN_W, startW + (left ? ev.clientX - startX : startX - ev.clientX))))
+      last = Math.round(Math.min(MAX_W, Math.max(MIN_W, startW + (side === 'left' ? ev.clientX - startX : startX - ev.clientX))))
       setLive({ width: last, split })
     }
     const up = () => {
@@ -103,34 +100,51 @@ export function TrackerDock() {
     window.addEventListener('pointerup', up)
   }
 
-  const both = p.wallet && p.social && !fw && !fs
+  const ALL: Which[] = ['wallet', 'social']
+  const dock = (side: Side) => {
+    const left = side === 'left'
+    const mine = ALL.filter((k) => sideOf(k) === side && !p.float?.[k])
+    const shown = mine.filter((k) => !hidden(k))
+    const away = mine.filter((k) => hidden(k))
+    const both = shown.length === 2 && p.wallet && p.social
+    const edge = left ? 'order-first border-r border-line' : 'order-last border-l border-line'
+    const body = (k: Which) => (k === 'wallet' ? <WalletSection /> : <SocialSection />)
+    return (
+      <>
+        {shown.length > 0 && (
+          <aside key={side} className={clsx('relative hidden shrink-0 flex-col bg-panel lg:flex', edge, live && 'select-none')} style={{ width }} aria-label={shown.length === 2 ? 'Trackers' : TITLE[shown[0]]}>
+            {/* Resize from the inner edge */}
+            <div onPointerDown={dragWidth(side)} onDoubleClick={() => set({ width: DOCK_DEFAULTS.width })} title="Drag to resize · double-click to reset" className={clsx('absolute inset-y-0 z-20 w-1.5 cursor-col-resize hover:bg-accent/40', left ? '-right-1' : '-left-1')} />
+            <div className="flex min-h-0 flex-1 flex-col">
+              {shown.map((k, i) => (
+                <Fragment key={k}>
+                  {i === 1 && both && <div onPointerDown={dragSplit} onDoubleClick={() => set({ split: 0.5 })} title="Drag to resize · double-click to reset" className="h-1 shrink-0 cursor-row-resize bg-line hover:bg-accent/50" />}
+                  <Section
+                    title={TITLE[k]} icon={k === 'wallet' ? <Wallet size={12} /> : <AtSign size={12} />} open={p[k]} onToggle={() => set({ [k]: !p[k] })}
+                    onFloat={() => popOut(k)} onMove={() => moveTo(k, left ? 'right' : 'left')} moveTitle={`Move to the ${left ? 'right' : 'left'} side`} onHide={() => hide(k)}
+                    style={both ? { height: `${(i === 0 ? split : 1 - split) * 100}%` } : p[k] ? { flex: 1 } : undefined}
+                  >
+                    {body(k)}
+                  </Section>
+                </Fragment>
+              ))}
+            </div>
+          </aside>
+        )}
+        {/* A hidden tracker waits on a thin rail at its own edge. */}
+        {away.length > 0 && (
+          <div className={clsx('hidden w-9 shrink-0 flex-col items-center gap-1 bg-panel py-2 lg:flex', edge)}>
+            {away.map((k) => <RailButton key={k} title={`Open ${k === 'wallet' ? 'wallet' : 'social'} tracker`} onClick={() => set(show(k))}>{k === 'wallet' ? <Wallet size={15} /> : <AtSign size={15} />}</RailButton>)}
+          </div>
+        )}
+      </>
+    )
+  }
   return (
     <>
-    {floats}
-    <aside
-      className={clsx('relative hidden shrink-0 flex-col bg-panel lg:flex', left ? 'order-first border-r border-line' : 'order-last border-l border-line', live && 'select-none')}
-      style={{ width }}
-      aria-label="Trackers"
-    >
-      {/* Resize from the inner edge */}
-      <div onPointerDown={dragWidth} onDoubleClick={() => set({ width: DOCK_DEFAULTS.width })} title="Drag to resize · double-click to reset" className={clsx('absolute inset-y-0 z-20 w-1.5 cursor-col-resize hover:bg-accent/40', left ? '-right-1' : '-left-1', live && 'bg-accent/40')} />
-
-      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-2">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-muted">Trackers</span>
-        <button onClick={() => set({ side: left ? 'right' : 'left' })} className="ml-auto rounded p-1 text-dim hover:bg-panel2 hover:text-ink" title={`Dock on the ${left ? 'right' : 'left'}`}><ArrowLeftRight size={13} /></button>
-        <button onClick={() => set({ open: false })} className="rounded p-1 text-dim hover:bg-panel2 hover:text-ink" title="Collapse">{left ? <PanelLeftClose size={14} /> : <PanelRightClose size={14} />}</button>
-      </div>
-
-      <div className="flex min-h-0 flex-1 flex-col">
-        {!fw && <Section title="Wallet Tracker" icon={<Wallet size={12} />} open={p.wallet} onToggle={() => set({ wallet: !p.wallet })} onFloat={() => popOut('wallet')} style={both ? { height: `${split * 100}%` } : p.wallet ? { flex: 1 } : undefined}>
-          <WalletSection />
-        </Section>}
-        {both && <div onPointerDown={dragSplit} onDoubleClick={() => set({ split: 0.5 })} title="Drag to resize · double-click to reset" className="h-1 shrink-0 cursor-row-resize bg-line hover:bg-accent/50" />}
-        {!fs && <Section title="Social Tracker" icon={<AtSign size={12} />} open={p.social} onToggle={() => set({ social: !p.social })} onFloat={() => popOut('social')} style={both ? { height: `${(1 - split) * 100}%` } : p.social ? { flex: 1 } : undefined}>
-          <SocialSection />
-        </Section>}
-      </div>
-    </aside>
+      {floats}
+      {dock('left')}
+      {dock('right')}
     </>
   )
 }
@@ -194,7 +208,7 @@ function RailButton({ title, onClick, children }: { title: string; onClick: () =
   return <button onClick={onClick} title={title} aria-label={title} className="grid size-7 place-items-center rounded-md text-muted hover:bg-panel2 hover:text-ink">{children}</button>
 }
 
-function Section({ title, icon, open, onToggle, onFloat, style, children }: { title: string; icon: ReactNode; open: boolean; onToggle: () => void; onFloat?: () => void; style?: React.CSSProperties; children: ReactNode }) {
+function Section({ title, icon, open, onToggle, onFloat, onMove, moveTitle, onHide, style, children }: { title: string; icon: ReactNode; open: boolean; onToggle: () => void; onFloat?: () => void; onMove?: () => void; moveTitle?: string; onHide?: () => void; style?: React.CSSProperties; children: ReactNode }) {
   return (
     <section className={clsx('flex min-h-0 flex-col', !open && 'shrink-0')} style={open ? style : undefined}>
       <div className="flex h-7 shrink-0 items-center border-b border-line/60 hover:bg-panel2/60">
@@ -203,7 +217,9 @@ function Section({ title, icon, open, onToggle, onFloat, style, children }: { ti
           <span className="text-dim">{icon}</span>
           {title}
         </button>
-        {onFloat && <button onClick={onFloat} className="mr-1 rounded p-1 text-dim hover:bg-panel2 hover:text-ink" title="Pop out: a floating panel you can drag anywhere" aria-label={`Pop out the ${title}`}><PictureInPicture2 size={13} /></button>}
+        {onMove && <button onClick={onMove} className="rounded p-1 text-dim hover:bg-panel2 hover:text-ink" title={moveTitle} aria-label={`${moveTitle}: ${title}`}><ArrowLeftRight size={13} /></button>}
+        {onFloat && <button onClick={onFloat} className="rounded p-1 text-dim hover:bg-panel2 hover:text-ink" title="Pop out: a floating panel you can drag anywhere" aria-label={`Pop out the ${title}`}><PictureInPicture2 size={13} /></button>}
+        {onHide && <button onClick={onHide} className="mr-1 rounded p-1 text-dim hover:bg-panel2 hover:text-ink" title="Hide this tracker (its button stays on the edge)" aria-label={`Hide the ${title}`}><X size={13} /></button>}
       </div>
       {open && <div className="flex min-h-0 flex-1 flex-col">{children}</div>}
     </section>
@@ -310,7 +326,7 @@ function WalletRow({ w, tr, friend, groupable }: { w: SimWallet; tr: WalletTrade
 
 // ─── Social tracker ──────────────────────────────────────────────────────────
 
-type SocialScope = 'x' | 'tg' | 'following' | 'live'
+type SocialScope = 'x' | 'tg' | 'following' | 'live' | 'happening'
 const BIG_ACCOUNT = 500_000 // followers: the "Big accounts only" filter
 
 function SocialSection() {
@@ -323,7 +339,8 @@ function SocialSection() {
   // (The huge accounts are the story market's: without its posts there is nothing that big to filter for.)
   const stories = feed.some((p) => !!p.sparkId)
   const liveFeed = useLiveFeed()
-  const posts = scope === 'live' ? [] : feed.filter((p) => {
+  const feedShown = scope !== 'live' && scope !== 'happening'
+  const posts = !feedShown ? [] : feed.filter((p) => {
     const acc = postAccount(p)
     if (!acc) return false
     if (scope === 'following' ? !followed.includes(acc.id) && !acc.player : acc.platform !== scope) return false
@@ -338,19 +355,19 @@ function SocialSection() {
         { value: 'tg', label: <><Send size={10} /> TG</> },
         { value: 'following', label: <>Following <span className="text-dim">{followed.length}</span></> },
         { value: 'live', label: <><Radio size={10} className={liveFeed.status === 'live' ? 'text-up' : undefined} /> Live X</> },
+        ...(stories ? [{ value: 'happening' as const, label: <><Flame size={10} /> What is happening</> }] : []),
       ]} />
-      {scope !== 'live' && (
+      {feedShown && (
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 border-b border-line/40 px-2 py-1 text-[10px] text-dim">
           <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={onlyCA} onChange={(e) => setOnlyCA(e.target.checked)} className="accent-[var(--accent)]" /> Only posts with a coin</label>
           {stories && <label className="flex cursor-pointer items-center gap-1" title="Only accounts with 500K followers or more: a big account's post moves far more than a small one's"><input type="checkbox" checked={onlyBig} onChange={(e) => setOnlyBig(e.target.checked)} className="accent-[var(--accent)]" /> Big accounts only</label>}
         </div>
       )}
-      {scope !== 'live' && scope !== 'tg' && (writing
+      {feedShown && scope !== 'tg' && (writing
         ? <div className="relative"><Composer /><button type="button" onClick={() => setWriting(false)} className="absolute right-2 top-1 text-[10px] text-dim hover:text-ink">Hide</button></div>
         : <button type="button" onClick={() => setWriting(true)} className="mx-2 my-1.5 shrink-0 rounded-md border border-line px-2 py-1.5 text-left text-[11px] text-dim hover:border-line2 hover:text-muted">✍️ Write a post…</button>)}
       <div className="min-h-0 flex-1 overflow-y-auto" style={scope === 'live' ? undefined : feedStyle}>
-        {scope !== 'live' && <Happening />}
-        {scope === 'live' ? <LiveXFeed /> : !posts.length ? (
+        {scope === 'happening' ? <Happening full /> : scope === 'live' ? <LiveXFeed /> : !posts.length ? (
           <EmptyState icon="📣" title={scope === 'following' ? 'No posts from accounts you follow' : 'No posts yet'} hint={scope === 'following' ? 'Hit Follow on any post' : 'Posts appear as the market moves'} />
         ) : posts.slice(0, 60).map((p) => <OnScreen key={p.id} className="slide-in"><Tweet p={p} /></OnScreen>)}
       </div>

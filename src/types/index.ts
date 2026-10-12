@@ -844,7 +844,9 @@ export interface FloatBox {
 
 export interface TrackerDockPrefs {
   open: boolean
-  side: 'left' | 'right'
+  side: 'left' | 'right' // the side both trackers are on unless `at` says otherwise
+  at?: { wallet?: 'left' | 'right'; social?: 'left' | 'right' } // a side for each tracker: one on each side, or both on one
+  off?: { wallet?: boolean; social?: boolean } // a tracker put away: only the other one shows (its button on the rail brings it back)
   width: number // px
   split: number // share of the height the wallet tracker gets (0..1)
   wallet: boolean // wallet section expanded

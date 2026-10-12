@@ -1,7 +1,7 @@
 // Two things a timeline has besides its posts: the "What is happening" box on top of the feed, and the page of an
 // account (a click on its name). Both show only what the feed already shows (the meta, what recent posts are about,
 // an account's size and its own posts): nothing about which coin is right or how a story will end.
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { X as Close } from 'lucide-react'
 import { ACCOUNT_BIOS } from '../../data/sparkFlavor'
 import { narrativeLabel } from '../../data/narratives'
@@ -13,7 +13,12 @@ import { useAccountCard } from './accountCard'
 import { Face, Tweet, X } from './Tweet'
 
 /** What the last ten minutes of posts were about: the meta, the busiest hashtags, the busiest other theme. */
-export function Happening() {
+/**
+ * `full`: the whole list, as the X tracker's own tab shows it. Otherwise it is one folded line over a feed that opens
+ * on a click (the owner's call: the open box took most of a small feed, leaving one post in view).
+ */
+export function Happening({ full }: { full?: boolean }) {
+  const [open, setOpen] = useState(false)
   const sparks = useGame((s) => s.market.sparks)
   const meta = useGame((s) => s.market.meta)
   const now = useGame((s) => s.market.time)
@@ -28,13 +33,25 @@ export function Happening() {
   const spelled = (tag: string) => recent.flatMap((s) => s.text.match(/#[A-Za-z0-9]{3,}/g) ?? []).find((t) => t.toLowerCase() === tag) ?? tag
   const rows: { over: string; what: string; n: number }[] = []
   if (meta) rows.push({ over: 'Meta right now', what: narrativeLabel(meta)?.label ?? meta, n: themes.get(meta) ?? 0 })
-  for (const [tag, n] of [...tags].sort((a, b) => b[1] - a[1]).slice(0, 2)) rows.push({ over: 'Trending', what: spelled(tag), n })
-  const other = [...themes].filter(([t]) => t !== meta).sort((a, b) => b[1] - a[1])[0]
-  if (other && rows.length < 3) rows.push({ over: 'Also busy', what: narrativeLabel(other[0] as never)?.label ?? other[0], n: other[1] })
-  if (!rows.length) return null
+  for (const [tag, n] of [...tags].sort((a, b) => b[1] - a[1]).slice(0, full ? 6 : 2)) rows.push({ over: 'Trending', what: spelled(tag), n })
+  const others = [...themes].filter(([t]) => t !== meta).sort((a, b) => b[1] - a[1])
+  for (const other of others.slice(0, full ? 4 : rows.length < 3 ? 1 : 0)) rows.push({ over: 'Also busy', what: narrativeLabel(other[0] as never)?.label ?? other[0], n: other[1] })
+  if (!rows.length) return full ? <p className="px-4 py-6 text-[13px]" style={{ color: X.dim }}>Nothing much yet. This fills up as posts come in.</p> : null
+  if (!full && !open) {
+    return (
+      <button onClick={() => setOpen(true)} aria-expanded={false} className="flex w-full items-center gap-2 border-b px-4 py-2 text-left text-[13px] hover:bg-white/[0.03]" style={{ borderColor: X.line }}>
+        <span className="font-bold" style={{ color: X.text }}>What is happening</span>
+        <span className="min-w-0 flex-1 truncate" style={{ color: X.dim }}>{rows[0].over}: {rows[0].what}</span>
+        <span style={{ color: X.blue }}>Show</span>
+      </button>
+    )
+  }
   return (
-    <div className="mx-4 my-3 rounded-2xl px-3.5 py-3" style={{ background: '#16181C' }}>
-      <div className="text-[17px] font-extrabold" style={{ color: X.text }}>What is happening</div>
+    <div className={full ? 'px-4 py-3' : 'mx-4 my-3 rounded-2xl px-3.5 py-3'} style={full ? undefined : { background: '#16181C' }}>
+      <div className="flex items-center justify-between">
+        <div className="text-[17px] font-extrabold" style={{ color: X.text }}>What is happening</div>
+        {!full && <button onClick={() => setOpen(false)} className="text-[13px] hover:underline" style={{ color: X.blue }}>Hide</button>}
+      </div>
       {rows.map((r, i) => (
         <div key={i} className="mt-2 flex items-center justify-between text-[14px]">
           <div className="min-w-0">

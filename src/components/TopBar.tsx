@@ -123,7 +123,7 @@ function DockToggle() {
   const [p, set] = useDockPrefs()
   const Icon = p.side === 'left' ? PanelLeft : PanelRight
   return (
-    <button onClick={() => set({ open: !p.open })} aria-pressed={p.open} className={clsx('hidden rounded-md p-1.5 hover:bg-panel2 lg:block', p.open ? 'text-accent' : 'text-muted hover:text-ink')} aria-label="Toggle trackers" title="Wallet & social trackers">
+    <button onClick={() => set(p.open ? { open: false } : { open: true, off: {} })} aria-pressed={p.open} className={clsx('hidden rounded-md p-1.5 hover:bg-panel2 lg:block', p.open ? 'text-accent' : 'text-muted hover:text-ink')} aria-label="Toggle trackers" title="Wallet & social trackers">
       <Icon size={15} />
     </button>
   )
