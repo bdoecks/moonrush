@@ -295,7 +295,7 @@ export function tickSocial(m: MarketState, rng: Rng, actions: WalletAction[], ev
   // from the hidden side but the name its post already gave: see feedFlavor.ts.)
   if (m.sparks?.length) {
     let n = 0
-    posts.push(...flavorPosts(m, Object.fromEntries(Object.entries(m.sparkSim ?? {}).map(([id, x]) => [id, x.name])), () => m.tick * 1000 + 900 + n++))
+    posts.push(...flavorPosts(m, Object.fromEntries(Object.entries(m.sparkSim ?? {}).map(([id, x]) => [id, x.name])), () => m.tick * 1000 + 800 + n++))
   }
 
   // Telegram channels post calls, and their members briefly pump what gets called.
