@@ -35,6 +35,13 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-10-12-back-button',
+    date: 'October 12, 2026',
+    title: 'The Back button works',
+    fixed: ['Your browser\u2019s Back button now takes you to the page or coin you had open before. It used to leave the game.'],
+    added: ['The address bar shows where you are, so reloading the page keeps you on the same page or coin.'],
+  },
+  {
     id: '2026-10-12-tracker-sides',
     date: 'October 12, 2026',
     title: 'Put each tracker where you want it',

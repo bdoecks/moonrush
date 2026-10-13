@@ -807,3 +807,15 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
 - "What is happening" is a TAB of the Social Tracker in the dock (`<Happening full />`): as a box over the feed it left
   one post in view. On the Track page and in the bottom panel it is one folded line that opens on a click.
 
+## Back, Forward and the address bar (2026-10-12)
+
+- `src/net/nav.ts` (`startNav` in `main.tsx`; browser only): every page and every open coin is a step in the browser's
+  history (`?page=trenches`, `?page=token&coin=<id>`), so Back goes to what the player had open (it used to leave the
+  game), and a reload or a link opens the same place when that coin is on this market (a coin that is gone opens the
+  page behind it). Other things in the address (`?ref=`, a test copy's switches) are kept.
+- **Not built: a coin in a new browser tab.** In the World the server refuses a second connection from the same player
+  ("already in this room on another device", `enter` in `server/index.ts`), and in solo play a second tab is a second
+  copy of the market that would fight the first over the save. Opening a coin in a new tab needs one player to hold
+  several connections with the wallet kept the same in each (the numbered wallet messages are per connection): a
+  medium job that touches money messages. The owner has been told; do not start it without his word.
+
