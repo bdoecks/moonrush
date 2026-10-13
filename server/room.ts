@@ -86,11 +86,20 @@ function round(v: unknown): unknown {
   return v
 }
 
+/** How many tabs one player may have open in a room. One more, and the oldest steps aside. */
+const MAX_TABS = 6
+
 interface Member {
   info: RoomPlayer
   focus?: string // World: the coin this player has open (the last one they asked the chart of): they get its live chart points and its whole tape
   seat?: string // guests: a hash of the private key they first joined with; only that key gets back in
+  // The connection being served: the one that sent the message in hand, else the one that spoke last. `ack` and
+  // `focus` below are that connection's.
   ws: WebSocket | null
+  // Every connection this player has open (a coin opened in a new browser tab is a second one), `ws` among them, each
+  // with the number of the last wallet message it sent and the coin it has open. What is here for `ws` is as of the
+  // last message it finished; `ack` and `focus` on the member are the live ones. Never saved.
+  tabs?: Map<WebSocket, { ack: number; focus?: string }>
   protect: string[]
   lastPostTick?: number
   addrs?: string[] // their wallet addresses (private: only used to route transfers sent to an address)
@@ -362,8 +371,17 @@ export class Room {
     const info: RoomPlayer = existing
       ? { ...existing.info, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, verified: !!msg.verified, spectator: spectator || undefined }
       : { id: msg.playerId, name: msg.name, avatar: msg.avatar, level: msg.level, online: true, equity: 0, startEquity: 0, trades: 0, wins: 0, verified: !!msg.verified, spectator: spectator || undefined }
-    existing?.ws?.close(4000, 'Joined from another tab')
-    this.members.set(msg.playerId, { ...existing, info, ws, protect: existing?.protect ?? [], inbox: undefined, ack: 0, seat: existing?.seat ?? seat }) // a new connection restarts the wallet message count (the game does too)
+    // The same player from another tab (a coin opened in a new tab, a second window): every tab stays connected, the
+    // new one is the one being served. Each counts its own wallet messages from zero (the game does too).
+    const tabs = new Map([...(existing?.tabs ?? [])].filter(([sock]) => sock.readyState === 1))
+    if (existing?.ws && existing.ws.readyState === 1) tabs.set(existing.ws, { ack: existing.ack, focus: existing.focus })
+    while (tabs.size >= MAX_TABS) {
+      const [oldest] = tabs.keys()
+      tabs.delete(oldest)
+      oldest.close(4000, 'Joined from another tab')
+    }
+    tabs.set(ws, { ack: 0 })
+    this.members.set(msg.playerId, { ...existing, info, ws, tabs, focus: undefined, protect: existing?.protect ?? [], inbox: undefined, ack: 0, seat: existing?.seat ?? seat })
     if (!this.hostId && !this.world) this.hostId = msg.playerId
     this.emptySince = null
     this.send(ws, {
@@ -383,7 +401,17 @@ export class Room {
 
   leave(playerId: string, ws: WebSocket) {
     const m = this.members.get(playerId)
-    if (!m || m.ws !== ws) return // an old socket closing after a reconnect
+    if (!m) return
+    m.tabs?.delete(ws)
+    if (m.ws !== ws) return // another of their tabs closing, or an old socket after a reconnect
+    // The tab being served closed: another of theirs takes over, and only the last one leaving is the player leaving.
+    const next = [...(m.tabs ?? [])].find(([sock]) => sock.readyState === 1)
+    if (next) {
+      m.ws = next[0]
+      m.ack = next[1].ack
+      m.focus = next[1].focus
+      return
+    }
     m.ws = null
     m.info.online = false
     if (m.info.spectator) this.members.delete(playerId)
@@ -400,6 +428,34 @@ export class Room {
     }
     if (![...this.members.values()].some((x) => x.info.online)) this.emptySince = Date.now()
     this.broadcastPlayers()
+  }
+
+  /**
+   * A message from one of a player's connections. That connection becomes the one being served for as long as the
+   * message takes: answers go to it, numbered by its own count of wallet messages, and "the coin I have open" is its
+   * own. (A connection the room no longer keeps, an old tab that stepped aside, is not listened to.)
+   */
+  handleFrom(ws: WebSocket, playerId: string, msg: ClientMsg) {
+    const m = this.members.get(playerId)
+    const tab = m?.tabs?.get(ws)
+    if (m?.tabs && !tab) return
+    if (m && tab && m.ws !== ws) {
+      const was = m.ws ? m.tabs!.get(m.ws) : undefined
+      if (was) {
+        was.ack = m.ack
+        was.focus = m.focus
+      }
+      m.ws = ws
+      m.ack = tab.ack
+      m.focus = tab.focus
+    }
+    this.handle(playerId, msg)
+    const after = this.members.get(playerId)
+    const mine = after?.tabs?.get(ws)
+    if (after && mine && after.ws === ws) {
+      mine.ack = after.ack
+      mine.focus = after.focus
+    }
   }
 
   handle(playerId: string, msg: ClientMsg) {
@@ -706,6 +762,23 @@ export class Room {
     for (const [id, c] of this.cooked) if (c.pid === m.info.id) vaults[id] = c.vault
     const state = { ...walletStateOf(m.wallet), cashback: m.cashback ?? { sol: 0, bsc: 0, hood: 0 }, vaults }
     this.sendTo(m.info.id, { t: 'wallet', ack: m.ack, state, ...extra })
+    this.walletToOtherTabs(m, state)
+  }
+
+  /**
+   * The same wallet to a player's other tabs, so a trade made in one shows in all. Each gets it under the number of
+   * ITS last wallet message: a tab with an order of its own on the way keeps its own picture until that is answered.
+   */
+  private walletToOtherTabs(m: Member, state: Extract<ServerMsg, { t: 'wallet' }>['state'], extra: { reset?: true } = {}) {
+    for (const [sock, tab] of m.tabs ?? []) if (sock !== m.ws) this.send(sock, { t: 'wallet', ack: tab.ack, state, ...extra })
+  }
+
+  /** Something a player should see wherever they are: every tab of theirs. */
+  private sendAll(playerId: string, msg: ServerMsg) {
+    const m = this.members.get(playerId)
+    if (!m) return
+    if (!m.tabs?.size) return this.send(m.ws, msg)
+    for (const sock of m.tabs.keys()) this.send(sock, msg)
   }
 
   /** Cashback on a player's fills (a share of the platform fee, tiered by their volume), paid now if they auto-claim. */
@@ -876,7 +949,7 @@ export class Room {
       ...(toAddr ? { toAddr } : {}),
     }
     this.sendTo(me.info.id, { t: 'sendResult', ref: msg.ref, ok: true, toName: toAddr ?? target.info.name })
-    if (target.ws) this.send(target.ws, recv)
+    if (target.ws) this.sendAll(target.info.id, recv)
     else target.inbox = [...(target.inbox ?? []), recv].slice(-50)
     this.sendWallet(me)
     this.sendWallet(target)
@@ -1070,7 +1143,7 @@ export class Room {
 
   /** `joined`: sent because they (re)joined, not because something just changed. */
   private sendSocial(m: Member, social: SocialProfile, results?: CallResult[], joined?: boolean) {
-    this.sendTo(m.info.id, { t: 'social', social, ...(results?.length ? { results } : {}), ...(joined ? { joined: true } : {}) })
+    this.sendAll(m.info.id, { t: 'social', social, ...(results?.length ? { results } : {}), ...(joined ? { joined: true } : {}) })
   }
 
   // ─── The clock ─────────────────────────────────────────────────────────────
@@ -1245,14 +1318,19 @@ export class Room {
     // So the tick carries neither; each player is sent the chart points and trades of the coin they have open, just
     // before the tick (built once per coin, however many are looking at it).
     if (this.world) {
-      const looking = new Map<string, Member[]>()
-      for (const m of this.members.values()) if (m.focus && m.ws && m.ws.readyState === 1) looking.set(m.focus, [...(looking.get(m.focus) ?? []), m])
+      const looking = new Map<string, WebSocket[]>()
+      for (const m of this.members.values()) {
+        for (const [sock, tab] of m.tabs?.size ? m.tabs : m.ws ? [[m.ws, { ack: m.ack, focus: m.focus }] as const] : []) {
+          const open = sock === m.ws ? m.focus : tab.focus // (the connection being served keeps its coin on the member)
+          if (open && sock.readyState === 1) looking.set(open, [...(looking.get(open) ?? []), sock])
+        }
+      }
       for (const [id, who] of looking) {
         const pts = points[id]
         const tape = this.freshTape.get(id)
         if (!pts && !tape) continue
         const data = Buffer.from(JSON.stringify({ t: 'focus', tokenId: id, ...(pts ? { points: pts } : {}), ...(tape ? { tape: round(tape) as TapeTrade[] } : {}) } satisfies ServerMsg))
-        for (const m of who) m.ws!.send(data, { binary: false })
+        for (const sock of who) sock.send(data, { binary: false })
       }
     }
     this.pending = new Map()
@@ -1898,9 +1976,9 @@ export class Room {
   kick(playerId: string, reason: string) {
     const m = this.members.get(playerId)
     if (!m) return false
-    if (m.ws) {
-      this.send(m.ws, { t: 'kicked', reason })
-      m.ws.close(4003, 'kicked')
+    for (const sock of m.tabs?.size ? [...m.tabs.keys()] : m.ws ? [m.ws] : []) {
+      this.send(sock, { t: 'kicked', reason })
+      sock.close(4003, 'kicked')
     }
     this.members.delete(playerId)
     if (this.hostId === playerId) this.hostId = [...this.members.keys()][0] ?? ''
@@ -2098,6 +2176,7 @@ export class Room {
     me.restarts = (me.restarts ?? 0) + 1
     for (const c of this.cooked.values()) if (c.pid === me.info.id) c.vault = 0
     this.boardCache = null
+    this.walletToOtherTabs(me, { ...walletStateOf(me.wallet), cashback: { sol: 0, bsc: 0, hood: 0 } }, { reset: true })
     this.sendTo(me.info.id, { t: 'wallet', ack: me.ack, state: { ...walletStateOf(me.wallet), cashback: { sol: 0, bsc: 0, hood: 0 } }, reset: true, note: `Fresh start: you're back in with $${WORLD_RESTART_BALANCE.toLocaleString('en-US')}. Next restart available in 24 hours.` })
   }
 
@@ -2137,6 +2216,7 @@ export class Room {
         this.wallets = this.wallets.map((w) => (w.id === m.info.id ? { ...w, cash: start, startValue: start, positions: {} } : w))
       }
       m.info = { ...m.info, equity: start, startEquity: start, trades: 0, wins: 0 }
+      this.walletToOtherTabs(m, { ...walletStateOf(m.wallet), cashback: { sol: 0, bsc: 0, hood: 0 } }, { reset: true })
       this.sendTo(m.info.id, { t: 'wallet', ack: m.ack, state: { ...walletStateOf(m.wallet), cashback: { sol: 0, bsc: 0, hood: 0 } }, reset: true })
       n++
     }
@@ -2181,6 +2261,7 @@ export class Room {
       m.cookTicks = undefined
       m.copyBook = undefined
       if (m.focus && gone.has(m.focus)) m.focus = undefined
+      for (const tab of m.tabs?.values() ?? []) if (tab.focus && gone.has(tab.focus)) tab.focus = undefined
       if (m.protect.some((id) => gone.has(id))) m.protect = m.protect.filter((id) => !gone.has(id))
     }
     this.hall = []
@@ -2199,7 +2280,7 @@ export class Room {
       const next = addFunds(w, asset, amount)
       m.wallet = { ...next, startBalance: next.startBalance + usd }
     }
-    this.sendTo(playerId, { t: 'grant', usd: asset === 'usd' ? amount : 0, asset, amount })
+    this.sendAll(playerId, { t: 'grant', usd: asset === 'usd' ? amount : 0, asset, amount })
     this.sendWallet(m)
     return true
   }
@@ -2235,6 +2316,10 @@ export class Room {
   private broadcast(msg: ServerMsg) {
     // Turned into bytes once for everybody (as a string, every socket would encode it again). Still a text message.
     const data = Buffer.from(JSON.stringify(msg))
-    for (const m of this.members.values()) if (m.ws && m.ws.readyState === 1) m.ws.send(data, { binary: false })
+    for (const m of this.members.values()) {
+      if (m.tabs?.size) {
+        for (const sock of m.tabs.keys()) if (sock.readyState === 1) sock.send(data, { binary: false })
+      } else if (m.ws && m.ws.readyState === 1) m.ws.send(data, { binary: false })
+    }
   }
 }

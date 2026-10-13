@@ -1,4 +1,5 @@
 import clsx from 'clsx'
+import { coinClick, coinHref } from '../../net/nav'
 import { fakeAddress } from '../../utils/address'
 import { CHAINS } from '../../data/chains'
 import { ChainBadge, ColumnQuickPicker, QuickBuyButton } from '../chain'
@@ -187,15 +188,20 @@ export const Card = memo(function Card({ t, now, preview, col, fresh = true }: {
   // The dev's record: coins migrated out of coins launched. Your own coin reads your own launches (as text, for the same reason).
   const mine = useGame((s) => (t.creator === 'you' ? s.launches.map((l) => `${l.tokenId}:${s.market.tokens.find((x) => x.id === l.tokenId)?.status ?? l.status}`).join('|') : ''))
   const dev = useMemo(() => devRecord(t, t.creator === 'you' ? mine.split('|').filter(Boolean).map((x) => ({ tokenId: x.slice(0, x.lastIndexOf(':')), status: x.slice(x.lastIndexOf(':') + 1) })) : undefined), [t.id, t.status, t.creator, mine])
+  const online = useGame((s) => !!s.online)
   const round = d.image === 'circle' ? 'rounded-full' : 'rounded-md'
   const big = d.metrics === 'large'
   const mc = d.roundMc ? fmtRounded : fmtCompact
   const audit = [show('top10'), show('dev'), show('devRecord'), show('snipers'), show('insiders'), show('bundlers')].some(Boolean) || show('change')
 
+  // (The card is a real link where a second tab can be the same game, so the browser's own "Open in new tab" works.)
+  const href = preview ? undefined : coinHref(t.id, online)
   return (
-    <div
-      onClick={preview ? undefined : () => select(t.id)}
-      className={clsx('group relative border-b border-line/70 px-2.5 py-2 transition-colors', !preview && 'cursor-pointer hover:bg-panel2', !preview && slide && 'slide-in', (dead || hidden) && 'opacity-50')}
+    <a
+      href={href}
+      draggable={false}
+      onClick={preview ? undefined : (e) => coinClick(e, href, () => select(t.id))}
+      className={clsx('group relative block border-b border-line/70 px-2.5 py-2 transition-colors', !preview && 'cursor-pointer hover:bg-panel2', !preview && slide && 'slide-in', (dead || hidden) && 'opacity-50')}
     >
       <div className="flex gap-2.5">
         {/* Avatar + address */}
@@ -309,7 +315,7 @@ export const Card = memo(function Card({ t, now, preview, col, fresh = true }: {
 
       {/* Hover quick-buy */}
       {!preview && <QuickBuyButton t={t} col={col} className="absolute right-2 bottom-2 border-0 bg-up px-2.5 text-black shadow-[0_0_16px_-4px_#19d989] hover:brightness-110 md:opacity-0 md:group-hover:opacity-100" />}
-    </div>
+    </a>
   )
 })
 

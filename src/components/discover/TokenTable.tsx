@@ -1,4 +1,5 @@
 import clsx from 'clsx'
+import { coinHref } from '../../net/nav'
 import { Boxes, ChefHat, ChevronDown, ChevronUp, Crosshair, Eye, Ghost, Star, UserRound, Users } from 'lucide-react'
 import { HideButton } from '../HideButton'
 import { useHidden } from '../../game/hidden'
@@ -143,6 +144,7 @@ export function TokenTable({ tokens, tf, sortKey, sortDir, onSort, cursor }: Pro
 
 const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { t: Token; tf: ChangeTf; now: number; watched: boolean; held: boolean; active: boolean; compact: boolean }) {
   const select = useGame((s) => s.select)
+  const online = useGame((s) => !!s.online)
   const toggleWatch = useGame((s) => s.toggleWatch)
   const hidden = useHidden((s) => s.ids.includes(t.id))
   const dead = t.status === 'rugged' || t.status === 'dead'
@@ -157,11 +159,13 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
   const bundler = publicBundlePct(t)
   const watchers = Math.round(t.hype * 0.6 + Math.sqrt(t.holders) * 2)
   const cell = clsx('border-b border-line/60 px-2', py)
+  const href = coinHref(t.id, online)
 
   return (
     <tr
       data-win
-      onClick={() => select(t.id)}
+      onClick={(e) => { if (href && (e.ctrlKey || e.metaKey)) window.open(href, '_blank'); else select(t.id) }}
+      onAuxClick={(e) => { if (href && e.button === 1) window.open(href, '_blank') }}
       className={clsx('group cursor-pointer transition-colors', active ? 'bg-raise' : 'hover:bg-panel2', (dead || hidden) && 'opacity-55')}
     >
       <td className={clsx('sticky left-0 z-[1] border-b border-line/60 pl-2', active ? 'bg-raise' : 'bg-bg group-hover:bg-panel2')}>
@@ -183,7 +187,8 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
           <TokenIcon token={t} size={compact ? 28 : 36} />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <span className="text-[13px] font-bold text-ink">{t.ticker}</span>
+              {/* (A real link where a second tab can be the same game: right-click it for "Open in new tab".) */}
+              <a href={href} draggable={false} onClick={(e) => { if (href && (e.ctrlKey || e.metaKey || e.shiftKey)) e.stopPropagation(); else e.preventDefault() }} onAuxClick={(e) => e.stopPropagation()} className="text-[13px] font-bold text-ink hover:underline">{t.ticker}</a>
               <span className="hidden max-w-[120px] truncate text-[11px] text-dim sm:inline">{t.name}</span>
               {held && <span className="rounded bg-accent/15 px-1 text-[9px] font-bold text-accent">HELD</span>}
               {t.hype > 75 && <span title="Social activity is spiking">🔥</span>}

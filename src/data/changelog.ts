@@ -35,6 +35,15 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-10-12-coin-new-tab',
+    date: 'October 12, 2026',
+    title: 'Open a coin in a new tab',
+    added: [
+      'In the World and in friends rooms, right-click a coin and choose "Open link in new tab", or click it with the middle button or with Ctrl held. The coin opens in its own browser tab, like on a real market.',
+      'You can keep several tabs open as the same player. A trade in one tab shows in the others, and each tab keeps its own coin and chart.',
+    ],
+  },
+  {
     id: '2026-10-12-back-button',
     date: 'October 12, 2026',
     title: 'The Back button works',

@@ -20,6 +20,32 @@ function addressOf(spot: Spot): string {
   return u.pathname + u.search + u.hash
 }
 
+/**
+ * The address of a coin's page, for a link a browser can open in a new tab. Only where a second tab can be the same
+ * game: in a room or the World, where the server runs the market and keeps the wallet, and a new tab joins as the same
+ * player. In solo play the market lives in the tab itself, so a second tab would be a second market: no link there.
+ */
+export function coinHref(id: string, online: boolean): string | undefined {
+  if (!online || typeof location === 'undefined') return undefined
+  const u = new URL(location.href)
+  u.searchParams.set('page', 'token')
+  u.searchParams.set('coin', id)
+  return u.pathname + u.search
+}
+
+/**
+ * What a coin's link does with a click. A plain click opens the coin here, as before. With Ctrl, Cmd or Shift, or the
+ * middle button, the browser opens the link in a new tab or window and this tab stays where it is. A click on a button
+ * inside the link (quick buy, hide, the leaf) is that button's: it never follows the link.
+ */
+export function coinClick(e: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; button: number; target: EventTarget | null; preventDefault(): void }, href: string | undefined, open: () => void) {
+  const onButton = !!(e.target as Element | null)?.closest?.('button, input, select, textarea, [role="button"]')
+  if (onButton) return e.preventDefault()
+  if (href && (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1)) return
+  e.preventDefault()
+  open()
+}
+
 /** Go to a place from the history or the address. A coin that is not on this market any more opens the market page. */
 function go(spot: Spot) {
   const s = useGame.getState()
@@ -35,10 +61,32 @@ export function startNav() {
   // An address that names a place (a reload, a link): open it. Else the address takes the place the game opened on.
   const q = new URLSearchParams(location.search)
   const page = q.get('page')
-  if (page && VIEWS.includes(page)) go({ view: page as View, coin: q.get('coin') })
+  const coin = q.get('coin')
+  if (page && VIEWS.includes(page)) go({ view: page as View, coin })
+  // A coin opened in a new tab: this tab joins the room first (net/client.ts, resumeRoom), and the coin is not here
+  // until the room has sent its market. Open it when it arrives; give up after half a minute or when the player goes
+  // somewhere else themselves.
+  let wanted = page === 'token' && coin && !useGame.getState().market.tokens.some((t) => t.id === coin) ? coin : null
+  const wantedUntil = Date.now() + 30_000
   let last = spotOf(useGame.getState())
   history.replaceState({ spot: last }, '', addressOf(last))
   useGame.subscribe((s) => {
+    if (wanted) {
+      if (Date.now() > wantedUntil || s.view === 'token') wanted = null
+      else if (s.market.tokens.some((t) => t.id === wanted)) {
+        const id = wanted
+        wanted = null
+        moving = true
+        try {
+          useGame.setState({ view: 'token', selectedId: id })
+          last = spotOf(useGame.getState())
+          history.replaceState({ spot: last }, '', addressOf(last))
+        } finally {
+          moving = false
+        }
+        return
+      }
+    }
     const now = spotOf(s)
     if (same(now, last)) return
     last = now

@@ -34,6 +34,7 @@ npx tsx scripts/world-test.ts               # World rules: always on, guests wat
 npx tsx scripts/bots-test.ts 2              # World bots over 2 simulated hours
 npx tsx scripts/safety-test.ts              # chat safety: filter, rate limit, mute, reports
 npx tsx scripts/seat-test.ts                # guest seats: only the browser with the seat key rejoins as that guest
+npx tsx scripts/tabs-test.ts                # one player in several tabs: each connection its own count and open coin, one wallet
 npx tsx scripts/kol-test.ts                 # KOL copy traders: followers copy a KOL's buys and sells
 npx tsx scripts/social-test.ts              # followers are the server's count: the World ignores claims, calls judged on the server
 npx tsx scripts/charts-test.ts 30           # charts across a restart: short timeframes rebuilt from the real 1m candles
@@ -813,9 +814,19 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   history (`?page=trenches`, `?page=token&coin=<id>`), so Back goes to what the player had open (it used to leave the
   game), and a reload or a link opens the same place when that coin is on this market (a coin that is gone opens the
   page behind it). Other things in the address (`?ref=`, a test copy's switches) are kept.
-- **Not built: a coin in a new browser tab.** In the World the server refuses a second connection from the same player
-  ("already in this room on another device", `enter` in `server/index.ts`), and in solo play a second tab is a second
-  copy of the market that would fight the first over the save. Opening a coin in a new tab needs one player to hold
-  several connections with the wallet kept the same in each (the numbered wallet messages are per connection): a
-  medium job that touches money messages. The owner has been told; do not start it without his word.
+- **A coin in a new browser tab** (the owner's ask, as on a real market). In a room or the World a coin is a real link
+  (`coinHref` / `coinClick` in `nav.ts`: the Trenches card is an `<a>`, the market table's ticker too), so the browser's
+  own "Open link in new tab", a middle click and Ctrl-click work. The new tab joins the room by itself (`resumeRoom`) and
+  opens on its coin once the room has sent the market (`wanted` in `startNav`). **No link in solo play**: there the market
+  lives in the tab, and a second tab would be a second market fighting the first over the save.
+- **One player, several connections** (`server/room.ts`): `Member.tabs` holds every connection of a player, each with ITS
+  count of wallet messages (`ack`) and ITS open coin (`focus`); `Member.ws` / `ack` / `focus` are those of the
+  connection being served (`handleFrom` switches to the one a message came in on, and writes its numbers back after).
+  An answer goes to the connection that asked (`sendTo`); what a player should see wherever they are goes to all of
+  theirs (`sendAll`: money arriving, followers, grants); the wallet goes to every tab under that tab's own number
+  (`walletToOtherTabs`), so a tab with an order of its own on the way keeps its picture until that is answered, as rule
+  2 has it. Only the last tab closing takes the player offline; a seventh tab (`MAX_TABS`) closes the oldest with the old
+  "opened in another tab" notice. Connections are never saved. `scripts/tabs-test.ts` holds all of it (21 checks): run it
+  after touching `join`, `leave`, `sendWallet` or anything that sends to one player. What does NOT follow a player
+  across tabs until a reload: things only the browser keeps (the watchlist, settings, the My launches list).
 

@@ -317,7 +317,7 @@ wss.on('connection', (ws: WebSocket) => {
   // drop every player in every room and the World. Log it and carry on.
   const handle = (m: ClientMsg) => {
     try {
-      room?.handle(playerId, m)
+      room?.handleFrom(ws, playerId, m)
     } catch (e) {
       console.error(`[room ${room?.code}] "${m?.t}" from ${playerId} failed:`, e)
     }
