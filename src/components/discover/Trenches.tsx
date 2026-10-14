@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { coinClick, coinHref } from '../../net/nav'
+import { coinClick, coinHref, coinMenu } from '../../net/nav'
 import { fakeAddress } from '../../utils/address'
 import { CHAINS } from '../../data/chains'
 import { ChainBadge, ColumnQuickPicker, QuickBuyButton } from '../chain'
@@ -201,6 +201,7 @@ export const Card = memo(function Card({ t, now, preview, col, fresh = true }: {
       href={href}
       draggable={false}
       onClick={preview ? undefined : (e) => coinClick(e, href, () => select(t.id))}
+      onContextMenu={preview ? undefined : (e) => coinMenu(e, href)}
       className={clsx('group relative block border-b border-line/70 px-2.5 py-2 transition-colors', !preview && 'cursor-pointer hover:bg-panel2', !preview && slide && 'slide-in', (dead || hidden) && 'opacity-50')}
     >
       <div className="flex gap-2.5">

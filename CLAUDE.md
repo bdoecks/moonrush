@@ -816,7 +816,8 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   page behind it). Other things in the address (`?ref=`, a test copy's switches) are kept.
 - **A coin in a new browser tab** (the owner's ask, as on a real market). In a room or the World a coin is a real link
   (`coinHref` / `coinClick` in `nav.ts`: the Trenches card is an `<a>`, the market table's ticker too), so the browser's
-  own "Open link in new tab", a middle click and Ctrl-click work. The new tab joins the room by itself (`resumeRoom`) and
+  own "Open link in new tab", a middle click and Ctrl-click work. A plain right-click opens the coin in a new tab at once,
+  with no menu (`coinMenu`, the owner's ask 2026-10-13); in solo play there is no link, so the browser's menu shows. The new tab joins the room by itself (`resumeRoom`) and
   opens on its coin once the room has sent the market (`wanted` in `startNav`). **No link in solo play**: there the market
   lives in the tab, and a second tab would be a second market fighting the first over the save.
 - **One player, several connections** (`server/room.ts`): `Member.tabs` holds every connection of a player, each with ITS

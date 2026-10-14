@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { coinHref } from '../../net/nav'
+import { coinHref, coinMenu } from '../../net/nav'
 import { Boxes, ChefHat, ChevronDown, ChevronUp, Crosshair, Eye, Ghost, Star, UserRound, Users } from 'lucide-react'
 import { HideButton } from '../HideButton'
 import { useHidden } from '../../game/hidden'
@@ -166,6 +166,7 @@ const Row = memo(function Row({ t, tf, now, watched, held, active, compact }: { 
       data-win
       onClick={(e) => { if (href && (e.ctrlKey || e.metaKey)) window.open(href, '_blank'); else select(t.id) }}
       onAuxClick={(e) => { if (href && e.button === 1) window.open(href, '_blank') }}
+      onContextMenu={(e) => coinMenu(e, href)}
       className={clsx('group cursor-pointer transition-colors', active ? 'bg-raise' : 'hover:bg-panel2', (dead || hidden) && 'opacity-55')}
     >
       <td className={clsx('sticky left-0 z-[1] border-b border-line/60 pl-2', active ? 'bg-raise' : 'bg-bg group-hover:bg-panel2')}>

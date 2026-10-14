@@ -46,6 +46,17 @@ export function coinClick(e: { ctrlKey: boolean; metaKey: boolean; shiftKey: boo
   open()
 }
 
+/**
+ * A right-click on a coin opens it in a new browser tab straight away (the owner's ask: no menu in between). Only where
+ * a coin has a link (see coinHref); in solo play the browser's own menu shows as before. A right-click on a text box
+ * inside the coin's row keeps its menu (paste).
+ */
+export function coinMenu(e: { target: EventTarget | null; preventDefault(): void }, href: string | undefined) {
+  if (!href || (e.target as Element | null)?.closest?.('input, textarea')) return
+  e.preventDefault()
+  window.open(href, '_blank')
+}
+
 /** Go to a place from the history or the address. A coin that is not on this market any more opens the market page. */
 function go(spot: Spot) {
   const s = useGame.getState()

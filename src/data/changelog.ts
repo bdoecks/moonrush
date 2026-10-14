@@ -35,6 +35,12 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-10-13-right-click',
+    date: 'October 13, 2026',
+    title: 'Right-click a coin to open it in a new tab',
+    changed: ['In the World and in friends rooms, a right-click on a coin now opens it in a new browser tab straight away. A middle click or a click with Ctrl held still does the same.'],
+  },
+  {
     id: '2026-10-12-coin-new-tab',
     date: 'October 12, 2026',
     title: 'Open a coin in a new tab',
