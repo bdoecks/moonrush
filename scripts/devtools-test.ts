@@ -144,7 +144,8 @@ ok(soon >= 2 && soon < got0, `some sell what they were sent right away, the othe
 ok(left < got0 * 0.5, `and most have sold within a few minutes (${got0 - left} of ${got0})`)
 const sellers = r.wallets.filter((w) => w.trades.some((x) => x.tokenId === B && x.side === 'sell' && x.why === GIFT_WHY))
 ok(sellers.length >= 3, `a trader's page says why it sold: "${GIFT_WHY}" (${sellers.length} traders)`)
-ok(sellers.every((w) => !w.trades.some((x) => x.tokenId === B && x.side === 'buy' && x.action !== 'more')), 'none of them shows a buy of the coin it never chose')
+// (Its first trade of the coin is that sell: no buy before it. It may choose to buy the coin later, like anybody.)
+ok(sellers.every((w) => { const mine = w.trades.filter((x) => x.tokenId === B); return mine[mine.length - 1]?.why === GIFT_WHY }), 'none of them shows a buy of the coin before selling what it was sent')
 
 console.log(bad ? `${bad} check(s) failed` : 'all checks passed')
 process.exit(bad ? 1 : 0)

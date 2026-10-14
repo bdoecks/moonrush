@@ -35,6 +35,19 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-10-13-rapid-deploy',
+    date: 'October 13, 2026',
+    title: 'Deploy and Rapid deploy from a post',
+    flag: 'cooking',
+    added: [
+      'Turn on "Deploy buttons" in the X tracker (or in Cooking > Rapid deploy settings) and every open post in the World gets two buttons. Deploy opens Cooking with that post on top of the form.',
+      'Rapid deploy shows three coin ideas made from the post, ready to go with your own settings. One click launches it and opens your coin.',
+      'Rapid deploy settings: chain and launchpad, which dev wallet, the dev buy, a bundle, the ticker style, and auto-sell for the dev bag and for the bundle (after a time, at a multiple, at a market cap, or a stop loss).',
+      'The dev panel on your coin can now sell your bundle on its own, apart from the dev bag.',
+    ],
+    changed: ['The list of posts is no longer on the Cooking page: press Deploy under a post in the X tracker instead.'],
+  },
+  {
     id: '2026-10-13-dev-tools',
     date: 'October 13, 2026',
     title: 'The volume bot and the airdrop work like the real ones',

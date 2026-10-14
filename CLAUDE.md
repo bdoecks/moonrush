@@ -51,6 +51,7 @@ npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Ligh
 npx tsx scripts/missions-test.ts            # weekly missions and career ladders: counted from fills, each paid once, weeks roll over
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/cook-test.ts                # cooking in the World: a player's launch is under the fair-market rules, snipers pass on a big dev bag
+npx tsx scripts/rapid-test.ts               # rapid deploy: the three ideas read off a post's words, the auto-sell rules
 npx tsx scripts/devtools-test.ts            # a dev's tools: the volume bot package (real trades, fee, stops itself) and the airdrop (own wallets, picked traders)
 npx tsx scripts/cook-report.ts 3            # what cooking pays, recipe by recipe (not pass/fail): read before and after touching launches or creator fees
 npx tsx scripts/tutorial-test.ts            # the tutorials: every step readable, the waiting steps move on for the right thing only
@@ -852,4 +853,25 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   with the reason "Sold tokens the dev sent it". Receiving is not a trade, so no followers copy it. The Tracked tab
   marks such a holding "sent by dev". **A browser can no longer queue anybody's sells** (the old message carried a
   dump list). The old "current holders" / random "fresh wallets" airdrops are gone.
+
+## Deploy and Rapid deploy (2026-10-13, the owner's design)
+
+- `components/cook/RapidDeploy.tsx`, `game/rapid.ts`, `scripts/rapid-test.ts`. Two buttons under each open post in the X
+  tracker (World only, Cooking open, and only when the player turned on `settings.devButtons`: off by default so
+  traders never see dev buttons; the switch is in the tracker's filter row and in Cooking > Rapid deploy settings).
+  **Deploy** opens Cooking with that post on top of the form (`useDeploy.cookPost`); the list of posts that used to be
+  on the Cooking page is gone. **Rapid deploy** opens a window with three ideas (`rapidIdeas`: the name the post gives,
+  the same name with another ticker, a "Baby" version), read off the post's WORDS only (the browser never has a post's
+  hidden side: `rapid-test` checks the first idea is the post's name 599 times in 600, as a careful reader would find
+  it). One click launches with `settings.rapid` (chain, pad, dev wallet, dev buy, bundle, ticker style) and opens the
+  coin. The owner had said a player types the name on a post (2026-10-11); with rapid deploy he chose filled-in ideas.
+  Launching on a post with the exact name was already measured to lose (`cook-post-report`): re-measure if the
+  post-launch fees, creator fees or `gain` change.
+- **Auto-sell** (`SellRules`, `LaunchRecord.autoSell`, `runAutoSell` in the store, run once a tick by
+  `AutoSellRunner`): separate rules for the dev bag and the bundle (after X s, take-profit steps at x times the market
+  cap just after launch, at a market cap, stop loss); each rule fires once and sells through the ordinary `sell`, so
+  the server judges it like any order. `sell(…, part)` sells the visible dev bag or the hidden bundle on purpose (by
+  default the bundle goes first, as before); the dev panel has Sell bundle buttons.
+- Found on the way: a coin opened the second it launched showed its first trades twice (`localToken` in
+  `net/client.ts` now keeps each trade once, in id order, and the trade log in `ledger.ts` folds by id).
 

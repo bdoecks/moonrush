@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Card } from '../components/discover/Trenches'
 import { ImagePicker } from '../components/cook/ImagePicker'
 import { AirdropPanel, BundlerSection, SideWalletsSection, VolumeBotPanel } from '../components/cook/DevTools'
+import { RapidSettingsPanel, useDeploy } from '../components/cook/RapidDeploy'
 import { useWallets } from '../hooks/useWallets'
 import { BUNDLE_WALLET_FEE, bundleDetectChance, STAGGER_FEE } from '../game/devTools'
 import { EmptyState, Segmented, TokenIcon } from '../components/ui'
@@ -98,6 +99,16 @@ export function CookingView() {
   const sparks = useGame((s) => s.market.sparks)
   const openPosts = inWorld ? (sparks ?? []).filter((x) => !x.picked && x.over === undefined && x.kind !== 'tech').slice(0, 12) : []
   const onPost = spec.onPost ? openPosts.find((x) => x.id === spec.onPost) : undefined
+  // A post's Deploy button (X tracker) opens this page on that post: it goes on top of the form.
+  const cookPost = useDeploy((s) => s.cookPost)
+  const setCookPost = useDeploy((s) => s.setCookPost)
+  useEffect(() => {
+    if (!cookPost) return
+    setTab0('create')
+    pickPost(cookPost)
+    setCookPost(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cookPost])
   useEffect(() => {
     if (spec.onPost && !onPost) setSpec((s) => ({ ...s, onPost: undefined }))
   }, [spec.onPost, onPost])
@@ -208,7 +219,7 @@ export function CookingView() {
             <h1 className="font-display text-[17px] font-bold">Cooking</h1>
           </div>
           <div role="tablist" className="flex gap-1 rounded-md border border-line2 bg-bg p-0.5">
-            {([['create', 'Launch a coin'], ['vamp', '🧛 Vamp coin'], ['launches', `My launches${launches.length ? ` · ${launches.length}` : ''}`]] as const).map(([k, label]) => (
+            {([['create', 'Launch a coin'], ['vamp', '🧛 Vamp coin'], ['launches', `My launches${launches.length ? ` · ${launches.length}` : ''}`], ['rapid', '⚡ Rapid deploy settings']] as const).map(([k, label]) => (
               <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={clsx('rounded px-3 py-1 text-[12px] font-bold transition-colors', tab === k ? 'bg-raise text-ink' : 'text-dim hover:text-muted')}>
                 {label}
               </button>
@@ -234,6 +245,8 @@ export function CookingView() {
             <MyLaunches onCreate={() => setTab('create')} />
             <RecentlyCooked tokens={tokens} now={now} onOpen={(id) => select(id)} />
           </>
+        ) : tab === 'rapid' ? (
+          <RapidSettingsPanel />
         ) : tab === 'vamp' ? (
           <VampPicker
             tokens={tokens}
@@ -244,54 +257,36 @@ export function CookingView() {
             }}
           />
         ) : (
-        <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)_300px]">
-          {/* ① What to launch on: a post the timeline has not settled yet, or nothing (the player's own idea). */}
-          <section data-tut="cook-posts" className="flex max-h-[calc(100vh-190px)] min-h-[420px] flex-col overflow-hidden rounded-xl border lg:col-span-2 xl:col-span-1" style={{ ...feedStyle, borderColor: X.line }}>
-            <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5 text-[13px] font-bold" style={{ borderColor: X.line, color: X.dim }}>
-              <span>1. Pick what to launch on</span>
-              {openPosts.length > 0 && <span className="text-[12px] font-normal">posts leave this list when the timeline settles</span>}
+        <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="min-w-0 space-y-3">
+          {/* ① What it launches on: the post its Deploy button was pressed on (X tracker), or the player's own idea. */}
+          {onPost ? (
+            <section data-tut="cook-posts" className="flex gap-3 rounded-xl border px-4 py-3" style={{ ...feedStyle, borderColor: X.line }}>
+              <Face face={onPost.by.face ?? faceOf(onPost.by.handle)} emoji={onPost.by.avatar} size={40} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1 text-[14px] leading-5">
+                  <span className="truncate font-bold" style={{ color: X.text }}>{onPost.by.name}</span>
+                  {onPost.by.verified && <VerifiedMark size={14} />}
+                  <span className="min-w-0 shrink truncate" style={{ color: X.dim }}>@{onPost.by.handle} · {fmtAge(Math.max(0, now - onPost.time))} · {fmtCompact(onPost.by.followers, '')} followers</span>
+                  <button onClick={() => pickPost(undefined)} className="ml-auto shrink-0 rounded-full px-2 py-0.5 text-[12px] hover:bg-white/10" style={{ color: X.dim }} title="Launch your own idea instead">✕ not this post</button>
+                </div>
+                <div className="mt-1 whitespace-pre-line break-words text-[15px] leading-5" style={{ color: X.text }}>{onPost.text}</div>
+                {onPost.quote && <div className="mt-1.5 rounded-lg border px-2.5 py-1.5 text-[12px]" style={{ borderColor: X.line, color: X.dim }}>Screenshot of a post by <b style={{ color: X.text }}>{onPost.quote.name}</b> · not posted from that account</div>}
+                {onPost.pic && <img src={`${import.meta.env.BASE_URL}posts/${onPost.pic}.webp`} alt="The post's picture" className="mt-2 block max-h-[220px] w-full rounded-xl border object-cover" style={{ borderColor: X.line }} />}
+                <div className="mt-1.5 text-[12px]" style={{ color: X.dim }}>Launching on this post. It leaves when the timeline settles.</div>
+              </div>
+            </section>
+          ) : (
+            <div data-tut="cook-posts" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-panel px-4 py-2.5 text-[12px]">
+              <span className="font-bold">No post: your own idea</span>
+              <span className="text-dim">{inWorld ? 'To launch on a post, press Deploy under it in the X tracker (turn on Deploy buttons there or in Rapid deploy settings).' : 'Launching on a post happens in the World, where everybody sees the same timeline.'}</span>
             </div>
-            <button onClick={() => pickPost(undefined)} aria-pressed={!onPost} className={clsx('flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-white/[0.03]', !onPost && 'bg-accent/[0.06] shadow-[inset_3px_0_0_var(--accent)]')} style={{ borderColor: X.line }}>
-              <span className="grid size-9 shrink-0 place-items-center rounded-full border border-dashed text-[18px]" style={{ borderColor: '#536471', color: X.dim }}>+</span>
-              <span className="min-w-0">
-                <span className="block text-[14px] font-bold" style={{ color: X.text }}>No post: my own idea</span>
-                <span className="block text-[13px]" style={{ color: X.dim }}>Your name, your picture. Nobody is waiting for it.</span>
-              </span>
-            </button>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {openPosts.map((x) => {
-                const f = x.by.followers
-                const badge = f >= 20_000_000 ? { bg: 'rgba(192,132,252,0.2)', fg: '#d8b4fe' } : f >= 500_000 ? { bg: 'rgba(255,176,32,0.18)', fg: '#ffb020' } : f >= 20_000 ? { bg: 'rgba(29,155,240,0.15)', fg: X.blue } : { bg: 'rgba(231,233,234,0.08)', fg: X.dim }
-                const on = onPost?.id === x.id
-                return (
-                  <button key={x.id} onClick={() => pickPost(x.id)} aria-pressed={on} className={clsx('flex w-full gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-white/[0.03]', on && 'bg-accent/[0.06] shadow-[inset_3px_0_0_var(--accent)]')} style={{ borderColor: X.line }}>
-                    <Face face={x.by.face ?? faceOf(x.by.handle)} emoji={x.by.avatar} size={36} />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1 text-[14px] leading-5">
-                        <span className="truncate font-bold" style={{ color: X.text }}>{x.by.name}</span>
-                        {x.by.verified && <VerifiedMark size={14} />}
-                        <span className="min-w-0 shrink truncate" style={{ color: X.dim }}>@{x.by.handle} · {fmtAge(Math.max(0, now - x.time))}</span>
-                        <span className="num ml-auto shrink-0 rounded px-1.5 py-px text-[11px] font-bold" style={{ background: badge.bg, color: badge.fg }}>{fmtCompact(f, '')}</span>
-                      </span>
-                      <span className="mt-1 block whitespace-pre-line break-words text-[14px] leading-[19px]" style={{ color: X.text }}>{x.text}</span>
-                      {x.quote && <span className="mt-1.5 block rounded-lg border px-2.5 py-1.5 text-[12px]" style={{ borderColor: X.line, color: X.dim }}>Screenshot of a post by <b style={{ color: X.text }}>{x.quote.name}</b> · not posted from that account</span>}
-                      {x.pic && <img src={`${import.meta.env.BASE_URL}posts/${x.pic}.webp`} alt="The post's picture" loading="lazy" className="mt-2 block h-[120px] w-full rounded-xl border object-cover" style={{ borderColor: X.line }} />}
-                    </span>
-                  </button>
-                )
-              })}
-              {openPosts.length === 0 && (
-                <p className="px-4 py-6 text-[13px] leading-5" style={{ color: X.dim }}>
-                  {inWorld ? 'No post is open right now. A new one comes every few seconds.' : 'Launching on a post happens in the World, where everybody sees the same timeline. Here you can launch your own idea.'}
-                </p>
-              )}
-            </div>
-          </section>
+          )}
 
           {/* ② to ④: the coin, where it launches, who launches it. One panel, as short as it can be. */}
           <section className="space-y-3.5 rounded-xl border border-line bg-panel p-4">
             <div className="flex items-center justify-between">
-              <Head>2. Your coin</Head>
+              <Head>Your coin</Head>
               {!onPost && (
                 <button onClick={() => up(randomIdentity(spec.narrative, tokens))} className="flex items-center gap-1 rounded border border-line2 px-2 py-0.5 text-[11px] text-muted hover:border-accent/50 hover:text-accent">
                   <Dices size={12} /> Randomize
@@ -343,7 +338,7 @@ export function CookingView() {
               </div>
             )}
 
-            <Head>3. Where it launches</Head>
+            <Head>Where it launches</Head>
             <div role="radiogroup" aria-label="Chain" className="flex flex-wrap gap-1.5">
               {CHAIN_IDS.map((c) => {
                 const m = CHAINS[c]
@@ -376,7 +371,7 @@ export function CookingView() {
               </div>
             )}
 
-            <Head>4. Who launches it</Head>
+            <Head>Who launches it</Head>
             <div data-tut="cook-deploy" className="flex flex-wrap gap-1.5">
               {devWallets.map((a) => {
                 const on = a.id === (spec.devWallet ?? devWallets[0]?.id)
@@ -430,6 +425,7 @@ export function CookingView() {
               )}
             </div>
           </section>
+          </div>
 
           {/* Summary: preview, cost, launch */}
           <aside className="overflow-hidden rounded-md border border-line bg-panel lg:sticky lg:top-3 lg:self-start">
@@ -502,7 +498,7 @@ function Line({ label, children }: { label: ReactNode; children: ReactNode }) {
   )
 }
 // ─── Vamp coin: clone a live coin to ride its hype ───────────────────────────
-type CookTab = 'create' | 'vamp' | 'launches'
+type CookTab = 'create' | 'vamp' | 'launches' | 'rapid'
 type VampStyle = 'exact' | 'baby' | 'two' | 'inu'
 const VAMP_STYLES: { id: VampStyle; label: string }[] = [
   { id: 'exact', label: 'Exact copy' },

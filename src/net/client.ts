@@ -642,7 +642,10 @@ function onTick(msg: TickMsg) {
 function localToken(d: TokenDiff, prev: Token | undefined, me: string, mine: Set<string>): Token {
   const fresh = (d.tape ?? []).map((e) => (e.pid === me || (e.addr && mine.has(e.addr)) ? { ...e, wallet: 'YOU', tag: 'you' as const } : e))
   // New trades go on top of what we had, dropping local-only copies of our own trades (the server echo replaces them).
-  const tape = prev ? [...fresh, ...prev.tape.filter((e) => !(e.tag === 'you' && !e.pid && !e.addr))].slice(0, TAPE_LEN) : fresh
+  // Each trade once: a coin that has just been launched comes whole on more than one tick (new, then its whole tape for
+  // the open coin), and opening your own coin the second it launches showed its first trades twice.
+  const seenIds = new Set<number>()
+  const tape = (prev ? [...fresh, ...prev.tape.filter((e) => !(e.tag === 'you' && !e.pid && !e.addr))] : fresh).filter((e) => (seenIds.has(e.id) ? false : (seenIds.add(e.id), true))).sort((a, b) => b.id - a.id).slice(0, TAPE_LEN)
   // Story beats arrive like trades: new ones whole and changed ones as patches, laid over what we had.
   const { beats: sent, ...rest } = d
   const beats = mergeBeats(prev?.beats, sent)

@@ -9,6 +9,7 @@ import { TrackerDock } from './components/tracker/TrackerDock'
 import { useGameLoop } from './hooks/useGameLoop'
 import { useKeyboard } from './hooks/useKeyboard'
 import { useGame } from './game/store'
+import { AutoSellRunner, RapidDeployModal } from './components/cook/RapidDeploy'
 import { syncMarket } from './game/ledger'
 import { foldDaily, newTrades } from './game/daily'
 import { rankMap, watchRanks } from './game/rankWatch'
@@ -182,6 +183,8 @@ export default function App() {
       <MobileTradeSheet />
       <Toasts />
       <Modals />
+      <RapidDeployModal />
+      <AutoSellRunner />
       <PlayerCardDrawer />
       <SparkDrawer />
       <AccountCardHost />

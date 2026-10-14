@@ -30,6 +30,7 @@ import { ACCOUNTS, addFollowers, CALL_SETTLE_TICKS, callerKey, type CallResult, 
 import { COIN_IMAGE_MAX, hasLink, visibleCount } from './textRules'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import { worldStartOf, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
+import { sellsDue } from './rapid'
 import { addFunds, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap } from './orders'
 import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, REFERRALS_ENABLED, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
 
@@ -279,7 +280,12 @@ export interface GameState {
   /** `slot` picks the P1/P2/P3 trade settings (defaults to the active slot). */
   buy: (usd: number, tokenId?: string, slot?: number) => boolean
   /** scope: 'active' = the selected wallets (default), 'all' = every wallet holding it, one wallet id, or a list of ids. */
-  sell: (qty: number, tokenId?: string, slot?: number, scope?: 'active' | 'all' | (string & {}) | string[]) => boolean
+  /** `part`: on a coin you launched, sell from the visible dev bag or the hidden bundle (by default the bundle goes first). */
+  sell: (qty: number, tokenId?: string, slot?: number, scope?: 'active' | 'all' | (string & {}) | string[], part?: 'dev' | 'bundle') => boolean
+  /** Rapid deploy: the auto-sell rules a launch carries. */
+  setAutoSell: (tokenId: string, a: LaunchRecord['autoSell']) => void
+  /** Rapid deploy: sell whatever auto-sell rules are due (called once a tick). */
+  runAutoSell: () => void
   select: (id: string, open?: boolean) => void
   setView: (v: View) => void
   setDockTab: (t: DockTab) => void
@@ -1300,7 +1306,7 @@ export const useGame = create<GameState>()((set, get) => {
       return buyFrom(ids, usd / Math.max(1, ids.length), id, slot)
     },
 
-    sell: (qty, tokenId, slot, scope = 'active') => {
+    sell: (qty, tokenId, slot, scope = 'active', part) => {
       if (watchingOnly()) return false
       const s = get()
       if (s.runStatus !== 'running') {
@@ -1364,7 +1370,8 @@ export const useGame = create<GameState>()((set, get) => {
         const linkedBefore = qtyIn(s.portfolio, linked, id)
         const linkedFrac = linkedBefore > 0 ? Math.min(1, (linkedBefore - qtyIn(res.portfolio, linked, id)) / linkedBefore) : 0
         const bundleBefore = Math.min(rec?.bundleQty ?? 0, devWBefore)
-        const fromBundle = Math.min(bundleBefore, devWBefore - devWAfter)
+        // (Selling the dev bag on purpose leaves the bundle alone, as far as the bag allows.)
+        const fromBundle = part === 'dev' ? Math.max(0, bundleBefore - devWAfter) : Math.min(bundleBefore, devWBefore - devWAfter)
         const fromDev = devWBefore - devWAfter - fromBundle
         const devBefore = devWBefore - bundleBefore
         const devFrac = devBefore > 0 ? Math.min(1, fromDev / devBefore) : 0
@@ -1985,6 +1992,39 @@ export const useGame = create<GameState>()((set, get) => {
       )
       persist()
       return true
+    },
+    setAutoSell: (tokenId, a) => {
+      set({ launches: get().launches.map((r) => (r.tokenId === tokenId ? { ...r, autoSell: a } : r)) })
+      persist()
+    },
+    runAutoSell: () => {
+      const s = get()
+      if (s.runStatus !== 'running' || s.online?.spectator) return
+      for (const rec of s.launches) {
+        const a = rec.autoSell
+        if (!a || (!a.dev?.on && !a.bundle?.on)) continue
+        const t = s.market.tokens.find((x) => x.id === rec.tokenId)
+        if (!t || (t.status !== 'bonding' && t.status !== 'graduated')) continue
+        const entry = a.entry ?? t.mcap
+        const done = a.done ?? []
+        const age = s.market.time - rec.launchedTime
+        const due = [...sellsDue(a.dev, 'dev', age, t.mcap, entry, done), ...sellsDue(a.bundle, 'bundle', age, t.mcap, entry, done)]
+        if (!due.length && a.entry !== undefined) continue
+        // (Marked done before selling: a sell that fails is not tried again every second.)
+        get().setAutoSell(rec.tokenId, { ...a, entry, done: [...done, ...due.map((d) => d.id)] })
+        const [devW] = devSet(get().portfolio, rec)
+        for (const part of ['dev', 'bundle'] as const) {
+          const mine = due.filter((d) => d.id.startsWith(part))
+          if (!mine.length) continue
+          const now = get()
+          const r = now.launches.find((x) => x.tokenId === rec.tokenId)
+          const all = qtyIn(now.portfolio, [devW], rec.tokenId)
+          const bundle = Math.min(r?.bundleQty ?? 0, all)
+          const have = part === 'bundle' ? bundle : all - bundle
+          const pct = mine.some((d) => d.pct >= 1) ? 1 : Math.min(1, mine.reduce((x, d) => x + d.pct, 0))
+          if (have > 0) now.sell(have * pct, rec.tokenId, undefined, devW, part)
+        }
+      }
     },
     airdrop: (tokenId, pct, wallets, target, to = []) => {
       if (watchingOnly()) return false
