@@ -4,7 +4,7 @@ import type { Chain, MarketEvent, MarketState, Token, VolumeBot } from '../types
 import { clamp, type Rng } from '../utils/rng'
 import { tradeFee } from './tradingEngine'
 import { addWin, getWin } from './windows'
-import { SIM_SEC_PER_TICK, SUPPLY, touchCandles, walletName } from './marketEngine'
+import { fillSim, quoteBuy, SIM_SEC_PER_TICK, SUPPLY, walletName } from './marketEngine'
 
 // ─── Bundler ─────────────────────────────────────────────────────────────────
 export const BUNDLE_MAX_WALLETS = 20
@@ -41,7 +41,23 @@ export function sleuthBundle(t: Token, rng: Rng) {
 }
 
 // ─── Volume bot ──────────────────────────────────────────────────────────────
-export const BOT_RATES = [500, 2000, 5000, 15000] // USD of volume per simulated minute
+/**
+ * A volume bot is a service a dev pays for, as on the real market: a package of so much volume from so many maker
+ * wallets over so long, for a service fee up front. The trading fees on the bot's own buys and sells come on top
+ * (paid by the dev wallet as it goes), and the dev earns the coin's creator fee on that volume like on any other.
+ * (Sizes are the game's: a package always costs more than the creator fees it brings back.)
+ */
+export const BOT_PACKS = [
+  { id: 'starter', label: 'Starter', volume: 5_000, minutes: 5, makers: 25, fee: 15 },
+  { id: 'boost', label: 'Boost', volume: 25_000, minutes: 10, makers: 80, fee: 60 },
+  { id: 'trending', label: 'Trending', volume: 100_000, minutes: 20, makers: 250, fee: 200 },
+  { id: 'whale', label: 'Whale', volume: 400_000, minutes: 30, makers: 800, fee: 700 },
+] as const
+export type BotPack = (typeof BOT_PACKS)[number]
+export const botPack = (id: unknown): BotPack | undefined => BOT_PACKS.find((p) => p.id === id)
+/** A bought package as the bot runs it: `before` = the volume the coin's bot had already made. */
+export const botOf = (pack: BotPack, before: number, spent: number, tick: number): VolumeBot => ({ on: true, pack: pack.id, rate: pack.volume / pack.minutes, target: before + pack.volume, budget: spent + pack.fee + pack.volume * 0.06, spent: spent + pack.fee, volume: before, startedTick: tick })
+export const BOT_RATES: number[] = BOT_PACKS.map((p) => p.volume / p.minutes) // USD of volume per simulated minute
 const ticksPerMin = () => 60 / SIM_SEC_PER_TICK // the clock depends on the market (classic 6s/tick, realistic 1s)
 
 const BOT_TX_COST = 0.03 // USD network/priority cost per bot transaction
@@ -54,6 +70,12 @@ export function botTickCost(t: Token, vol: number) {
   return (vol / 2) * (tradeFee(t, 'buy') + tradeFee(t, 'sell')) + 4 * BOT_TX_COST
 }
 
+/** What a whole package costs in trading fees, start to end (the per-trade network cost adds up over its minutes). */
+export const botPackCost = (t: Token, pack: { volume: number; minutes: number }) => {
+  const ticks = pack.minutes * ticksPerMin()
+  return botTickCost(t, pack.volume / ticks) * ticks
+}
+
 /** Rough cost per simulated minute, for the UI. */
 export const botCostPerMin = (t: Token, rate: number) => botTickCost(t, rate / ticksPerMin()) * ticksPerMin()
 
@@ -61,32 +83,40 @@ export const botCostPerMin = (t: Token, rate: number) => botTickCost(t, rate / t
 export const washShare = (t: Token) => (t.volume > 0 ? clamp((t.washVol ?? 0) / t.volume, 0, 1) : 0)
 
 /**
- * Run one tick of a volume bot on a token (mutates it). Buys and sells the same size from rotating wallets, so price
- * barely moves, but volume, tx counts and "makers" go up, which pulls in some real attention until someone notices.
+ * Run one tick of a volume bot on a token (mutates it). Fresh wallets REALLY buy and then sell the same money's worth
+ * through the coin's curve or pool (`fillSim`, like every other trade in the game), so the price ends the tick where it
+ * began, the chart shows the small wicks of it, and volume, trade counts and makers go up. That is what climbs the
+ * volume lists and pulls in some real attention, until somebody notices. A buy that would finish a curve is not made
+ * (a sold-out curve cannot be sold back into, and the bot would be left holding).
  */
 export function runBotTick(t: Token, bot: VolumeBot, m: MarketState, rng: Rng): { vol: number; cost: number; event?: MarketEvent } {
-  const vol = (bot.rate / ticksPerMin()) * (0.7 + 0.6 * rng.next())
-  const cost = botTickCost(t, vol)
+  const want = (bot.rate / ticksPerMin()) * (0.7 + 0.6 * rng.next())
+  const pairs = rng.int(1, 3)
+  let vol = 0
+  let done = 0
+  for (let i = 0; i < pairs; i++) {
+    const usd = want / 2 / pairs
+    if (t.status === 'bonding' && quoteBuy(t, usd).used < usd * 0.999) break
+    const w = walletName(rng)
+    const bought = fillSim(m, t, 'buy', usd, m.time, w)
+    if (!(bought > 0)) break
+    // (The same money out puts the reserves, and so the price, back where they were.)
+    vol += bought + fillSim(m, t, 'sell', bought, m.time, w)
+    done++
+  }
+  const cost = vol > 0 ? botTickCost(t, vol) : 0
   t.volume += vol
   t.washVol = (t.washVol ?? 0) + vol
-  const pairs = rng.int(1, 3)
-  t.win = addWin(getWin(t, m.time), vol, pairs, pairs)
-  t.buys += pairs
-  t.sells += pairs
-  if (rng.chance(0.25)) t.holders += 1 // fresh bot wallets show up as tiny holders
-  for (let i = 0; i < Math.min(2, pairs); i++) {
-    const usd = vol / 2 / pairs
-    const w = walletName(rng)
-    t.tape = [
-      { id: m.nextTradeId++, time: m.time, side: 'sell' as const, usd, price: t.price, wallet: w },
-      { id: m.nextTradeId++, time: m.time, side: 'buy' as const, usd, price: t.price, wallet: w },
-      ...t.tape,
-    ].slice(0, 40)
-  }
-  touchCandles(t, m.time, t.price, vol)
+  // A coin that is being traded is not a dead one: the bot's trades count as trades for the clock that writes a
+  // quiet coin off (it costs its dev fees every second it does).
+  if (vol > 0 && t.sim.flow) t.sim.flow.lastTrade = m.time
+  t.win = addWin(getWin(t, m.time), vol, done, done)
+  t.buys += done
+  t.sells += done
+  if (done && rng.chance(0.25)) t.holders += 1 // a maker wallet now and then keeps a little dust
   // Fake activity draws a little real interest (trending lists), until it's flagged.
   // The pull is relative to the coin's size: a bot can juice a tiny coin, but barely registers on a big one.
-  if (!t.washFlagged) t.sim.pressure += 0.00025 * Math.min(1.5, Math.log10(1 + vol / Math.max(10, t.mcap * 0.002)))
+  if (!t.washFlagged && vol > 0) t.sim.pressure += 0.00025 * Math.min(1.5, Math.log10(1 + vol / Math.max(10, t.mcap * 0.002)))
 
   let event: MarketEvent | undefined
   const share = washShare(t)

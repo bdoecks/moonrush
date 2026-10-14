@@ -611,7 +611,9 @@ export interface BundleSpec {
 export interface VolumeBot {
   on: boolean
   rate: number // USD of volume per simulated minute
-  budget: number // USD you're willing to burn; the bot stops when it's spent
+  pack?: string // the package bought (BOT_PACKS in game/devTools.ts): it sets the rate, the volume and the service fee
+  target?: number // the bot's volume at which this package is delivered and the bot stops
+  budget: number // USD it may burn at most (a safety cap well above what a package costs); the bot stops when it's spent
   spent: number // USD burned on fees and price impact
   volume: number // USD of fake volume generated
   startedTick: number

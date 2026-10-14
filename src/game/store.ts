@@ -18,7 +18,7 @@ import { usePlayerCard } from '../net/playerCard'
 import { tickStories } from './storyEngine'
 import { postLaunchFee } from './sparks'
 import { candleStore, COOK_FEE, cookAllowance, cookToken, COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, SUPPLY, tickMarket, walletName } from './marketEngine'
-import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
+import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botOf, botPack, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
 import { lengthTicks, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS, type RoundLength } from './progression'
 import { accountOf, activeAccounts, commitView, DEV_EMOJI, devWalletFor, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf } from './accounts'
@@ -971,6 +971,7 @@ export const useGame = create<GameState>()((set, get) => {
           const devW = devSet(s.portfolio, r)[0]
           const have = (accountOf(s.portfolio, devW)?.balances[t.chain] ?? 0) * px - costOf(devW)[t.chain]
           if (!live) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: `$${t.ticker} is ${t.status}` })
+          else if (r.bot.volume >= (r.bot.target ?? Infinity)) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: 'package delivered' })
           else if (r.bot.spent >= r.bot.budget) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: 'budget used up' })
           else if (have < botTickCost(t, r.bot.rate / 5)) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: `out of ${CHAINS[t.chain].native}` })
           else {
@@ -2056,14 +2057,25 @@ export const useGame = create<GameState>()((set, get) => {
         s.notify({ title: 'BOT NOT STARTED', body: `$${t.ticker} is ${t.status}`, tone: 'warn', icon: '🤖' })
         return
       }
-      const base: VolumeBot = rec.bot ?? { on: false, rate: 2000, budget: 0, spent: 0, volume: 0, startedTick: s.market.tick }
-      const bot: VolumeBot = { ...base, ...patch, ...(patch.on && !base.on ? { startedTick: s.market.tick } : {}) }
-      set({ launches: s.launches.map((r) => (r.tokenId === tokenId ? { ...r, bot } : r)) })
+      const base: VolumeBot = rec.bot ?? { on: false, rate: 0, budget: 0, spent: 0, volume: 0, startedTick: s.market.tick }
+      // Starting a bot is buying a package (BOT_PACKS): its speed, its volume and its service fee. In a room the server
+      // charges the fee and runs the bot; alone, the fee leaves the USD balance here.
+      const pack = patch.on ? botPack(patch.pack ?? base.pack) : undefined
+      if (patch.on && !pack) return
+      if (pack && !s.online && s.portfolio.cash + 1e-9 < pack.fee) {
+        s.notify({ title: 'BOT NOT STARTED', body: `The ${pack.label} package costs ${fmtUsd(pack.fee, 0)}: not enough USD`, tone: 'warn', icon: '🤖' })
+        return
+      }
+      const bot: VolumeBot = pack ? botOf(pack, base.volume, base.spent, s.market.tick) : { ...base, on: false }
+      set({
+        launches: s.launches.map((r) => (r.tokenId === tokenId ? { ...r, bot } : r)),
+        ...(pack && !s.online ? { portfolio: { ...s.portfolio, cash: s.portfolio.cash - pack.fee, feesPaid: s.portfolio.feesPaid + pack.fee } } : {}),
+      })
       if (s.online) netHooks.send?.({ t: 'bot', tokenId, bot: bot.on ? bot : null }) // the server runs it on the shared coin
       if (patch.on !== undefined && patch.on !== base.on) {
         s.notify(
           patch.on
-            ? { title: 'VOLUME BOT ON', body: `$${t.ticker} · ${fmtUsd(bot.rate, 0)}/min · budget ${fmtUsd(bot.budget - bot.spent, 0)}`, tone: 'info', icon: '🤖' }
+            ? { title: 'VOLUME BOT ON', body: `$${t.ticker} · ${pack?.label ?? ''} package: ${fmtUsd(pack?.volume ?? 0, 0)} of volume over ${pack?.minutes ?? 0} min`, tone: 'info', icon: '🤖' }
             : { title: 'VOLUME BOT OFF', body: `$${t.ticker} · ${fmtUsd(bot.volume, 0)} volume for ${fmtUsd(bot.spent)} in fees`, tone: 'info', icon: '🤖' },
         )
       }

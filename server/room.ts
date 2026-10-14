@@ -26,7 +26,7 @@ import { claimGifts } from './persist'
 import { CHAINS } from '../src/data/chains'
 import { LAUNCHPADS } from '../src/data/launchpads'
 import { walletAddress } from '../src/utils/address'
-import { airdropFeePerWallet, BOT_RATES, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
+import { airdropFeePerWallet, BOT_RATES, botOf, botPack, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, TapeTrade, Timeframe, Trade, VolumeBot } from '../src/types'
@@ -489,14 +489,24 @@ export class Room {
       case 'bot': {
         const t = this.market.tokens.find((x) => x.id === msg.tokenId) as NetToken | undefined
         if (!t || t.creatorId !== playerId) return
-        // What it has spent is counted here (the bot is paid on the server), not taken from the game.
+        // A bot is a package bought from the list (see BOT_PACKS): the message only names it. Its speed, its volume and
+        // its fee are the server's, the service fee is charged here (in USD, up front, not refunded), and what the bot
+        // has made and spent is counted here, never taken from the game. (A speed that was not a number once broke a
+        // coin for everyone: a $50M market cap in seconds, a NaN wallet for sellers.)
         const was = this.bots.get(msg.tokenId)
-        // Only the fields a bot has are kept, each one checked, and the speed must be one the game offers. A speed that
-        // was not a number broke the coin for everyone (a $50M market cap in seconds, a NaN wallet for sellers).
         const b = msg.bot as Partial<VolumeBot> | null | undefined
-        const amount = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(1e9, Math.max(0, n)) : 0)
-        if (b?.on && typeof b.rate === 'number' && BOT_RATES.includes(b.rate)) this.bots.set(msg.tokenId, { on: true, rate: b.rate, budget: amount(b.budget), spent: amount(was?.spent ?? b.spent), volume: amount(was?.volume ?? b.volume), startedTick: amount(b.startedTick) })
-        else this.bots.delete(msg.tokenId)
+        const pack = b?.on ? botPack(b.pack) : undefined
+        if (!pack) {
+          this.bots.delete(msg.tokenId)
+          return
+        }
+        if (was?.on && was.pack === pack.id) return // already running that package: nothing to buy again
+        const w = this.walletOf(me)
+        if (!w || !live(t)) return
+        if (w.cash + 1e-9 < pack.fee) return this.sendTo(playerId, { t: 'error', message: `The ${pack.label} package costs $${pack.fee}: not enough USD` })
+        me.wallet = { ...w, cash: w.cash - pack.fee, feesPaid: w.feesPaid + pack.fee }
+        this.bots.set(msg.tokenId, botOf(pack, was?.volume ?? 0, was?.spent ?? 0, this.market.tick))
+        this.sendWallet(me)
         return
       }
       case 'status': {
@@ -1204,6 +1214,10 @@ export class Room {
       if (!BOT_RATES.includes(bot.rate) || !Number.isFinite(bot.budget) || !Number.isFinite(bot.spent)) { stop('Bot switched off'); continue }
       const px = nativePrice(market, t.chain)
       const have = (accountOf(w, c.walletId)?.balances[t.chain] ?? 0) * px
+      if ((bot.volume ?? 0) >= (bot.target ?? Infinity)) {
+        stop('package delivered')
+        continue
+      }
       if ((bot.spent ?? 0) >= bot.budget) {
         stop('budget used up')
         continue
