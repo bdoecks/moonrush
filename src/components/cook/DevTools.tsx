@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { Bot, Boxes, Check, Copy, EyeOff, Gift, Info, Play, Plus, Square, Wallet } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { CHAINS, fmtNative } from '../../data/chains'
-import { airdropFeePerWallet, BOT_RATES, BUNDLE_MAX_WALLETS, botCostPerMin, washShare, type AirdropTarget } from '../../game/devTools'
+import { AIRDROP_MAX_KOLS, airdropFeePerWallet, canReceive, BOT_PACKS, botPack, botPackCost, BUNDLE_MAX_WALLETS, washShare, type AirdropTarget } from '../../game/devTools'
 import { SUPPLY } from '../../game/marketEngine'
 import { useGame } from '../../game/store'
 import { creatorRate, nativePrice } from '../../game/tradingEngine'
@@ -258,68 +258,74 @@ export function SideWalletsSection({ spec, onChange }: { spec: CookSpec; onChang
 }
 
 // ─── Volume bot (your launches) ──────────────────────────────────────────────
-const BUDGETS = [100, 250, 500, 1000, 2500]
-
 export function VolumeBotPanel({ rec, t }: { rec: LaunchRecord; t?: Token }) {
   const setBot = useGame((s) => s.setBot)
   const px = useGame((s) => (t ? nativePrice(s.market, t.chain) : 1))
   const balance = useGame((s) => (t ? (s.portfolio.balances?.[t.chain] ?? 0) : 0))
+  const cash = useGame((s) => s.portfolio.cash)
   const bot = rec.bot
-  const [rate, setRate] = useState(bot?.rate ?? 2000)
-  const [budget, setBudget] = useState(250)
+  const [pick, setPick] = useState<string>(bot?.pack ?? BOT_PACKS[1].id)
   if (!t) return <div className="p-3 text-[11px] text-dim">Token delisted.</div>
   const live = t.status === 'bonding' || t.status === 'graduated'
   const on = !!bot?.on
-  const perMin = botCostPerMin(t, on ? bot!.rate : rate)
-  const left = bot ? Math.max(0, bot.budget - bot.spent) : 0
+  const pack = botPack(on ? bot!.pack : pick) ?? BOT_PACKS[1]
+  // What a package costs besides its service fee: the trading fee on every buy and every sell the bot makes.
+  const tradeCost = botPackCost(t, pack)
+  const back = pack.volume * creatorRate(t)
   const share = washShare(t)
   const c = CHAINS[t.chain]
+  const made = Math.max(0, (bot?.volume ?? 0) - Math.max(0, (bot?.target ?? 0) - pack.volume))
   const earnedBack = (bot?.volume ?? 0) * creatorRate(t)
+  const short = cash < pack.fee ? 'Not enough USD for the service fee' : balance * px < tradeCost * 0.1 ? `Dev wallet needs ${c.native} for the trading fees` : null
+  const k = (n: number) => (n >= 1000 ? `$${n / 1000}K` : `$${n}`)
 
   return (
-    <div className="grid gap-3 p-3 lg:grid-cols-[1fr_1fr_1.1fr]">
+    <div className="grid gap-3 p-3 lg:grid-cols-[1.5fr_1fr_1fr]">
       <div className="space-y-2">
         <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted"><Bot size={13} className="text-info" /> Volume bot</div>
-        <p className="text-[11px] leading-snug text-muted">Rotating wallets buy and sell the same size, so the price barely moves but volume, txns and makers go up. That drags in some real attention, until someone notices.</p>
-        <div className="text-[10px] text-dim">Speed (volume per minute)</div>
-        <Segmented
-          value={String(on ? bot!.rate : rate)}
-          onChange={(v) => (on ? setBot(t.id, { rate: Number(v) }) : setRate(Number(v)))}
-          options={BOT_RATES.map((r) => ({ value: String(r), label: `$${r >= 1000 ? `${r / 1000}K` : r}` }))}
-          className="w-full [&>button]:flex-1"
-        />
+        <p className="text-[11px] leading-snug text-muted">A bot service you pay for a package. Fresh wallets really buy and sell your coin, the same size in and out, so the price ends where it started but volume, trades and makers climb. That is what gets a coin up the volume lists, where real buyers look.</p>
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+          {BOT_PACKS.map((p) => {
+            const sel = pack.id === p.id
+            return (
+              <button key={p.id} disabled={on} onClick={() => setPick(p.id)} aria-pressed={sel} className={clsx('rounded-md border px-2 py-1.5 text-left transition-colors disabled:cursor-default', sel ? 'border-info/70 bg-info/10' : 'border-line2 hover:bg-panel2', on && !sel && 'opacity-40')}>
+                <div className={clsx('text-[12px] font-bold', sel ? 'text-info' : 'text-ink')}>{p.label}</div>
+                <div className="num text-[11px] text-muted">{k(p.volume)} volume</div>
+                <div className="num text-[10px] text-dim">{p.makers} makers · {p.minutes} min</div>
+                <div className="num mt-0.5 text-[11px] font-semibold text-warn">{fmtUsd(p.fee, 0)} fee</div>
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       <div className="space-y-2">
-        <div className="text-[10px] text-dim">{on ? 'Budget left' : 'Max to burn (fees + price impact)'}</div>
-        {on ? (
-          <div className="num text-[18px] font-bold">{fmtUsd(left)} <span className="text-[11px] font-normal text-dim">left of {fmtUsd(bot!.budget, 0)} cap</span></div>
-        ) : (
-          <div className="grid grid-cols-5 gap-1">
-            {BUDGETS.map((b) => (
-              <button key={b} onClick={() => setBudget(b)} className={clsx('num rounded border py-1 text-[11px] font-semibold', budget === b ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')}>
-                {b >= 1000 ? `${b / 1000}K` : b}
-              </button>
-            ))}
-          </div>
+        <div className="text-[10px] uppercase tracking-wider text-dim">{on ? `${pack.label} package running` : `${pack.label} package`}</div>
+        {on && (
+          <>
+            <div className="num text-[16px] font-bold">{fmtUsd(made, 0)} <span className="text-[11px] font-normal text-dim">of {k(pack.volume)} delivered</span></div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-line2"><div className="h-full bg-info transition-all" style={{ width: `${Math.min(100, (made / pack.volume) * 100)}%` }} /></div>
+          </>
         )}
         <div className="space-y-0.5 text-[11px]">
-          <Row label="Burn rate">≈{fmtUsd(perMin)}/min</Row>
-          <Row label="Runs for">≈{Math.max(0, (on ? left : budget) / Math.max(0.01, perMin)).toFixed(1)} min</Row>
-          <Row label={`Paid in ${c.native}`}>{fmtNative(balance, t.chain)} <span className="text-dim">≈{fmtUsd(balance * px, 0)}</span></Row>
+          <Row label="Service fee (paid up front, in USD)">{fmtUsd(pack.fee, 0)}</Row>
+          <Row label={`Trading fees on the bot's trades (in ${c.native})`}>≈{fmtUsd(tradeCost, 0)}</Row>
+          <Row label={`Creator fees you earn back (${(creatorRate(t) * 100).toFixed(2)}%)`}><span className="text-up">≈+{fmtUsd(back, 0)}</span></Row>
+          <Row label="What it costs you in the end"><span className="font-bold text-down">≈{fmtUsd(pack.fee + tradeCost - back, 0)}</span></Row>
+          <Row label="Dev wallet holds">{fmtNative(balance, t.chain)} <span className="text-dim">≈{fmtUsd(balance * px, 0)}</span></Row>
         </div>
         {live ? (
           on ? (
             <button onClick={() => setBot(t.id, { on: false })} className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-down/40 bg-down/10 text-[12px] font-bold text-down hover:bg-down hover:text-white">
-              <Square size={12} /> Stop bot
+              <Square size={12} /> Stop the bot (the service fee is not refunded)
             </button>
           ) : (
             <button
-              disabled={balance * px < 1}
-              onClick={() => setBot(t.id, { on: true, rate, budget: (bot?.spent ?? 0) + budget })}
-              className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-info text-[12px] font-extrabold text-black hover:brightness-110 disabled:opacity-40"
+              disabled={!!short}
+              onClick={() => setBot(t.id, { on: true, pack: pack.id })}
+              className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-info px-2 text-[12px] font-extrabold text-black hover:brightness-110 disabled:opacity-40"
             >
-              <Play size={12} /> {balance * px < 1 ? `No ${c.native} to pay fees` : `Start bot · ${fmtUsd(budget, 0)}`}
+              <Play size={12} /> {short ?? `Buy ${pack.label} · ${fmtUsd(pack.fee, 0)}`}
             </button>
           )
         ) : (
@@ -329,18 +335,18 @@ export function VolumeBotPanel({ rec, t }: { rec: LaunchRecord; t?: Token }) {
 
       <div className="space-y-2 rounded-md bg-bg/60 p-2">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-wider text-dim">Wash share of 1h volume</span>
+          <span className="text-[10px] uppercase tracking-wider text-dim">Bot share of 1h volume</span>
           <span className={clsx('num text-[12px] font-bold', share > 0.6 ? 'text-down' : share > 0.35 ? 'text-warn' : 'text-up')}>{Math.round(share * 100)}%</span>
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-line2">
           <div className={clsx('h-full transition-all', share > 0.6 ? 'bg-down' : share > 0.35 ? 'bg-warn' : 'bg-up')} style={{ width: `${share * 100}%` }} />
         </div>
-        <div className="text-[10px] text-dim">Above ~35%, sleuths get suspicious fast.</div>
-        {t.washFlagged && <div className="rounded border border-down/40 bg-down/10 px-2 py-1 text-[11px] font-semibold text-down">🤖 Flagged for wash trading. The bot no longer attracts buyers.</div>}
+        <div className="text-[10px] text-dim">When most of a coin's volume is the same size in and out, traders notice.</div>
+        {t.washFlagged && <div className="rounded border border-down/40 bg-down/10 px-2 py-1 text-[11px] font-semibold text-down">🤖 Called out for wash trading. The bot no longer brings buyers.</div>}
         <div className="space-y-0.5 pt-1 text-[11px]">
-          <Row label="Fake volume made">{fmtUsd(bot?.volume ?? 0, 0)}</Row>
-          <Row label="Burned on fees">-{fmtUsd(bot?.spent ?? 0)}</Row>
-          <Row label={`Creator fees back (${(creatorRate(t) * 100).toFixed(1)}%)`}><span className="text-up">+{fmtUsd(earnedBack)}</span></Row>
+          <Row label="Bot volume so far">{fmtUsd(bot?.volume ?? 0, 0)}</Row>
+          <Row label="Paid so far (service + trading fees)">-{fmtUsd(bot?.spent ?? 0)}</Row>
+          <Row label="Creator fees back"><span className="text-up">+{fmtUsd(earnedBack)}</span></Row>
           <Row label="Bot net"><span className={clsx('font-bold', earnedBack - (bot?.spent ?? 0) >= 0 ? 'text-up' : 'text-down')}>{fmtUsd(earnedBack - (bot?.spent ?? 0))}</span></Row>
         </div>
       </div>
@@ -350,55 +356,97 @@ export function VolumeBotPanel({ rec, t }: { rec: LaunchRecord; t?: Token }) {
 
 // ─── Airdrop (your launches) ─────────────────────────────────────────────────
 const DROP_PCTS = [0.05, 0.1, 0.25, 0.5]
-const DROP_WALLETS = [10, 25, 50, 100, 200]
+const DROP_WALLETS = [5, 10, 20, 30, 50]
+const KIND: Record<string, string> = { kol: 'KOL', smart: 'Smart money', whale: 'Whale' }
 
 export function AirdropPanel({ rec, t }: { rec: LaunchRecord; t?: Token }) {
   const airdrop = useGame((s) => s.airdrop)
   const devW = rec.devWallet ?? useGame.getState().portfolio.accounts?.[0]?.id ?? 'w-main'
   const bag = useGame((s) => s.portfolio.accounts?.find((a) => a.id === devW)?.positions[rec.tokenId]?.qty ?? 0)
   const native = useGame((s) => (t ? s.portfolio.accounts?.find((a) => a.id === devW)?.balances[t.chain] ?? 0 : 0))
+  const all = useGame((s) => s.wallets)
+  const tracked = useGame((s) => s.trackedWallets)
   const [pct, setPct] = useState(0.1)
-  const [wallets, setWallets] = useState(50)
-  const [target, setTarget] = useState<AirdropTarget>('fresh')
+  const [wallets, setWallets] = useState(10)
+  const [target, setTarget] = useState<AirdropTarget>('own')
+  const [picked, setPicked] = useState<string[]>([])
   if (!t) return null
   const live = t.status === 'bonding' || t.status === 'graduated'
+  // KOLs first, then the ones you track, then by name: the list a dev scrolls to choose who gets tokens.
+  const order = { kol: 0, smart: 1, whale: 2 } as Record<string, number>
+  const traders = all.filter((w) => canReceive(w, t.id)).sort((a, b) => order[a.style] - order[b.style] || +tracked.includes(b.id) - +tracked.includes(a.id) || a.name.localeCompare(b.name))
+  const to = picked.filter((id) => traders.some((w) => w.id === id))
+  const holding = all.filter((w) => w.positions[t.id]?.gift)
+  const n = target === 'kols' ? to.length : wallets
   const free = Math.max(0, bag - (rec.bundleQty ?? 0))
   const qty = free * pct
   const supplyPct = (qty / SUPPLY) * 100
-  const fee = airdropFeePerWallet(t.chain, target) * wallets
-  const tooFewHolders = target === 'holders' && t.holders < wallets
+  const fee = airdropFeePerWallet(t.chain) * n
   const c = CHAINS[t.chain]
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length >= AIRDROP_MAX_KOLS ? p : [...p, id]))
+  const why = !(qty > 0) ? 'No dev bag to send' : target === 'kols' && !n ? 'Pick who gets it' : native < fee ? `Need ${c.native} for fees` : null
 
   return (
-    <div className="grid gap-3 border-t border-line p-3 lg:grid-cols-[1fr_1fr_1.1fr]">
+    <div className="grid gap-3 border-t border-line p-3 lg:grid-cols-[1fr_1.2fr_1fr]">
       <div className="space-y-2">
         <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted"><Gift size={13} className="text-accent" /> Airdrop</div>
-        <p className="text-[11px] leading-snug text-muted">Give part of your dev bag away. Your dev % drops and the holder count jumps, but plenty of recipients are farmers who dump what they got within minutes.</p>
         <div className="text-[10px] text-dim">Send to</div>
-        <Segmented value={target} onChange={(v) => setTarget(v as AirdropTarget)} options={[{ value: 'fresh', label: 'Fresh wallets' }, { value: 'holders', label: 'Current holders' }]} className="w-full [&>button]:flex-1" />
-        <div className="text-[10px] leading-snug text-dim">{target === 'fresh' ? 'Holder count +1 each. About half dump.' : 'Rewards people already in. Fewer dump, more goodwill, holders stay the same.'}</div>
-      </div>
-
-      <div className="space-y-2">
+        <Segmented value={target} onChange={(v) => setTarget(v as AirdropTarget)} options={[{ value: 'own', label: 'My own fresh wallets' }, { value: 'kols', label: 'Known traders' }]} className="w-full [&>button]:flex-1" />
+        <p className="text-[11px] leading-snug text-muted">
+          {target === 'own'
+            ? 'Split part of your dev bag over new wallets that are yours. Nothing is given away: your dev wallet looks smaller, the holder count goes up, and you can still sell those coins. Wallets like these can be traced back to you, like a bundle.'
+            : 'Send tokens to traders people follow, so the trackers show them holding your coin. The tokens are gone for good. They did not choose your coin: it brings no followers, and most sell what they are sent, some right away.'}
+        </p>
         <div className="text-[10px] text-dim">How much of your dev bag</div>
         <div className="grid grid-cols-4 gap-1">
           {DROP_PCTS.map((p) => (
             <button key={p} onClick={() => setPct(p)} className={clsx('num rounded border py-1 text-[11px] font-semibold', pct === p ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')}>{p * 100}%</button>
           ))}
         </div>
-        <div className="text-[10px] text-dim">Wallets</div>
-        <div className="grid grid-cols-5 gap-1">
-          {DROP_WALLETS.map((n) => (
-            <button key={n} onClick={() => setWallets(n)} className={clsx('num rounded border py-1 text-[11px] font-semibold', wallets === n ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')}>{n}</button>
-          ))}
-        </div>
+      </div>
+
+      <div className="space-y-2">
+        {target === 'own' ? (
+          <>
+            <div className="text-[10px] text-dim">How many wallets</div>
+            <div className="grid grid-cols-5 gap-1">
+              {DROP_WALLETS.map((w) => (
+                <button key={w} onClick={() => setWallets(w)} className={clsx('num rounded border py-1 text-[11px] font-semibold', wallets === w ? 'border-accent/60 bg-accent/10 text-accent' : 'border-line2 text-muted hover:text-ink')}>{w}</button>
+              ))}
+            </div>
+            <div className="text-[10px] leading-snug text-dim">More wallets means smaller pieces: fewer of them show among the top holders.</div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between text-[10px] text-dim">
+              <span>Who gets it (up to {AIRDROP_MAX_KOLS})</span>
+              <span className="num">{to.length} picked</span>
+            </div>
+            <div data-tut="drop-traders" className="max-h-44 space-y-0.5 overflow-y-auto rounded-md border border-line2 p-1">
+              {traders.length === 0 && <div className="py-3 text-center text-[11px] text-dim">No trader to send to right now.</div>}
+              {traders.map((w) => {
+                const on = to.includes(w.id)
+                return (
+                  <button key={w.id} onClick={() => toggle(w.id)} aria-pressed={on} className={clsx('flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[11px]', on ? 'bg-accent/10 text-ink' : 'text-muted hover:bg-panel2')}>
+                    <span className={clsx('flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border', on ? 'border-accent bg-accent text-accent-ink' : 'border-line2')}>{on && <Check size={10} />}</span>
+                    <span className="shrink-0">{w.avatar}</span>
+                    <span className="min-w-0 flex-1 truncate font-semibold">{w.name}</span>
+                    {tracked.includes(w.id) && <span className="shrink-0 text-[9px] uppercase text-info">tracked</span>}
+                    <span className="shrink-0 text-[10px] text-dim">{KIND[w.style]}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {holding.length > 0 && <div className="text-[10px] leading-snug text-dim">Still holding what you sent: {holding.map((w) => w.name).join(', ')}</div>}
+          </>
+        )}
       </div>
 
       <div className="space-y-2 rounded-md bg-bg/60 p-2">
         <div className="space-y-0.5 text-[11px]">
-          <Row label="Giving away">{supplyPct.toFixed(2)}% of supply</Row>
+          <Row label={target === 'own' ? 'Moving' : 'Giving away'}>{supplyPct.toFixed(2)}% of supply</Row>
           <Row label="Worth now">≈{fmtUsd(qty * t.price)}</Row>
-          <Row label="Each wallet gets">≈{fmtUsd((qty * t.price) / wallets, 2)}</Row>
+          {n > 0 && <Row label="Each wallet gets">≈{fmtUsd((qty * t.price) / n, 2)}</Row>}
           <Row label={`Network fees (${c.native})`}>{fmtNative(fee, t.chain)} <span className={clsx(native < fee ? 'text-down' : 'text-dim')}>· have {fmtNative(native, t.chain)}</span></Row>
           {rec.airdropped && <Row label="Airdropped so far">{((rec.airdropped.qty / SUPPLY) * 100).toFixed(2)}% · {rec.airdropped.wallets} wallets</Row>}
         </div>
@@ -406,14 +454,16 @@ export function AirdropPanel({ rec, t }: { rec: LaunchRecord; t?: Token }) {
           <div className="rounded-md bg-raise py-2 text-center text-[11px] text-dim">${t.ticker} is {t.status}</div>
         ) : (
           <button
-            disabled={!(qty > 0) || native < fee || tooFewHolders}
-            onClick={() => airdrop(t.id, pct, wallets, target)}
+            disabled={!!why}
+            onClick={() => {
+              if (airdrop(t.id, pct, wallets, target, to)) setPicked([])
+            }}
             className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-accent text-[12px] font-extrabold text-accent-ink hover:brightness-110 disabled:opacity-40"
           >
-            <Gift size={12} /> {!(qty > 0) ? 'No dev bag to give' : tooFewHolders ? `Only ${t.holders} holders` : native < fee ? `Need ${c.native} for fees` : `Airdrop to ${wallets} wallets`}
+            <Gift size={12} /> {why ?? (target === 'own' ? `Move to ${n} wallets of mine` : `Send to ${n} trader${n === 1 ? '' : 's'}`)}
           </button>
         )}
-        <div className="text-[10px] text-dim">Your hidden bundle isn't touched. What you give away counts as a loss at your cost.</div>
+        <div className="text-[10px] text-dim">{target === 'own' ? 'These coins stay yours and count in your hidden share.' : 'What you give away counts as a loss at your cost.'}</div>
       </div>
     </div>
   )

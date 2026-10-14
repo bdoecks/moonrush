@@ -246,7 +246,7 @@ export type ClientMsg =
   | { t: 'layout'; seq: number; layout: WalletLayout }
   | { t: 'chat'; text: string }
   // Your airdrop: `qty` leaves your dev wallet `walletId` for `wallets` recipients; `queue` = the ones who'll dump.
-  | { t: 'airdrop'; seq?: number; tokenId: string; queue: NonNullable<MarketState['shillQueue']>; walletId?: string; qty?: number; wallets?: number; target?: 'holders' | 'fresh' }
+  | { t: 'airdrop'; seq?: number; tokenId: string; walletId?: string; qty?: number; wallets?: number; target?: 'own' | 'kols'; to?: string[] }
   | { t: 'event'; event: MarketEvent } // something you did to your own coin (dev sells, bundle dumps)
   // Send coins to another player: to their main wallet (`to` = player id) or to any wallet address they gave you.
   | { t: 'send'; ref: number; to?: string; toAddr?: string; asset: SendAsset; amount: number; usd: number; main: boolean; fromAddr: string; fromWallet?: string }

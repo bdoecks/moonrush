@@ -18,7 +18,7 @@ import { usePlayerCard } from '../net/playerCard'
 import { tickStories } from './storyEngine'
 import { postLaunchFee } from './sparks'
 import { candleStore, COOK_FEE, cookAllowance, cookToken, COOK_COOLDOWN_TICKS, GRAD_BONUS, MAX_COOKS_PER_ROUND, createMarket, migrateMarket, rebuildCandles, secPerTickOf, setClock, SIM_SEC_PER_TICK, SUPPLY, tickMarket, walletName } from './marketEngine'
-import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
+import { AIRDROP_MAX_KOLS, AIRDROP_MAX_WALLETS, airdropFeePerWallet, canReceive, giftTo, planAirdrop, type AirdropTarget, BUNDLE_MAX_WALLETS, BUNDLE_WALLET_FEE, bundleDetectChance, botOf, botPack, botTickCost, flagBundle, runBotTick, sleuthBundle, splitBag, STAGGER_FEE } from './devTools'
 import { newPortfolio, portfolioStats, snapshot, valuePortfolio } from './portfolioEngine'
 import { lengthTicks, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS, type RoundLength } from './progression'
 import { accountOf, activeAccounts, commitView, DEV_EMOJI, devWalletFor, ensureAccounts, makeAccount, MAX_WALLETS, primaryId, viewOf } from './accounts'
@@ -30,7 +30,8 @@ import { ACCOUNTS, addFollowers, CALL_SETTLE_TICKS, callerKey, type CallResult, 
 import { COIN_IMAGE_MAX, hasLink, visibleCount } from './textRules'
 import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import { worldStartOf, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
-import { payNative, runBuy, runConvert, runGiveAway, runSell, runSwap } from './orders'
+import { sellsDue } from './rapid'
+import { addFunds, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap } from './orders'
 import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, REFERRALS_ENABLED, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
 
 export type View = 'discover' | 'trenches' | 'token' | 'portfolio' | 'missions' | 'leaderboard' | 'cooking' | 'copytrade' | 'sniper' | 'monitor' | 'track' | 'rewards' | 'admin'
@@ -279,7 +280,12 @@ export interface GameState {
   /** `slot` picks the P1/P2/P3 trade settings (defaults to the active slot). */
   buy: (usd: number, tokenId?: string, slot?: number) => boolean
   /** scope: 'active' = the selected wallets (default), 'all' = every wallet holding it, one wallet id, or a list of ids. */
-  sell: (qty: number, tokenId?: string, slot?: number, scope?: 'active' | 'all' | (string & {}) | string[]) => boolean
+  /** `part`: on a coin you launched, sell from the visible dev bag or the hidden bundle (by default the bundle goes first). */
+  sell: (qty: number, tokenId?: string, slot?: number, scope?: 'active' | 'all' | (string & {}) | string[], part?: 'dev' | 'bundle') => boolean
+  /** Rapid deploy: the auto-sell rules a launch carries. */
+  setAutoSell: (tokenId: string, a: LaunchRecord['autoSell']) => void
+  /** Rapid deploy: sell whatever auto-sell rules are due (called once a tick). */
+  runAutoSell: () => void
   select: (id: string, open?: boolean) => void
   setView: (v: View) => void
   setDockTab: (t: DockTab) => void
@@ -308,7 +314,7 @@ export interface GameState {
   stopCopy: (id: string, sellAll: boolean) => void
   toggleTrackWallet: (walletId: string) => void
   /** Give part of your dev bag away to `wallets` recipients (existing holders or fresh wallets). */
-  airdrop: (tokenId: string, pct: number, wallets: number, target: AirdropTarget) => boolean
+  airdrop: (tokenId: string, pct: number, wallets: number, target: AirdropTarget, to?: string[]) => boolean
   openWallet: (walletId: string | null) => void
   openSpark: (sparkId: string | null) => void
   toggleFollowAccount: (accountId: string) => void
@@ -971,6 +977,7 @@ export const useGame = create<GameState>()((set, get) => {
           const devW = devSet(s.portfolio, r)[0]
           const have = (accountOf(s.portfolio, devW)?.balances[t.chain] ?? 0) * px - costOf(devW)[t.chain]
           if (!live) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: `$${t.ticker} is ${t.status}` })
+          else if (r.bot.volume >= (r.bot.target ?? Infinity)) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: 'package delivered' })
           else if (r.bot.spent >= r.bot.budget) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: 'budget used up' })
           else if (have < botTickCost(t, r.bot.rate / 5)) botRuns.set(r.tokenId, { vol: 0, cost: 0, stop: `out of ${CHAINS[t.chain].native}` })
           else {
@@ -1299,7 +1306,7 @@ export const useGame = create<GameState>()((set, get) => {
       return buyFrom(ids, usd / Math.max(1, ids.length), id, slot)
     },
 
-    sell: (qty, tokenId, slot, scope = 'active') => {
+    sell: (qty, tokenId, slot, scope = 'active', part) => {
       if (watchingOnly()) return false
       const s = get()
       if (s.runStatus !== 'running') {
@@ -1363,7 +1370,8 @@ export const useGame = create<GameState>()((set, get) => {
         const linkedBefore = qtyIn(s.portfolio, linked, id)
         const linkedFrac = linkedBefore > 0 ? Math.min(1, (linkedBefore - qtyIn(res.portfolio, linked, id)) / linkedBefore) : 0
         const bundleBefore = Math.min(rec?.bundleQty ?? 0, devWBefore)
-        const fromBundle = Math.min(bundleBefore, devWBefore - devWAfter)
+        // (Selling the dev bag on purpose leaves the bundle alone, as far as the bag allows.)
+        const fromBundle = part === 'dev' ? Math.max(0, bundleBefore - devWAfter) : Math.min(bundleBefore, devWBefore - devWAfter)
         const fromDev = devWBefore - devWAfter - fromBundle
         const devBefore = devWBefore - bundleBefore
         const devFrac = devBefore > 0 ? Math.min(1, fromDev / devBefore) : 0
@@ -1985,7 +1993,40 @@ export const useGame = create<GameState>()((set, get) => {
       persist()
       return true
     },
-    airdrop: (tokenId, pct, wallets, target) => {
+    setAutoSell: (tokenId, a) => {
+      set({ launches: get().launches.map((r) => (r.tokenId === tokenId ? { ...r, autoSell: a } : r)) })
+      persist()
+    },
+    runAutoSell: () => {
+      const s = get()
+      if (s.runStatus !== 'running' || s.online?.spectator) return
+      for (const rec of s.launches) {
+        const a = rec.autoSell
+        if (!a || (!a.dev?.on && !a.bundle?.on)) continue
+        const t = s.market.tokens.find((x) => x.id === rec.tokenId)
+        if (!t || (t.status !== 'bonding' && t.status !== 'graduated')) continue
+        const entry = a.entry ?? t.mcap
+        const done = a.done ?? []
+        const age = s.market.time - rec.launchedTime
+        const due = [...sellsDue(a.dev, 'dev', age, t.mcap, entry, done), ...sellsDue(a.bundle, 'bundle', age, t.mcap, entry, done)]
+        if (!due.length && a.entry !== undefined) continue
+        // (Marked done before selling: a sell that fails is not tried again every second.)
+        get().setAutoSell(rec.tokenId, { ...a, entry, done: [...done, ...due.map((d) => d.id)] })
+        const [devW] = devSet(get().portfolio, rec)
+        for (const part of ['dev', 'bundle'] as const) {
+          const mine = due.filter((d) => d.id.startsWith(part))
+          if (!mine.length) continue
+          const now = get()
+          const r = now.launches.find((x) => x.tokenId === rec.tokenId)
+          const all = qtyIn(now.portfolio, [devW], rec.tokenId)
+          const bundle = Math.min(r?.bundleQty ?? 0, all)
+          const have = part === 'bundle' ? bundle : all - bundle
+          const pct = mine.some((d) => d.pct >= 1) ? 1 : Math.min(1, mine.reduce((x, d) => x + d.pct, 0))
+          if (have > 0) now.sell(have * pct, rec.tokenId, undefined, devW, part)
+        }
+      }
+    },
+    airdrop: (tokenId, pct, wallets, target, to = []) => {
       if (watchingOnly()) return false
       const s = get()
       const fail = (body: string) => {
@@ -1997,8 +2038,9 @@ export const useGame = create<GameState>()((set, get) => {
       const t = s.market.tokens.find((x) => x.id === tokenId)
       if (!rec || !t || t.creator !== 'you') return fail('You can only airdrop coins you cooked')
       if (t.status !== 'bonding' && t.status !== 'graduated') return fail(`$${t.ticker} is ${t.status}`)
-      const n = Math.round(clamp(wallets, 1, AIRDROP_MAX_WALLETS))
-      if (target === 'holders' && t.holders < n) return fail(`$${t.ticker} only has ${t.holders} holders. Pick fewer, or send to fresh wallets.`)
+      const picked = target === 'kols' ? s.wallets.filter((w) => to.includes(w.id) && canReceive(w, tokenId)).slice(0, AIRDROP_MAX_KOLS).map((w) => w.id) : []
+      if (target === 'kols' && !picked.length) return fail('Pick at least one trader who does not hold the coin yet')
+      const n = target === 'kols' ? picked.length : Math.round(clamp(wallets, 1, AIRDROP_MAX_WALLETS))
       const devW = devSet(s.portfolio, rec)[0]
       const acc = accountOf(s.portfolio, devW)
       const pos = acc?.positions[tokenId]
@@ -2008,36 +2050,54 @@ export const useGame = create<GameState>()((set, get) => {
       if (!acc || !pos || !(qty > 0)) return fail('Your dev wallet has no tokens of this coin to give away')
       const fee = airdropFeePerWallet(t.chain, target) * n
       if (acc.balances[t.chain] < fee) return fail(`Needs ${fmtNative(fee, t.chain)} in your dev wallet for network fees (${n} transfers)`)
-      const rng = new Rng((s.market.seed ^ Math.imul(s.market.tick + 1, 0x2c1b3c6d) ^ n) >>> 0)
-      const plan = planAirdrop(t, qty, n, target, rng, s.market.tick, secPerTickOf(s.market))
-      // The tokens leave your bag for nothing: their cost is written off as a realized loss.
-      const given = runGiveAway(s.portfolio, devW, tokenId, qty, t.chain, fee)
-      if (!given.ok) return fail(given.error)
-      const portfolio = given.portfolio
-      const launches = s.launches.map((r) => (r.tokenId === tokenId ? { ...r, airdropped: { qty: (r.airdropped?.qty ?? 0) + qty, wallets: (r.airdropped?.wallets ?? 0) + n, count: (r.airdropped?.count ?? 0) + 1 } } : r))
-      const stake = devStake(portfolio, rec, tokenId)
-      let market = patchToken(s.market, tokenId, (x) => {
-        x.devPct = stake.devPct
-        x.bundlePct = stake.bundlePct
-        x.holders += plan.holdersAdd
-        x.top10Pct = Math.max(1, x.top10Pct - plan.top10Drop)
-        x.hype = Math.min(100, x.hype + plan.hype)
-      })
-      if (!s.online) market = { ...market, shillQueue: [...(market.shillQueue ?? []), ...plan.queue] }
       const pctTxt = `${((qty / SUPPLY) * 100).toFixed(2)}% of supply`
+      let portfolio = s.portfolio
+      let launches = s.launches
+      let walletsNow = s.wallets
+      let market = s.market
+      if (target === 'own') {
+        // Nothing is given away: that part of the bag now sits in wallets of the dev's own (the hidden bundle share,
+        // kept in the dev wallet as a bundle is). Only the network fee is paid.
+        portfolio = { ...addFunds(s.portfolio, t.chain, -fee, devW), feesPaid: s.portfolio.feesPaid + fee * nativePrice(s.market, t.chain) }
+        const plan = planAirdrop(t, qty, n)
+        const rec2 = { ...rec, bundleQty: (rec.bundleQty ?? 0) + qty, bundleWallets: Math.min(50, (rec.bundleWallets ?? 0) + n), airdropped: { qty: (rec.airdropped?.qty ?? 0) + qty, wallets: (rec.airdropped?.wallets ?? 0) + n, count: (rec.airdropped?.count ?? 0) + 1 } }
+        launches = s.launches.map((r) => (r.tokenId === tokenId ? rec2 : r))
+        const stake = devStake(portfolio, rec2, tokenId)
+        market = patchToken(s.market, tokenId, (x) => {
+          x.devPct = stake.devPct
+          x.bundlePct = stake.bundlePct
+          x.bundleWallets = rec2.bundleWallets
+          x.holders += plan.holdersAdd
+          x.top10Pct = Math.max(1, x.top10Pct - plan.top10Drop)
+        })
+      } else {
+        // The tokens leave the bag for nothing: their cost is written off as a realized loss.
+        const given = runGiveAway(s.portfolio, devW, tokenId, qty, t.chain, fee)
+        if (!given.ok) return fail(given.error)
+        portfolio = given.portfolio
+        launches = s.launches.map((r) => (r.tokenId === tokenId ? { ...r, airdropped: { qty: (r.airdropped?.qty ?? 0) + qty, wallets: (r.airdropped?.wallets ?? 0) + n, count: (r.airdropped?.count ?? 0) + 1 } } : r))
+        walletsNow = giftTo(s.wallets, picked, t, given.qty, s.market.tick).wallets
+        const stake = devStake(portfolio, rec, tokenId)
+        market = patchToken(s.market, tokenId, (x) => {
+          x.devPct = stake.devPct
+          x.bundlePct = stake.bundlePct
+        })
+      }
+      const who = target === 'own' ? 'fresh wallets' : 'known traders'
       const ev: MarketEvent = {
         id: s.market.tick * 100 + 93, tick: s.market.tick, time: s.market.time, kind: 'airdrop', tokenId, ticker: t.ticker,
-        text: `Dev airdropped ${pctTxt} of $${t.ticker} to ${n} ${target === 'fresh' ? 'fresh wallets' : 'holders'}`, icon: '🪂', tone: 'info',
+        text: `Dev airdropped ${pctTxt} of $${t.ticker} to ${n} ${who}`, icon: '🪂', tone: 'info',
       }
-      quietly(() => set({ portfolio, market, launches, events: [ev, ...s.events].slice(0, 120) }))
+      // (Sending to your own wallets is not announced: nobody can tell whose a fresh wallet is until it is traced.)
+      quietly(() => set({ portfolio, market, launches, wallets: walletsNow, ...(target === 'kols' ? { events: [ev, ...s.events].slice(0, 120) } : {}) }))
       if (s.online) {
-        netHooks.wallet?.({ t: 'airdrop', tokenId, queue: plan.queue, walletId: devW, qty, wallets: n, target }) // the server takes the tokens and fee too
-        netHooks.send?.({ t: 'event', event: ev })
+        netHooks.wallet?.({ t: 'airdrop', tokenId, walletId: devW, qty, wallets: n, target, ...(target === 'kols' ? { to: picked } : {}) }) // the server takes the fee, and the tokens when they are given away
+        if (target === 'kols') netHooks.send?.({ t: 'event', event: ev })
         sendTokenPatch(tokenId)
       }
       s.notify({
-        title: 'AIRDROP SENT', tone: 'info', icon: '🪂', tokenId,
-        body: `${pctTxt} to ${n} ${target === 'fresh' ? 'fresh wallets' : 'holders'} · fees ${fmtNative(fee, t.chain)}${plan.dumpers ? ` · watch out: ~${plan.dumpers} look like farmers` : ''}`,
+        title: target === 'own' ? 'BAG SPLIT' : 'AIRDROP SENT', tone: 'info', icon: '🪂', tokenId,
+        body: target === 'own' ? `${pctTxt} moved to ${n} wallets of your own · fees ${fmtNative(fee, t.chain)}` : `${pctTxt} sent to ${n} known traders · fees ${fmtNative(fee, t.chain)} · most sell what they are sent`,
       }, 'click')
       persist()
       return true
@@ -2056,14 +2116,25 @@ export const useGame = create<GameState>()((set, get) => {
         s.notify({ title: 'BOT NOT STARTED', body: `$${t.ticker} is ${t.status}`, tone: 'warn', icon: '🤖' })
         return
       }
-      const base: VolumeBot = rec.bot ?? { on: false, rate: 2000, budget: 0, spent: 0, volume: 0, startedTick: s.market.tick }
-      const bot: VolumeBot = { ...base, ...patch, ...(patch.on && !base.on ? { startedTick: s.market.tick } : {}) }
-      set({ launches: s.launches.map((r) => (r.tokenId === tokenId ? { ...r, bot } : r)) })
+      const base: VolumeBot = rec.bot ?? { on: false, rate: 0, budget: 0, spent: 0, volume: 0, startedTick: s.market.tick }
+      // Starting a bot is buying a package (BOT_PACKS): its speed, its volume and its service fee. In a room the server
+      // charges the fee and runs the bot; alone, the fee leaves the USD balance here.
+      const pack = patch.on ? botPack(patch.pack ?? base.pack) : undefined
+      if (patch.on && !pack) return
+      if (pack && !s.online && s.portfolio.cash + 1e-9 < pack.fee) {
+        s.notify({ title: 'BOT NOT STARTED', body: `The ${pack.label} package costs ${fmtUsd(pack.fee, 0)}: not enough USD`, tone: 'warn', icon: '🤖' })
+        return
+      }
+      const bot: VolumeBot = pack ? botOf(pack, base.volume, base.spent, s.market.tick) : { ...base, on: false }
+      set({
+        launches: s.launches.map((r) => (r.tokenId === tokenId ? { ...r, bot } : r)),
+        ...(pack && !s.online ? { portfolio: { ...s.portfolio, cash: s.portfolio.cash - pack.fee, feesPaid: s.portfolio.feesPaid + pack.fee } } : {}),
+      })
       if (s.online) netHooks.send?.({ t: 'bot', tokenId, bot: bot.on ? bot : null }) // the server runs it on the shared coin
       if (patch.on !== undefined && patch.on !== base.on) {
         s.notify(
           patch.on
-            ? { title: 'VOLUME BOT ON', body: `$${t.ticker} · ${fmtUsd(bot.rate, 0)}/min · budget ${fmtUsd(bot.budget - bot.spent, 0)}`, tone: 'info', icon: '🤖' }
+            ? { title: 'VOLUME BOT ON', body: `$${t.ticker} · ${pack?.label ?? ''} package: ${fmtUsd(pack?.volume ?? 0, 0)} of volume over ${pack?.minutes ?? 0} min`, tone: 'info', icon: '🤖' }
             : { title: 'VOLUME BOT OFF', body: `$${t.ticker} · ${fmtUsd(bot.volume, 0)} volume for ${fmtUsd(bot.spent)} in fees`, tone: 'info', icon: '🤖' },
         )
       }

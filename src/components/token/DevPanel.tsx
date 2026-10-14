@@ -39,6 +39,7 @@ function Panel({ t }: { t: Token }) {
   const running = useGame((s) => s.runStatus === 'running')
   const buyFromWallet = useGame((s) => s.buyFromWallet)
   const sell = useGame((s) => s.sell)
+  const bundleQty = useGame((s) => s.launches.find((l) => l.tokenId === t.id)?.bundleQty ?? 0)
   const [open, setOpen] = useState(() => load<boolean>('devPanelOpen') ?? window.innerWidth >= 768) // (a phone starts with it closed: it would cover the chart)
   const [pos2d, setPos] = useState(() => clampPos(load<{ x: number; y: number }>('devPanelPos') ?? { x: window.innerWidth - W - 24, y: 150 }))
   const [customBuy, setCustomBuy] = useState('')
@@ -66,14 +67,20 @@ function Panel({ t }: { t: Token }) {
 
   const qty = dev?.positions[t.id]?.qty ?? 0
   const bal = dev?.balances[chain] ?? 0
-  const pct = (qty / SUPPLY) * 100
+  const pct = ((qty - Math.min(bundleQty, qty)) / SUPPLY) * 100
   // What the dev wallet can spend: its own coin, plus the USD bank when auto-swap is on.
   const spendable = bal + (autoSwap ? cash / px : 0)
   const buy = (amount: number) => {
     if (running && amount > 0) buyFromWallet(devId, amount * px, t.id)
   }
+  // The bag is the dev's visible share plus the hidden bundle (both sit in the dev wallet): each sells on its own.
+  const bundleQ = Math.min(bundleQty, qty)
+  const devQ = qty - bundleQ
   const sellPct = (p: number) => {
-    if (running && qty > 0 && p > 0) sell(p >= 100 ? qty : (qty * p) / 100, t.id, undefined, devId)
+    if (running && devQ > 0 && p > 0) sell(p >= 100 ? devQ : (devQ * p) / 100, t.id, undefined, devId, 'dev')
+  }
+  const sellBundle = (p: number) => {
+    if (running && bundleQ > 0 && p > 0) sell(p >= 100 ? bundleQ : (bundleQ * p) / 100, t.id, undefined, devId, 'bundle')
   }
   const num = (s: string) => Number(s.replace(',', '.'))
   const cb = num(customBuy)
@@ -129,7 +136,7 @@ function Panel({ t }: { t: Token }) {
           <div className="mb-1 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-down">Dev sell <span className="font-normal normal-case tracking-normal text-dim">% of the dev bag</span></div>
           <div className="grid grid-cols-4 gap-1">
             {SELL_PCTS.map((p) => (
-              <button key={p} disabled={!running || !(qty > 0)} onClick={() => sellPct(p)} aria-label={`Dev sell ${p}%`} className={clsx(btn, 'border-down/40 bg-down/10 text-down hover:bg-down/20')}>{p}%</button>
+              <button key={p} disabled={!running || !(devQ > 0)} onClick={() => sellPct(p)} aria-label={`Dev sell ${p}%`} className={clsx(btn, 'border-down/40 bg-down/10 text-down hover:bg-down/20')}>{p}%</button>
             ))}
           </div>
           <div className="mt-1 flex gap-1">
@@ -137,6 +144,16 @@ function Panel({ t }: { t: Token }) {
             <button disabled={!running || !(qty > 0) || !(cs > 0) || cs > 100} onClick={() => { sellPct(cs); setCustomSell('') }} className={clsx(btn, 'border-down/40 px-3 text-down hover:bg-down/10')}>Sell</button>
           </div>
         </div>
+        {bundleQ > 0 && (
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-info">Sell bundle <span className="font-normal normal-case tracking-normal text-dim">{((bundleQ / SUPPLY) * 100).toFixed(2)}% · {fmtCompact(bundleQ * t.price)}</span></div>
+            <div className="grid grid-cols-4 gap-1">
+              {SELL_PCTS.map((p) => (
+                <button key={p} disabled={!running} onClick={() => sellBundle(p)} aria-label={`Sell ${p}% of the bundle`} className={clsx(btn, 'border-info/40 bg-info/10 text-info hover:bg-info/20')}>{p}%</button>
+              ))}
+            </div>
+          </div>
+        )}
         <p className="text-[10px] leading-snug text-dim">Trades here come from the dev wallet, so everyone sees them as the dev. A dev sell costs the coin some of its crowd. Your other wallets trade as anybody else.</p>
       </div>
     </div>

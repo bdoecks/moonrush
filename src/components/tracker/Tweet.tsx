@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import clsx from 'clsx'
 import { BarChart2, Heart, MessageCircle, Repeat2 } from 'lucide-react'
+import { PostDevButtons } from '../cook/RapidDeploy'
 import { tokenMapOf } from '../../hooks/useDerived'
 import { faceOf, repliesOf } from '../../game/feedFlavor'
 import { SIM_SEC_PER_TICK } from '../../game/marketEngine'
@@ -149,6 +150,7 @@ export function Tweet({ p, roomy, quiet, thread: showThread = true }: { p: Socia
           <span className="flex items-center gap-1.5"><Heart size={16} /> {cnt(n.likes)}</span>
           <span className="flex items-center gap-1.5"><BarChart2 size={16} /> {cnt(n.views)}</span>
         </div>
+        {!quiet && <PostDevButtons spark={spark} />}
         {p.tokenId && p.buyers !== undefined && <div className="mt-1 text-[12px]" style={{ color: X.dim }}>🦍 <span className={p.buyers ? 'font-semibold text-up' : ''}>{p.buyers} aped</span></div>}
         {!!p.replies?.length && <div className="mt-1 truncate text-[12px] italic" style={{ color: X.dim }}>{p.replies.map((r) => `“${r}”`).join('  ')}</div>}
         {thread.length > 0 && (

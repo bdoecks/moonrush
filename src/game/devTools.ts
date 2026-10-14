@@ -1,10 +1,11 @@
 // Dev tools for tokens you cooked: a launch bundler and a volume bot. Both are fictional game mechanics that show
 // how these tactics look on-chain and why they tend to backfire: sleuths flag them, and the market punishes it.
-import type { Chain, MarketEvent, MarketState, Token, VolumeBot } from '../types'
+import type { Chain, MarketEvent, MarketState, SimWallet, Token, VolumeBot } from '../types'
 import { clamp, type Rng } from '../utils/rng'
 import { tradeFee } from './tradingEngine'
 import { addWin, getWin } from './windows'
-import { SIM_SEC_PER_TICK, SUPPLY, touchCandles, walletName } from './marketEngine'
+import { hash01 } from './feedFlavor'
+import { fillSim, quoteBuy, SIM_SEC_PER_TICK, SUPPLY, walletName } from './marketEngine'
 
 // ─── Bundler ─────────────────────────────────────────────────────────────────
 export const BUNDLE_MAX_WALLETS = 20
@@ -41,7 +42,23 @@ export function sleuthBundle(t: Token, rng: Rng) {
 }
 
 // ─── Volume bot ──────────────────────────────────────────────────────────────
-export const BOT_RATES = [500, 2000, 5000, 15000] // USD of volume per simulated minute
+/**
+ * A volume bot is a service a dev pays for, as on the real market: a package of so much volume from so many maker
+ * wallets over so long, for a service fee up front. The trading fees on the bot's own buys and sells come on top
+ * (paid by the dev wallet as it goes), and the dev earns the coin's creator fee on that volume like on any other.
+ * (Sizes are the game's: a package always costs more than the creator fees it brings back.)
+ */
+export const BOT_PACKS = [
+  { id: 'starter', label: 'Starter', volume: 5_000, minutes: 5, makers: 25, fee: 15 },
+  { id: 'boost', label: 'Boost', volume: 25_000, minutes: 10, makers: 80, fee: 60 },
+  { id: 'trending', label: 'Trending', volume: 100_000, minutes: 20, makers: 250, fee: 200 },
+  { id: 'whale', label: 'Whale', volume: 400_000, minutes: 30, makers: 800, fee: 700 },
+] as const
+export type BotPack = (typeof BOT_PACKS)[number]
+export const botPack = (id: unknown): BotPack | undefined => BOT_PACKS.find((p) => p.id === id)
+/** A bought package as the bot runs it: `before` = the volume the coin's bot had already made. */
+export const botOf = (pack: BotPack, before: number, spent: number, tick: number): VolumeBot => ({ on: true, pack: pack.id, rate: pack.volume / pack.minutes, target: before + pack.volume, budget: spent + pack.fee + pack.volume * 0.06, spent: spent + pack.fee, volume: before, startedTick: tick })
+export const BOT_RATES: number[] = BOT_PACKS.map((p) => p.volume / p.minutes) // USD of volume per simulated minute
 const ticksPerMin = () => 60 / SIM_SEC_PER_TICK // the clock depends on the market (classic 6s/tick, realistic 1s)
 
 const BOT_TX_COST = 0.03 // USD network/priority cost per bot transaction
@@ -54,6 +71,12 @@ export function botTickCost(t: Token, vol: number) {
   return (vol / 2) * (tradeFee(t, 'buy') + tradeFee(t, 'sell')) + 4 * BOT_TX_COST
 }
 
+/** What a whole package costs in trading fees, start to end (the per-trade network cost adds up over its minutes). */
+export const botPackCost = (t: Token, pack: { volume: number; minutes: number }) => {
+  const ticks = pack.minutes * ticksPerMin()
+  return botTickCost(t, pack.volume / ticks) * ticks
+}
+
 /** Rough cost per simulated minute, for the UI. */
 export const botCostPerMin = (t: Token, rate: number) => botTickCost(t, rate / ticksPerMin()) * ticksPerMin()
 
@@ -61,32 +84,40 @@ export const botCostPerMin = (t: Token, rate: number) => botTickCost(t, rate / t
 export const washShare = (t: Token) => (t.volume > 0 ? clamp((t.washVol ?? 0) / t.volume, 0, 1) : 0)
 
 /**
- * Run one tick of a volume bot on a token (mutates it). Buys and sells the same size from rotating wallets, so price
- * barely moves, but volume, tx counts and "makers" go up, which pulls in some real attention until someone notices.
+ * Run one tick of a volume bot on a token (mutates it). Fresh wallets REALLY buy and then sell the same money's worth
+ * through the coin's curve or pool (`fillSim`, like every other trade in the game), so the price ends the tick where it
+ * began, the chart shows the small wicks of it, and volume, trade counts and makers go up. That is what climbs the
+ * volume lists and pulls in some real attention, until somebody notices. A buy that would finish a curve is not made
+ * (a sold-out curve cannot be sold back into, and the bot would be left holding).
  */
 export function runBotTick(t: Token, bot: VolumeBot, m: MarketState, rng: Rng): { vol: number; cost: number; event?: MarketEvent } {
-  const vol = (bot.rate / ticksPerMin()) * (0.7 + 0.6 * rng.next())
-  const cost = botTickCost(t, vol)
+  const want = (bot.rate / ticksPerMin()) * (0.7 + 0.6 * rng.next())
+  const pairs = rng.int(1, 3)
+  let vol = 0
+  let done = 0
+  for (let i = 0; i < pairs; i++) {
+    const usd = want / 2 / pairs
+    if (t.status === 'bonding' && quoteBuy(t, usd).used < usd * 0.999) break
+    const w = walletName(rng)
+    const bought = fillSim(m, t, 'buy', usd, m.time, w)
+    if (!(bought > 0)) break
+    // (The same money out puts the reserves, and so the price, back where they were.)
+    vol += bought + fillSim(m, t, 'sell', bought, m.time, w)
+    done++
+  }
+  const cost = vol > 0 ? botTickCost(t, vol) : 0
   t.volume += vol
   t.washVol = (t.washVol ?? 0) + vol
-  const pairs = rng.int(1, 3)
-  t.win = addWin(getWin(t, m.time), vol, pairs, pairs)
-  t.buys += pairs
-  t.sells += pairs
-  if (rng.chance(0.25)) t.holders += 1 // fresh bot wallets show up as tiny holders
-  for (let i = 0; i < Math.min(2, pairs); i++) {
-    const usd = vol / 2 / pairs
-    const w = walletName(rng)
-    t.tape = [
-      { id: m.nextTradeId++, time: m.time, side: 'sell' as const, usd, price: t.price, wallet: w },
-      { id: m.nextTradeId++, time: m.time, side: 'buy' as const, usd, price: t.price, wallet: w },
-      ...t.tape,
-    ].slice(0, 40)
-  }
-  touchCandles(t, m.time, t.price, vol)
+  // A coin that is being traded is not a dead one: the bot's trades count as trades for the clock that writes a
+  // quiet coin off (it costs its dev fees every second it does).
+  if (vol > 0 && t.sim.flow) t.sim.flow.lastTrade = m.time
+  t.win = addWin(getWin(t, m.time), vol, done, done)
+  t.buys += done
+  t.sells += done
+  if (done && rng.chance(0.25)) t.holders += 1 // a maker wallet now and then keeps a little dust
   // Fake activity draws a little real interest (trending lists), until it's flagged.
   // The pull is relative to the coin's size: a bot can juice a tiny coin, but barely registers on a big one.
-  if (!t.washFlagged) t.sim.pressure += 0.00025 * Math.min(1.5, Math.log10(1 + vol / Math.max(10, t.mcap * 0.002)))
+  if (!t.washFlagged && vol > 0) t.sim.pressure += 0.00025 * Math.min(1.5, Math.log10(1 + vol / Math.max(10, t.mcap * 0.002)))
 
   let event: MarketEvent | undefined
   const share = washShare(t)
@@ -103,43 +134,45 @@ export function runBotTick(t: Token, bot: VolumeBot, m: MarketState, rng: Rng): 
 }
 
 // ─── Airdrop ─────────────────────────────────────────────────────────────────
-export type AirdropTarget = 'holders' | 'fresh'
-export const AIRDROP_MAX_WALLETS = 200
 /**
- * Network cost per recipient, in the chain's coin. On Solana a fresh wallet needs a token account opened for it
- * (~0.002 SOL rent); wallets that already hold the coin only cost the tx fee. EVM chains pay gas per transfer.
+ * Two things a real dev does with an airdrop, and the game has both:
+ *  - 'own': the dev splits part of the dev bag over fresh wallets of their own. Nothing is given away: the dev wallet
+ *    looks smaller, the holder count goes up, and the coins are still the dev's to sell (they join the hidden bundle
+ *    share, and can be traced back like any bundle).
+ *  - 'kols': the dev sends tokens to known traders they pick, so the trackers show those names holding the coin.
+ *    The tokens are gone for good. A trader who was sent a coin did not choose it: it brings no followers, and most
+ *    sell what they were sent, some at once.
  */
-export const airdropFeePerWallet = (chain: Chain, target: AirdropTarget) => (chain === 'sol' ? (target === 'fresh' ? 0.00204 : 0.00002) : chain === 'bsc' ? 0.00005 : 0.000012)
+export type AirdropTarget = 'own' | 'kols'
+export const AIRDROP_MAX_WALLETS = 50
+export const AIRDROP_MAX_KOLS = 10
+/** Network cost per recipient, in the chain's coin: on Solana a wallet new to the coin needs a token account opened for it (~0.002 SOL rent). */
+export const airdropFeePerWallet = (chain: Chain, _target?: AirdropTarget) => (chain === 'sol' ? 0.00204 : chain === 'bsc' ? 0.00005 : 0.000012)
 
-export interface AirdropPlan {
-  queue: NonNullable<MarketState['shillQueue']> // recipients who dump, and when
-  dumpers: number
-  holdersAdd: number
-  hype: number
-  top10Drop: number // percentage points the top-10 share falls
+/** What splitting `qty` of the dev bag over `wallets` wallets of the dev's own does to what the coin's page shows. */
+export function planAirdrop(t: Token, qty: number, wallets: number) {
+  const supplyPct = (qty / SUPPLY) * 100
+  // A piece only leaves the top-10 list when it is small: a bag cut in three is still three top holders.
+  return { holdersAdd: wallets, top10Drop: Math.min(t.top10Pct * 0.5, supplyPct * Math.min(1, wallets / 20) * 0.9) }
 }
 
+/** A known trader a dev can send tokens to: a tracked wallet of the market's own that does not hold the coin yet. */
+export const canReceive = (w: SimWallet, tokenId: string) => !w.bot && !w.rival && (w.style === 'kol' || w.style === 'smart' || w.style === 'whale') && !w.positions[tokenId]
+
 /**
- * Dev gives `qty` tokens away across `wallets` recipients. Existing holders mostly keep it (goodwill, a hype bump);
- * fresh wallets pump the holder count but many are airdrop farmers who dump within minutes.
+ * Put `qty` tokens, in equal parts, into the picked traders' wallets (the ones that may receive them). Each holds a
+ * real position from here on and sells it like any other of theirs, through the curve or pool, under its own name.
+ * About half were never going to keep a coin they did not pick: those sell at their next look. (No dice: which ones
+ * comes from the wallet and the coin.) Returns the new wallets and who received.
  */
-export function planAirdrop(t: Token, qty: number, wallets: number, target: AirdropTarget, rng: Rng, tick: number, secPerTick: number): AirdropPlan {
-  const share = qty / Math.max(1, wallets)
-  const supplyPct = (qty / SUPPLY) * 100
-  const dumpChance = target === 'fresh' ? 0.55 : 0.22
-  const queue: AirdropPlan['queue'] = []
-  for (let i = 0; i < wallets; i++) {
-    if (!rng.chance(dumpChance)) continue
-    const delaySec = 15 + Math.pow(rng.next(), 1.6) * 480 // most dump in the first couple of minutes
-    queue.push({ tokenId: t.id, atTick: tick + Math.max(1, Math.round(delaySec / secPerTick)), usd: 0, wallet: walletName(rng), side: 'sell', qty: share * (0.6 + rng.next() * 0.4) })
-  }
-  const reach = Math.log2(1 + wallets)
+export function giftTo(wallets: SimWallet[], ids: string[], t: Pick<Token, 'id' | 'price'>, qty: number, tick: number): { wallets: SimWallet[]; to: string[] } {
+  const want = new Set(ids)
+  const to = wallets.filter((w) => want.has(w.id) && canReceive(w, t.id)).slice(0, AIRDROP_MAX_KOLS).map((w) => w.id)
+  if (!to.length || !(qty > 0)) return { wallets, to: [] }
+  const share = qty / to.length
   return {
-    queue,
-    dumpers: queue.length,
-    holdersAdd: target === 'fresh' ? wallets : 0,
-    hype: Math.min(25, (target === 'holders' ? 1.6 : 1.1) * reach + supplyPct * 0.8),
-    top10Drop: Math.min(t.top10Pct * 0.5, supplyPct * (target === 'fresh' ? 0.9 : 0.4)),
+    to,
+    wallets: wallets.map((w) => (to.includes(w.id) ? { ...w, positions: { ...w.positions, [t.id]: { qty: share, cost: Math.max(1e-9, share * t.price), openedTick: hash01(`gift|${w.id}|${t.id}`) < 0.5 ? tick - 100_000 : tick, gift: true } } } : w)),
   }
 }
 

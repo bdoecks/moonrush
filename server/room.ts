@@ -26,7 +26,7 @@ import { claimGifts } from './persist'
 import { CHAINS } from '../src/data/chains'
 import { LAUNCHPADS } from '../src/data/launchpads'
 import { walletAddress } from '../src/utils/address'
-import { airdropFeePerWallet, BOT_RATES, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
+import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, giftTo, BOT_RATES, botOf, botPack, botTickCost, BUNDLE_WALLET_FEE, flagBundle, runBotTick, sleuthBundle, STAGGER_FEE } from '../src/game/devTools'
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, TapeTrade, Timeframe, Trade, VolumeBot } from '../src/types'
@@ -58,7 +58,7 @@ function ownCoinEvent(kind: unknown, text: string, t: Token, name: string): { ki
   let m: RegExpExecArray | null
   if (kind === 'devsell' && (m = /^Dev \(you\) sold (\d{1,3})% of their \$/.exec(text))) return { kind, slot: 98, text: `Dev (${name}) sold ${pct(m[1])}% of their $${t.ticker} bag`, icon: '🧑‍💻', tone: 'down' }
   if (kind === 'bundle' && (m = /^Flagged bundle wallets are dumping \$\S+ \((\d{1,3})% of the bundle sold\)$/.exec(text))) return { kind, slot: 95, text: `Flagged bundle wallets are dumping $${t.ticker} (${pct(m[1])}% of the bundle sold)`, icon: '📦', tone: 'down' }
-  if (kind === 'airdrop' && (m = /^Dev airdropped (\d{1,3}(?:\.\d{1,2})?)% of supply of \$\S+ to (\d{1,3}) (fresh wallets|holders)$/.exec(text))) return { kind, slot: 93, text: `Dev airdropped ${Math.min(100, Number(m[1])).toFixed(2)}% of supply of $${t.ticker} to ${Math.min(999, Number(m[2]))} ${m[3]}`, icon: '🪂', tone: 'info' }
+  if (kind === 'airdrop' && (m = /^Dev airdropped (\d{1,3}(?:\.\d{1,2})?)% of supply of \$\S+ to (\d{1,3}) (fresh wallets|known traders)$/.exec(text))) return { kind, slot: 93, text: `Dev airdropped ${Math.min(100, Number(m[1])).toFixed(2)}% of supply of $${t.ticker} to ${Math.min(999, Number(m[2]))} ${m[3]}`, icon: '🪂', tone: 'info' }
   return null
 }
 const WORLD_TRADES_KEPT = 300 // World wallets live forever: keep their recent trade history only
@@ -489,14 +489,24 @@ export class Room {
       case 'bot': {
         const t = this.market.tokens.find((x) => x.id === msg.tokenId) as NetToken | undefined
         if (!t || t.creatorId !== playerId) return
-        // What it has spent is counted here (the bot is paid on the server), not taken from the game.
+        // A bot is a package bought from the list (see BOT_PACKS): the message only names it. Its speed, its volume and
+        // its fee are the server's, the service fee is charged here (in USD, up front, not refunded), and what the bot
+        // has made and spent is counted here, never taken from the game. (A speed that was not a number once broke a
+        // coin for everyone: a $50M market cap in seconds, a NaN wallet for sellers.)
         const was = this.bots.get(msg.tokenId)
-        // Only the fields a bot has are kept, each one checked, and the speed must be one the game offers. A speed that
-        // was not a number broke the coin for everyone (a $50M market cap in seconds, a NaN wallet for sellers).
         const b = msg.bot as Partial<VolumeBot> | null | undefined
-        const amount = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(1e9, Math.max(0, n)) : 0)
-        if (b?.on && typeof b.rate === 'number' && BOT_RATES.includes(b.rate)) this.bots.set(msg.tokenId, { on: true, rate: b.rate, budget: amount(b.budget), spent: amount(was?.spent ?? b.spent), volume: amount(was?.volume ?? b.volume), startedTick: amount(b.startedTick) })
-        else this.bots.delete(msg.tokenId)
+        const pack = b?.on ? botPack(b.pack) : undefined
+        if (!pack) {
+          this.bots.delete(msg.tokenId)
+          return
+        }
+        if (was?.on && was.pack === pack.id) return // already running that package: nothing to buy again
+        const w = this.walletOf(me)
+        if (!w || !live(t)) return
+        if (w.cash + 1e-9 < pack.fee) return this.sendTo(playerId, { t: 'error', message: `The ${pack.label} package costs $${pack.fee}: not enough USD` })
+        me.wallet = { ...w, cash: w.cash - pack.fee, feesPaid: w.feesPaid + pack.fee }
+        this.bots.set(msg.tokenId, botOf(pack, was?.volume ?? 0, was?.spent ?? 0, this.market.tick))
+        this.sendWallet(me)
         return
       }
       case 'status': {
@@ -663,21 +673,26 @@ export class Room {
     const t = this.market.tokens.find((x) => x.id === msg.tokenId) as NetToken | undefined
     const c = this.cooked.get(msg.tokenId)
     const w = this.walletOf(me)
-    if (!t || !c || c.pid !== me.info.id || !w || !Array.isArray(msg.queue) || !live(t)) return this.sendWallet(me)
-    const n = Math.max(1, Math.min(500, Math.round(Number(msg.wallets) || 1)))
-    const fee = airdropFeePerWallet(t.chain, msg.target === 'fresh' ? 'fresh' : 'holders') * n
-    const r = runGiveAway(w, c.walletId, t.id, Math.max(0, Number(msg.qty) || 0), t.chain, fee)
+    if (!t || !c || c.pid !== me.info.id || !w || !live(t)) return this.sendWallet(me)
+    const fee1 = airdropFeePerWallet(t.chain)
+    if (msg.target === 'own') {
+      // To the dev's own fresh wallets: the coins stay the dev's (the game keeps them in the dev wallet, as its hidden
+      // bundle share), so only the network fee is taken here.
+      const n = Math.max(1, Math.min(AIRDROP_MAX_WALLETS, Math.round(Number(msg.wallets) || 1)))
+      const acc = accountOf(w, c.walletId)
+      if (!acc || !(acc.positions[t.id]?.qty > 0) || acc.balances[t.chain] < fee1 * n - 1e-12) return this.sendWallet(me)
+      me.wallet = { ...addFunds(w, t.chain, -fee1 * n, c.walletId), feesPaid: w.feesPaid + fee1 * n * nativePrice(this.market, t.chain) }
+      return this.sendWallet(me)
+    }
+    if (msg.target !== 'kols' || !Array.isArray(msg.to)) return this.sendWallet(me)
+    // To known traders the dev picked: the tokens leave the dev wallet for good and each trader holds a real position
+    // (see giftTo). Who may receive is decided here, from the server's own wallets.
+    const plan = giftTo(this.wallets, msg.to.filter((x) => typeof x === 'string').slice(0, 40), t, 1, this.market.tick)
+    if (!plan.to.length) return this.sendWallet(me)
+    const r = runGiveAway(w, c.walletId, t.id, Math.max(0, Number(msg.qty) || 0), t.chain, fee1 * plan.to.length)
     if (!r.ok) return this.sendWallet(me)
     me.wallet = r.portfolio
-    // Recipients who'll dump what they got (never more than was given away).
-    const tick = this.market.tick
-    let left = r.qty
-    const queue = msg.queue.slice(0, 200).filter((q) => q && q.side === 'sell' && q.qty! > 0 && q.qty! < 1e12).map((q) => {
-      const qty = Math.min(+q.qty!, left)
-      left -= qty
-      return { tokenId: t.id, atTick: Math.min(tick + 3600, Math.max(tick + 1, Math.round(+q.atTick || 0))), usd: 0, wallet: String(q.wallet ?? '').slice(0, 24), side: 'sell' as const, qty }
-    }).filter((q) => q.qty > 0)
-    this.market = { ...this.market, shillQueue: [...(this.market.shillQueue ?? []), ...queue] }
+    this.wallets = giftTo(this.wallets, plan.to, t, r.qty, this.market.tick).wallets
     this.sendWallet(me)
   }
 
@@ -1204,6 +1219,10 @@ export class Room {
       if (!BOT_RATES.includes(bot.rate) || !Number.isFinite(bot.budget) || !Number.isFinite(bot.spent)) { stop('Bot switched off'); continue }
       const px = nativePrice(market, t.chain)
       const have = (accountOf(w, c.walletId)?.balances[t.chain] ?? 0) * px
+      if ((bot.volume ?? 0) >= (bot.target ?? Infinity)) {
+        stop('package delivered')
+        continue
+      }
       if ((bot.spent ?? 0) >= bot.budget) {
         stop('budget used up')
         continue

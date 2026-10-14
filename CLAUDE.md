@@ -51,6 +51,8 @@ npx tsx scripts/windows-test.ts             # rolling 5m / 1h stats and the Ligh
 npx tsx scripts/missions-test.ts            # weekly missions and career ladders: counted from fills, each paid once, weeks roll over
 npx tsx scripts/daily-test.ts               # daily challenges: three a day, each pays once, new day starts clean
 npx tsx scripts/cook-test.ts                # cooking in the World: a player's launch is under the fair-market rules, snipers pass on a big dev bag
+npx tsx scripts/rapid-test.ts               # rapid deploy: the three ideas read off a post's words, the auto-sell rules
+npx tsx scripts/devtools-test.ts            # a dev's tools: the volume bot package (real trades, fee, stops itself) and the airdrop (own wallets, picked traders)
 npx tsx scripts/cook-report.ts 3            # what cooking pays, recipe by recipe (not pass/fail): read before and after touching launches or creator fees
 npx tsx scripts/tutorial-test.ts            # the tutorials: every step readable, the waiting steps move on for the right thing only
 npx tsx scripts/rank-test.ts                # World ranks: the title a season profit earns, scaled to the starting balance
@@ -830,4 +832,47 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   "opened in another tab" notice. Connections are never saved. `scripts/tabs-test.ts` holds all of it (21 checks): run it
   after touching `join`, `leave`, `sendWallet` or anything that sends to one player. What does NOT follow a player
   across tabs until a reload: things only the browser keeps (the watchlist, settings, the My launches list).
+
+## The volume bot and the airdrop, as real devs use them (2026-10-13)
+
+- The owner's ask: keep both, make them act like the real ones. `src/game/devTools.ts`, `components/cook/DevTools.tsx`,
+  the `bot` and `airdrop` handlers in `server/room.ts`, `scripts/devtools-test.ts`.
+- **Volume bot = a package** (`BOT_PACKS`: volume, minutes, maker wallets, a service fee in USD charged up front and
+  never refunded). The message names only the package; speed, target and counts are the server's (`botOf`). Each tick
+  fresh wallets REALLY buy and sell the same money's worth (`runBotTick` → `fillSim`), so the price ends where it
+  began and the trades are on the tape; the dev wallet pays the trading fees as it goes, and the dev earns the creator
+  fee on that volume like on any other. It stops at its target. A coin its bot is trading is not written off as dead.
+  Wash-trade detection is unchanged (the owner did not ask for it to go). **A package must always cost more than the
+  creator fees it brings back** (`devtools-test` checks every package), and launching with one must not pay: run the
+  `bot-*` recipes of `cook-report` after touching packages, fees or the bot's attention (`pressure`).
+- **Airdrop, two targets** (`AirdropTarget`): `own` = part of the dev bag split over fresh wallets of the dev's own:
+  nothing leaves the dev wallet (the coins join the hidden bundle share: `rec.bundleQty`, `bundleWallets`, so it can
+  be traced like a bundle), holders go up, only the network fee is charged by the server. `kols` = tokens sent to
+  tracked traders the dev picks (`canReceive`: the market's own KOL / smart money / whale wallets that do not hold the
+  coin; never a World bot's or a rival's wallet; `AIRDROP_MAX_KOLS`): `giftTo` gives each a real position marked
+  `gift`, about half sell at their next look and the rest by their style's own exits, as real trades under their names
+  with the reason "Sold tokens the dev sent it". Receiving is not a trade, so no followers copy it. The Tracked tab
+  marks such a holding "sent by dev". **A browser can no longer queue anybody's sells** (the old message carried a
+  dump list). The old "current holders" / random "fresh wallets" airdrops are gone.
+
+## Deploy and Rapid deploy (2026-10-13, the owner's design)
+
+- `components/cook/RapidDeploy.tsx`, `game/rapid.ts`, `scripts/rapid-test.ts`. Two buttons under each open post in the X
+  tracker (World only, Cooking open, and only when the player turned on `settings.devButtons`: off by default so
+  traders never see dev buttons; the switch is in the tracker's filter row and in Cooking > Rapid deploy settings).
+  **Deploy** opens Cooking with that post on top of the form (`useDeploy.cookPost`); the list of posts that used to be
+  on the Cooking page is gone. **Rapid deploy** opens a window with three ideas (`rapidIdeas`: the name the post gives,
+  the same name with another ticker, a "Baby" version), read off the post's WORDS only (the browser never has a post's
+  hidden side: `rapid-test` checks the first idea is the post's name 599 times in 600, as a careful reader would find
+  it). One click launches with `settings.rapid` (chain, pad, dev wallet, dev buy, bundle, ticker style) and opens the
+  coin. The owner had said a player types the name on a post (2026-10-11); with rapid deploy he chose filled-in ideas.
+  Launching on a post with the exact name was already measured to lose (`cook-post-report`): re-measure if the
+  post-launch fees, creator fees or `gain` change.
+- **Auto-sell** (`SellRules`, `LaunchRecord.autoSell`, `runAutoSell` in the store, run once a tick by
+  `AutoSellRunner`): separate rules for the dev bag and the bundle (after X s, take-profit steps at x times the market
+  cap just after launch, at a market cap, stop loss); each rule fires once and sells through the ordinary `sell`, so
+  the server judges it like any order. `sell(…, part)` sells the visible dev bag or the hidden bundle on purpose (by
+  default the bundle goes first, as before); the dev panel has Sell bundle buttons.
+- Found on the way: a coin opened the second it launched showed its first trades twice (`localToken` in
+  `net/client.ts` now keeps each trade once, in id order, and the trade log in `ledger.ts` folds by id).
 

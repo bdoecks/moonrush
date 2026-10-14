@@ -1,5 +1,6 @@
 import clsx from 'clsx'
 import { ArrowLeftRight, AtSign, ChevronDown, ChevronRight, ExternalLink, Flame, GripHorizontal, PictureInPicture2, Radio, Send, UserPlus, Wallet, X } from 'lucide-react'
+import { useCooking } from '../../hooks/useLabs'
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTokenMap } from '../../hooks/useDerived'
 import { OnScreen } from '../OnScreen'
@@ -361,6 +362,7 @@ function SocialSection() {
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 border-b border-line/40 px-2 py-1 text-[10px] text-dim">
           <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={onlyCA} onChange={(e) => setOnlyCA(e.target.checked)} className="accent-[var(--accent)]" /> Only posts with a coin</label>
           {stories && <label className="flex cursor-pointer items-center gap-1" title="Only accounts with 500K followers or more: a big account's post moves far more than a small one's"><input type="checkbox" checked={onlyBig} onChange={(e) => setOnlyBig(e.target.checked)} className="accent-[var(--accent)]" /> Big accounts only</label>}
+          {stories && <DevButtonsSwitch />}
         </div>
       )}
       {feedShown && scope !== 'tg' && (writing
@@ -405,4 +407,13 @@ function LiveXFeed() {
       ))}
     </>
   )
+}
+
+/** The switch for the Deploy / Rapid deploy buttons on posts (the same one as in Cooking > Rapid deploy settings). */
+function DevButtonsSwitch() {
+  const on = useGame((s) => !!s.settings.devButtons)
+  const updateSettings = useGame((s) => s.updateSettings)
+  const world = useGame((s) => !!s.online?.round.world)
+  if (!useCooking() || !world) return null
+  return <label className="flex cursor-pointer items-center gap-1" title="Show Deploy and Rapid deploy under each open post"><input type="checkbox" checked={on} onChange={(e) => updateSettings({ devButtons: e.target.checked })} className="accent-[var(--accent)]" /> Deploy buttons</label>
 }

@@ -272,10 +272,13 @@ export function syncToken(t: Token, now: number): Book {
     book = seed(t, now)
     books.set(t.id, book)
   }
-  if (t.tape.length && t.tape[0].id > book.lastId) {
-    const next = t.tape.filter((x) => x.id > book!.lastId)
+  // (By id, not by place: a tape is newest first, but a trade can land a place lower than a newer one, and taking the
+  // top one's id as the newest folded the same trade in twice.)
+  const newest = t.tape.reduce((a, x) => Math.max(a, x.id), 0)
+  if (newest > book.lastId) {
+    const next = t.tape.filter((x) => x.id > book!.lastId).sort((a, b) => b.id - a.id)
     for (let i = next.length - 1; i >= 0; i--) apply(book, next[i])
-    book.lastId = t.tape[0].id
+    book.lastId = newest
   }
   if (fresh) {
     // The seed is a guess; make it add up. Curve coins: holders own exactly what's been sold. Older coins: whatever

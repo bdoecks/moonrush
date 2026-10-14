@@ -211,6 +211,9 @@ function exitFraction(w: SimWallet, t: Token, pnlPct: number, held: number, took
   }
 }
 
+/** Why a trader sold a coin it never bought (see giftTo in devTools.ts). */
+export const GIFT_WHY = 'Sold tokens the dev sent it'
+
 const TAG: Record<WalletStyle, 'smart' | 'sniper' | 'kol' | 'whale' | undefined> = { smart: 'smart', sniper: 'sniper', kol: 'kol', whale: 'whale', degen: undefined, fresh: undefined }
 
 /**
@@ -274,9 +277,9 @@ export function tickWallets(wallets: SimWallet[], m: MarketState, rng: Rng): { w
       if (pnl > 0) w.live.wins++
       else w.live.losses++
       const kind = frac >= 1 ? 'all' : 'partial'
-      w.trades = record(w, { tokenId: id, ticker: t.ticker, emoji: t.emoji, hue: t.hue, side: 'sell', usd, qty, price: q.avgPrice, pnl, pnlPct: pnl / costPart, mcap: t.mcap, action: kind, ...(minded ? { why: minded.why } : {}) })
+      w.trades = record(w, { tokenId: id, ticker: t.ticker, emoji: t.emoji, hue: t.hue, side: 'sell', usd, qty, price: q.avgPrice, pnl, pnlPct: pnl / costPart, mcap: t.mcap, action: kind, ...(minded ? { why: minded.why } : pos.gift ? { why: GIFT_WHY } : {}) })
       w.lastActive = m.tick
-      actions.push({ walletId: w.id, tokenId: id, side: 'sell', usd, fraction: frac >= 1 ? 1 : frac, kind, mcap: t.mcap, ...(minded ? { why: minded.why } : {}) })
+      actions.push({ walletId: w.id, tokenId: id, side: 'sell', usd, fraction: frac >= 1 ? 1 : frac, kind, mcap: t.mcap, ...(minded ? { why: minded.why } : pos.gift ? { why: GIFT_WHY } : {}) })
     }
 
     // Conviction adds: winners sometimes buy more of a position that's working.

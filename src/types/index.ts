@@ -189,6 +189,7 @@ export interface WalletPosition {
   cost: number
   openedTick: number
   tookProfit?: boolean
+  gift?: boolean // sent to it by the coin's dev (an airdrop), not bought
 }
 
 export interface WalletTrade {
@@ -611,7 +612,9 @@ export interface BundleSpec {
 export interface VolumeBot {
   on: boolean
   rate: number // USD of volume per simulated minute
-  budget: number // USD you're willing to burn; the bot stops when it's spent
+  pack?: string // the package bought (BOT_PACKS in game/devTools.ts): it sets the rate, the volume and the service fee
+  target?: number // the bot's volume at which this package is delivered and the bot stops
+  budget: number // USD it may burn at most (a safety cap well above what a package costs); the bot stops when it's spent
   spent: number // USD burned on fees and price impact
   volume: number // USD of fake volume generated
   startedTick: number
@@ -641,6 +644,7 @@ export interface LaunchRecord {
   bundleWallets?: number
   bot?: VolumeBot
   airdropped?: { qty: number; wallets: number; count: number } // everything you've airdropped of this coin
+  autoSell?: { dev?: SellRules; bundle?: SellRules; entry?: number; done?: string[] } // rapid deploy's auto-sell (entry: market cap just after launch)
 }
 
 export interface MarketState {
@@ -832,6 +836,29 @@ export interface Settings {
   tradeSettings: TradeSettings // slippage / priority fee / tip / anti-MEV per chain, side and P slot
   instant: InstantPrefs // Instant Trade units and value presets
   trackerDock?: TrackerDockPrefs // GMGN-style side dock with the wallet + social trackers
+  devButtons?: boolean // Deploy / Rapid deploy buttons on posts in the X tracker (off by default: traders never see dev buttons)
+  rapid?: RapidSettings // how Rapid deploy launches (game/rapid.ts)
+}
+
+/** Selling part of a bag by itself after a launch. Each rule is off when it is null (or empty). */
+export interface SellRules {
+  on: boolean
+  after?: number | null // seconds after launch: sell all
+  at?: { x: number; pct: number }[] // when the market cap is x times what it was just after launch: sell pct (0..1) of what is left
+  mcap?: number | null // USD market cap: sell all
+  stop?: number | null // the market cap falls this share (0..1) below where it was just after launch: sell all
+}
+
+/** Rapid deploy: everything a one-click launch on a post uses besides the name (Cooking > Rapid deploy settings). */
+export interface RapidSettings {
+  chain: Chain
+  pad: PadId
+  devWallet?: string // which dev wallet deploys (none: the first)
+  devBuy: number // in the chain's coin
+  bundle: BundleSpec
+  ticker: 'full' | 'short' | 'letters'
+  dev: SellRules // auto-sell for the dev bag
+  bundleSell: SellRules // …and for the bundle
 }
 
 /** A floating panel's place and size on the screen (px). */
