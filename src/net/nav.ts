@@ -3,7 +3,11 @@
 // game), and the address bar names the page and the coin (`?page=trenches`, `?page=token&coin=WAFFLES-x7k2`), so a
 // reload or a pasted link opens the same place when that coin is on this market. Browser only: nothing here touches
 // money, the market or the server. Other things in the address (an invite's ?ref=, a test copy's switches) are kept.
+import { create } from 'zustand'
 import { useGame, type View } from '../game/store'
+
+/** The coin a new tab is opening while it joins the room: the page shows "Opening…" instead of the market meanwhile. */
+export const useOpening = create<{ coin: string | null; stop: () => void }>((set) => ({ coin: null, stop: () => set({ coin: null }) }))
 
 type Spot = { view: View; coin: string | null }
 const VIEWS: readonly string[] = ['discover', 'trenches', 'token', 'portfolio', 'missions', 'leaderboard', 'cooking', 'copytrade', 'sniper', 'monitor', 'track', 'rewards']
@@ -79,14 +83,22 @@ export function startNav() {
   // somewhere else themselves.
   let wanted = page === 'token' && coin && !useGame.getState().market.tokens.some((t) => t.id === coin) ? coin : null
   const wantedUntil = Date.now() + 30_000
+  if (wanted) {
+    useOpening.setState({ coin: wanted })
+    setTimeout(() => useOpening.setState({ coin: null }), 30_000)
+  }
   let last = spotOf(useGame.getState())
   history.replaceState({ spot: last }, '', addressOf(last))
   useGame.subscribe((s) => {
     if (wanted) {
-      if (Date.now() > wantedUntil || s.view === 'token') wanted = null
+      if (Date.now() > wantedUntil || s.view === 'token' || !useOpening.getState().coin) {
+        wanted = null
+        useOpening.setState({ coin: null })
+      }
       else if (s.market.tokens.some((t) => t.id === wanted)) {
         const id = wanted
         wanted = null
+        useOpening.setState({ coin: null })
         moving = true
         try {
           useGame.setState({ view: 'token', selectedId: id })

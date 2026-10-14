@@ -9,6 +9,7 @@ import { TrackerDock } from './components/tracker/TrackerDock'
 import { useGameLoop } from './hooks/useGameLoop'
 import { useKeyboard } from './hooks/useKeyboard'
 import { useGame } from './game/store'
+import { OpeningCoin } from './components/OpeningCoin'
 import { AutoSellRunner, RapidDeployModal } from './components/cook/RapidDeploy'
 import { syncMarket } from './game/ledger'
 import { foldDaily, newTrades } from './game/daily'
@@ -139,6 +140,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
+      <OpeningCoin />
       <TopBar />
       <NoticeBanner />
       <WatchBanner />
