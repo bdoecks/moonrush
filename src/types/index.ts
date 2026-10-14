@@ -189,6 +189,7 @@ export interface WalletPosition {
   cost: number
   openedTick: number
   tookProfit?: boolean
+  gift?: boolean // sent to it by the coin's dev (an airdrop), not bought
 }
 
 export interface WalletTrade {

@@ -2,7 +2,8 @@
 // (to the dev's own fresh wallets, or to tracked traders the dev picks).
 //   npx tsx scripts/devtools-test.ts
 import { Room } from '../server/room'
-import { BOT_PACKS, botPackCost } from '../src/game/devTools'
+import { AIRDROP_MAX_KOLS, airdropFeePerWallet, BOT_PACKS, botPackCost, canReceive } from '../src/game/devTools'
+import { GIFT_WHY } from '../src/game/walletEngine'
 import { cookToken } from '../src/game/marketEngine'
 import { creatorRate, nativePrice } from '../src/game/tradingEngine'
 import { WORLD_CODE, type ServerMsg } from '../src/net/protocol'
@@ -89,6 +90,61 @@ const back = (t1.creatorFees ?? 0) - fees0
 ok(back >= botVol * creatorRate(t1) * 0.9, `the dev earns the creator fee on that volume like on any other: $${back.toFixed(2)}`)
 ok(pack.fee + paid > back * 2, `and the package costs far more than it brings back ($${(pack.fee + paid).toFixed(0)} against $${back.toFixed(0)})`)
 for (const p of BOT_PACKS) ok(p.fee + botPackCost(t1, p) > p.volume * creatorRate(t1) * 2, `the ${p.label} package cannot pay for itself in creator fees`)
+
+// ─── The airdrop ─────────────────────────────────────────────────────────────
+const B = cook('DROPTEST', 2)
+const bag = () => me().wallet.positions[B]?.qty ?? 0
+const bag0 = bag()
+ok(bag0 > 0, 'a second coin, with a dev bag')
+const fee1 = airdropFeePerWallet('sol')
+const shill0 = (r.market.shillQueue ?? []).length
+
+// To the dev's own fresh wallets: only the network fee, the coins stay the dev's.
+let solA = sol()
+r.handle('pDev', { t: 'airdrop', seq: ++seq, tokenId: B, walletId: main, qty: bag0 * 0.5, wallets: 20, target: 'own' })
+ok(bag() === bag0, 'moving part of the bag to wallets of your own gives nothing away (the coins can still be sold)')
+ok(Math.abs(solA - sol() - fee1 * 20) < 1e-9, 'it costs the network fee for each wallet')
+solA = sol()
+r.handle('pDev', { t: 'airdrop', seq: ++seq, tokenId: B, walletId: main, qty: 1, wallets: 1e9, target: 'own' })
+ok(solA - sol() <= fee1 * 50 + 1e-9, 'however many wallets a message asks for, fees are for 50 at most')
+r.handle('pDev', { t: 'airdrop', seq: ++seq, tokenId: A, walletId: main, qty: 1, wallets: 5, target: 'holders', queue: [{ tokenId: A, atTick: r.market.tick + 1, usd: 0, wallet: 'x', side: 'sell', qty: 1e11 }] })
+ok((r.market.shillQueue ?? []).filter((q) => q.wallet === 'x').length === 0 && (r.market.shillQueue ?? []).length <= shill0 + 50, 'the old kind of airdrop message does nothing: nobody\'s sells can be queued from a browser')
+
+// To known traders the dev picks.
+const can = () => r.wallets.filter((w) => canReceive(w, B))
+const kols = can().filter((w) => w.style === 'kol')
+ok(kols.length >= 3, `there are known traders to pick from (${can().length}, ${kols.length} of them KOLs)`)
+const picks = kols.slice(0, 3).map((w) => w.id)
+const botW = r.wallets.find((w) => w.bot)
+const give = bag0 * 0.3
+solA = sol()
+const tapeB = new Set(tok(B)!.tape.map((x) => x.id))
+r.handle('pDev', { t: 'airdrop', seq: ++seq, tokenId: B, walletId: main, qty: give, wallets: 99, target: 'kols', to: [...picks, 'no-such-wallet', ...(botW ? [botW.id] : [])] })
+const posOf = (id: string) => r.wallets.find((w) => w.id === id)?.positions[B]
+ok(Math.abs(bag() - (bag0 - give)) < 1e-3, 'tokens sent to known traders leave the dev wallet for good')
+ok(picks.every((id) => Math.abs((posOf(id)?.qty ?? 0) - give / 3) < 1e-3 && posOf(id)?.gift), 'each picked trader now really holds its share, marked as sent by the dev')
+ok(Math.abs(solA - sol() - fee1 * 3) < 1e-9, 'the fee is for the traders who received, not for what the message claimed')
+ok(!botW || !r.wallets.find((w) => w.id === botW.id)?.positions[B]?.gift, 'a World bot (somebody\'s real wallet) cannot be sent tokens this way')
+ok(tok(B)!.tape.every((x) => tapeB.has(x.id)), 'receiving is not a trade: nothing on the tape, so nothing for followers to copy')
+const many = can().slice(0, 30).map((w) => w.id)
+const before = r.wallets.filter((w) => w.positions[B]?.gift).length
+r.handle('pDev', { t: 'airdrop', seq: ++seq, tokenId: B, walletId: main, qty: bag() * 0.1, wallets: 30, target: 'kols', to: many })
+ok(r.wallets.filter((w) => w.positions[B]?.gift).length - before === Math.min(AIRDROP_MAX_KOLS, many.length), `one airdrop reaches ${AIRDROP_MAX_KOLS} traders at most`)
+r.handle('pDev', { t: 'airdrop', seq: ++seq, tokenId: B, walletId: main, qty: bag(), wallets: 3, target: 'kols', to: picks })
+ok(bag() > 0, 'a trader who already holds the coin cannot be sent more (nothing leaves the dev wallet)')
+// They sell what they were sent, under their own names, as real trades.
+const got0 = r.wallets.filter((w) => w.positions[B]?.gift).length
+let soon = 0
+for (let i = 0; i < 400; i++) {
+  r.tick()
+  if (i === 14) soon = got0 - r.wallets.filter((w) => w.positions[B]?.gift).length
+}
+const left = r.wallets.filter((w) => w.positions[B]?.gift).length
+ok(soon >= 2 && soon < got0, `some sell what they were sent right away, the others hold a while (${soon} of ${got0} gone in 15 s)`)
+ok(left < got0 * 0.5, `and most have sold within a few minutes (${got0 - left} of ${got0})`)
+const sellers = r.wallets.filter((w) => w.trades.some((x) => x.tokenId === B && x.side === 'sell' && x.why === GIFT_WHY))
+ok(sellers.length >= 3, `a trader's page says why it sold: "${GIFT_WHY}" (${sellers.length} traders)`)
+ok(sellers.every((w) => !w.trades.some((x) => x.tokenId === B && x.side === 'buy' && x.action !== 'more')), 'none of them shows a buy of the coin it never chose')
 
 console.log(bad ? `${bad} check(s) failed` : 'all checks passed')
 process.exit(bad ? 1 : 0)

@@ -28,6 +28,7 @@ export interface TraderOnCoin {
   qty: number // coins held now
   cost: number // dollars paid for what is held
   avgEntry: number // price per coin of what is held (0 when out)
+  gift: boolean // what it holds was sent to it by the coin's dev, not bought
   value: number // what the position is worth at the current price
   sharePct: number // of the whole supply
   unrealized: number
@@ -63,7 +64,7 @@ export function tradersOn(token: Pick<Token, 'id' | 'price'>, wallets: SimWallet
     }
     out.push({
       id: w.id, name: w.name, avatar: w.avatar, style: w.style, mind: mindOf(w), bot: !!w.bot, tracked: mine, color: mine ? traderColor(tracked, w.id) : '#8b93a1',
-      qty, cost, avgEntry: qty > 0 ? cost / qty : 0, value, sharePct: (qty / SUPPLY) * 100, unrealized: qty > 0 ? value - cost : 0, realized,
+      qty, cost, avgEntry: qty > 0 ? cost / qty : 0, gift: qty > 0 && !!pos?.gift, value, sharePct: (qty / SUPPLY) * 100, unrealized: qty > 0 ? value - cost : 0, realized,
       boughtUsd, soldUsd, buys, sells, firstAt: trades.length ? trades[trades.length - 1].time : 0, lastAt: trades[0]?.time ?? 0, lastSide: trades[0]?.side ?? null, trades,
     })
   }

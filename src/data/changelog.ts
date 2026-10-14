@@ -9,7 +9,7 @@
 
 export interface Update {
   id: string
-  flag?: 'sparks' | 'larps' | 'tech' // told only while this switch is on (see the top of the file)
+  flag?: 'sparks' | 'larps' | 'tech' | 'cooking' // told only while this switch is on (see the top of the file)
   date: string // as shown, e.g. "October 8, 2026"
   title: string
   fixed?: string[]
@@ -34,6 +34,19 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 
 /** Newest first. */
 export const UPDATES: Update[] = [
+  {
+    id: '2026-10-13-dev-tools',
+    date: 'October 13, 2026',
+    title: 'The volume bot and the airdrop work like the real ones',
+    flag: 'cooking',
+    changed: [
+      'The volume bot is now a service you buy as a package: so much volume, from so many wallets, over so many minutes, for a fee paid up front. Its wallets really buy and sell your coin, so you see its trades on the tape and the chart.',
+      'A bot package always costs more than the creator fees it earns back. You pay for attention, not for profit.',
+      'An airdrop now goes one of two ways. The first is to fresh wallets of your own: your dev wallet looks smaller and the holder count goes up, and the coins are still yours.',
+      'The second is to known traders you pick from a list. The trackers then show them holding your coin, but they did not choose it, and most sell what they are sent.',
+      'On a coin\u2019s Tracked tab, a trader holding tokens the dev sent is marked "sent by dev", so you can tell a real buy from a gift.',
+    ],
+  },
   {
     id: '2026-10-12-coin-new-tab',
     date: 'October 12, 2026',
@@ -192,7 +205,7 @@ export const UPDATES: Update[] = [
   },
 ]
 
-type Switches = Partial<Record<'sparks' | 'larps' | 'tech', boolean>>
+type Switches = Partial<Record<'sparks' | 'larps' | 'tech' | 'cooking', boolean>>
 /** The updates a player is told about right now (an update behind a switch that is off is not news yet). */
 export const shownUpdates = (flags: Switches) => UPDATES.filter((u) => !u.flag || !!flags[u.flag])
 /** …and what is being worked on (a thing that has opened is not being worked on any more). */

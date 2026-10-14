@@ -18,6 +18,7 @@ interface Recipe {
   marketing: number
   sellAfter: number | 'bond' // seconds after launch the whole dev bag is sold; 'bond': held until it bonds or dies
   bundle?: { wallets: number; perWallet: number }
+  bot?: string // a volume bot package (BOT_PACKS) bought as the coin launches
 }
 const RECIPES: Recipe[] = [
   { name: 'lazy', what: 'nothing filled in, no dev buy', good: false, devBuy: 0, marketing: 0, sellAfter: 0 },
@@ -32,6 +33,11 @@ const RECIPES: Recipe[] = [
   { name: 'good-2sol-5s', what: 'best launch, 2 SOL dev buy, dumped after 5 s', good: true, devBuy: 2, marketing: 0, sellAfter: 5 },
   { name: 'best-free', what: 'best launch, no dev buy, no marketing (creator fees only, the cheapest way to launch well)', good: true, devBuy: 0, marketing: 0, sellAfter: 0 },
   { name: 'best-half-hold', what: 'best launch, 0.5 SOL dev buy held to the bond, no marketing', good: true, devBuy: 0.5, marketing: 0, sellAfter: 'bond' },
+  { name: 'bot-nobuy', what: 'no dev buy, a Starter volume bot (does the bot pay for itself in fees?)', good: true, devBuy: 0, marketing: 0, sellAfter: 0, bot: 'starter' },
+  { name: 'bot-1sol-hold', what: '1 SOL dev buy held to the bond, a Boost volume bot', good: true, devBuy: 1, marketing: 0, sellAfter: 'bond', bot: 'boost' },
+  { name: 'bot-2sol-3m', what: '2 SOL dev buy, a Boost volume bot, bag dumped after 3 min (on whoever the bot brought)', good: true, devBuy: 2, marketing: 0, sellAfter: 180, bot: 'boost' },
+  { name: 'bot-2sol-90s', what: '2 SOL dev buy, a Starter volume bot, bag dumped after 90 s', good: true, devBuy: 2, marketing: 0, sellAfter: 90, bot: 'starter' },
+  { name: 'nobot-2sol-3m', what: '2 SOL dev buy, no bot, bag dumped after 3 min (to compare)', good: true, devBuy: 2, marketing: 0, sellAfter: 180 },
   { name: 'lazy-1sol-30s', what: 'nothing filled in, 1 SOL dev buy, sold after 30 s', good: false, devBuy: 1, marketing: 0, sellAfter: 30 },
 ]
 
@@ -79,8 +85,10 @@ function run(recipe: Recipe, hours: number) {
       const c = cookToken(world.market, new Rng(i * 7919 + 13), spec as never)
       const before = r.market.tokens.length
       r.handle('u-chef', { t: 'cook', seq: seq++, ref: seq, token: c.token, money: { devWallet: 'w-main', devBuy: recipe.devBuy, marketing: recipe.marketing, style: spec.style, bundle: recipe.bundle ? { ...recipe.bundle, stagger: false } : undefined } })
-      if (r.market.tokens.length > before && r.cooked.has(c.token.id)) coins.push({ id: c.token.id, at: i, sold: false, bonded: false, peak: 0 })
-      else refused++
+      if (r.market.tokens.length > before && r.cooked.has(c.token.id)) {
+        coins.push({ id: c.token.id, at: i, sold: false, bonded: false, peak: 0 })
+        if (recipe.bot) r.handle('u-chef', { t: 'bot', tokenId: c.token.id, bot: { on: true, pack: recipe.bot } })
+      } else refused++
     }
     r.tick()
     for (const c of coins) {

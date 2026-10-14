@@ -89,11 +89,12 @@ export function TrackedTab({ token }: { token: Token }) {
                       {STYLE_ICON[r.style] && <span className="text-[11px]" title={r.style}>{STYLE_ICON[r.style]}</span>}
                       {r.mind && <span className="rounded bg-panel2 px-1 py-px text-[9px] font-semibold text-muted" title={`${MIND_META[r.mind].label}: ${MIND_META[r.mind].blurb}`}>{MIND_META[r.mind].icon} {MIND_META[r.mind].label}</span>}
                       {r.bot && <span className="rounded bg-panel2 px-1 text-[9px] font-semibold text-dim" title="Simulated trader">SIM</span>}
+                      {r.gift && <span className="rounded bg-warn/15 px-1 text-[9px] font-semibold text-warn" title="This trader did not buy the coin: the dev sent it these tokens">🪂 sent by dev</span>}
                     </div>
                   </td>
                   <td className={clsx(td, 'num text-right', r.qty > 0 ? 'text-ink' : 'text-dim')}>{r.qty > 0 ? fmtUsd(r.value) : 'out'}</td>
                   <td className={clsx(td, 'num text-right text-muted')}>{r.qty > 0 ? `${r.sharePct.toFixed(r.sharePct < 0.1 ? 3 : 2)}%` : '—'}</td>
-                  <td className={clsx(td, 'num text-right text-muted')}>{r.qty > 0 ? fmtCompact(r.avgEntry * SUPPLY) : '—'}</td>
+                  <td className={clsx(td, 'num text-right text-muted')}>{r.gift ? 'airdrop' : r.qty > 0 ? fmtCompact(r.avgEntry * SUPPLY) : '—'}</td>
                   <td className={clsx(td, 'num text-right', r.qty > 0 ? toneClass(r.unrealized) : 'text-dim')}>{r.qty > 0 ? <>{signed(r.unrealized)} <span className="text-[10px]">({r.cost > 0 ? `${((r.unrealized / r.cost) * 100).toFixed(0)}%` : '—'})</span></> : '—'}</td>
                   <td className={clsx(td, 'num text-right', r.sells ? toneClass(r.realized) : 'text-dim')}>{r.sells ? signed(r.realized) : '—'}</td>
                   <td className={clsx(td, 'num text-right')}><span className="text-up">{r.buys}</span> <span className="text-dim">/</span> <span className="text-down">{r.sells}</span></td>

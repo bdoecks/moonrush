@@ -70,13 +70,13 @@ ok((me().cashback?.sol ?? 0) > cb1, 'cashback grows on orders')
 
 // Volume bot: paid from the dev wallet on the server.
 const solBot = main().balances.sol
-r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, rate: 2000, budget: 50, spent: 0, volume: 0, startedTick: 0 } })
+r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, pack: 'starter' } })
 for (let i = 0; i < 5; i++) r.tick()
 ok(main().balances.sol < solBot, `bot charged the dev wallet: ${(solBot - main().balances.sol).toFixed(5)} SOL`)
 // Tampering: the game says the bot has spent nothing; the server keeps its own count.
-r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, rate: 2000, budget: 50, spent: 0, volume: 0, startedTick: 0 } })
+r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, pack: 'starter', spent: 0, volume: 0 } })
 const bots = (room as unknown as { bots: Map<string, { spent: number }> }).bots
-ok((bots.get(cooked.token.id)?.spent ?? 0) > 0, `server keeps the bot's spend: $${bots.get(cooked.token.id)?.spent.toFixed(3)}`)
+ok((bots.get(cooked.token.id)?.spent ?? 0) > 15, `server keeps the bot's spend: $${bots.get(cooked.token.id)?.spent.toFixed(3)}`)
 
 // Creator fees accrue in the vault; claiming pays them into the dev wallet.
 for (let i = 0; i < 40; i++) r.tick()
@@ -94,15 +94,16 @@ const cashCb = me().wallet.cash
 r.handle('p1', { t: 'op', seq: 6, op: { kind: 'cashback', chains: ['sol'], as: 'usdc' } })
 ok(me().wallet.cash > cashCb && me().cashback!.sol === 0, `cashback ${pend.toExponential(3)} SOL paid as $${(me().wallet.cash - cashCb).toFixed(4)} USDC`)
 
-// Airdrop 10% of the dev bag to 5 holders; a fake queue can't dump more than was given.
+// Airdrop 10% of the dev bag to a known trader the dev picks (scripts/devtools-test.ts holds the rest); a message can
+// no longer queue anybody's sells.
 const bagA = main().positions[cooked.token.id].qty
 const give = bagA * 0.1
-// (Other sells can be queued on the coin already: a story's followers flipping what they bought. Count the airdrop's own.)
 const dumps = () => (room.market.shillQueue ?? []).filter((x) => x.tokenId === cooked.token.id && x.side === 'sell').reduce((a, x) => a + (x.qty ?? 0), 0)
 const queuedBefore = dumps()
-r.handle('p1', { t: 'airdrop', seq: 7, tokenId: cooked.token.id, walletId: main().id, qty: give, wallets: 5, target: 'holders', queue: [{ tokenId: cooked.token.id, atTick: room.market.tick + 2, usd: 0, wallet: 'x', side: 'sell', qty: 1e11 }] })
+const kol = (room as unknown as { wallets: { id: string; style: string; bot?: boolean; rival?: string; positions: Record<string, unknown> }[] }).wallets.find((x) => x.style === 'kol' && !x.bot && !x.rival && !x.positions[cooked.token.id])!
+r.handle('p1', { t: 'airdrop', seq: 7, tokenId: cooked.token.id, walletId: main().id, qty: give, wallets: 1, target: 'kols', to: [kol.id], queue: [{ tokenId: cooked.token.id, atTick: room.market.tick + 2, usd: 0, wallet: 'x', side: 'sell', qty: 1e11 }] })
 ok(Math.abs(main().positions[cooked.token.id].qty - (bagA - give)) < 1e-6, 'airdropped tokens left the dev wallet')
-ok(dumps() - queuedBefore <= give + 1e-6 && dumps() > queuedBefore, 'dumpers capped at what was airdropped')
+ok(dumps() === queuedBefore, 'an airdrop message cannot queue sells on the coin')
 
 // Convert: SOL in the main wallet → BNB in the same wallet, one fee, on the server.
 const solC = main().balances.sol
@@ -238,7 +239,7 @@ ok(typeof coinLook({ name: 'Trench Pup', ticker: 'TPUP', emoji: '🐶', descript
   ok(tryCook({ id: otherId, ticker: 'OTHR' }).why.includes('already exists') && candleStore.get(otherId) === otherChart && !!otherChart && me().wallet.cash === cashI, 'a launch under the id of another room’s coin is refused and that coin’s chart is untouched')
   other.dispose()
   ok(tryCook({ pad: ['pump'], ticker: 'PADL' }).why.includes('launchpad'), 'a launchpad sent as a list is refused')
-  // The volume bot: only the speeds the game offers.
+  // The volume bot: only the packages the game offers.
   const botsMap = (room as unknown as { bots: Map<string, { rate: number }> }).bots
   r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, rate: 'x', budget: 1e9 } })
   const afterBad = botsMap.has(cooked.token.id)
@@ -247,9 +248,9 @@ ok(typeof coinLook({ name: 'Trench Pup', ticker: 'TPUP', emoji: '🐶', descript
   const mcap0 = room.market.tokens.find((x) => x.id === cooked.token.id)!.mcap
   for (let i = 0; i < 5; i++) r.tick()
   const coinB = room.market.tokens.find((x) => x.id === cooked.token.id)!
-  ok(!afterBad && !botsMap.has(cooked.token.id) && Number.isFinite(coinB.mcap) && Number.isFinite(coinB.liquidity) && coinB.mcap < mcap0 * 3, 'a volume bot with a speed that is not one of the game’s is refused, and the coin’s market stays sane')
-  r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, rate: 2000, budget: 50, spent: 0, volume: 0, startedTick: 0 } })
-  ok(botsMap.get(cooked.token.id)?.rate === 2000, 'an ordinary bot still starts')
+  ok(!afterBad && !botsMap.has(cooked.token.id) && Number.isFinite(coinB.mcap) && Number.isFinite(coinB.liquidity) && coinB.mcap < mcap0 * 3, 'a volume bot that is not one of the game’s packages is refused, and the coin’s market stays sane')
+  r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: { on: true, pack: 'starter' } })
+  ok(botsMap.get(cooked.token.id)?.rate === 1000, 'an ordinary bot still starts')
   r.handle('p1', { t: 'bot', tokenId: cooked.token.id, bot: null })
 }
 // A coin saved with a picture link (before this check) comes back without it, and saved trades lose picture copies.
