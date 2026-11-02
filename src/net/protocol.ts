@@ -211,6 +211,8 @@ export type OpMsg =
   | { kind: 'claimFees'; tokenIds?: string[] } // creator fees from your coins' vaults, into each coin's dev wallet
   | { kind: 'cashback'; chains: Chain[]; as: 'coin' | 'usdc' }
   | { kind: 'bankrupt' } // World: broke, start over with the restart balance (once a day)
+  | { kind: 'reward'; what: 'checkin' } // World: today's check-in pays money (the server counts the streak)
+  | { kind: 'reward'; what: 'mission'; usd: number; title: string } // World: a finished mission's money (capped per day)
 
 /** What a launch costs and buys: the server charges it and runs the dev buy / bundle on your wallet. */
 export interface CookMoney {
@@ -293,7 +295,7 @@ export type ServerMsg =
   | { t: 'notice'; text: string }
   // Your wallets as the server has them, after it handled your message number `ack` (and the order `ref`'s fills).
   // `reset`: an admin wiped your wallet back to the start (applied right away, trade history cleared).
-  | { t: 'wallet'; ack: number; state: WalletState; ref?: number; fills?: import('../types').Trade[]; failures?: string[]; reset?: boolean; note?: string }
+  | { t: 'wallet'; ack: number; state: WalletState; ref?: number; fills?: import('../types').Trade[]; failures?: string[]; reset?: boolean; note?: string; noteKind?: 'copy' | 'reward' }
   | BoardMsg
   // Your followers and reputation as the server has them, sent when you join and whenever they change (a post, a
   // call being judged: `results`). The World keeps its own count from a fresh start; a friends room starts from yours.

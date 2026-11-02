@@ -32,7 +32,7 @@ import { DEFAULT_TRACKER, shouldAlert, trackedHolders } from './tracker'
 import { worldStartOf, type ClientMsg, type OpMsg, type OrderMsg, type RoomPlayer, type RoundInfo } from '../net/protocol'
 import { sellsDue } from './rapid'
 import { addFunds, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap } from './orders'
-import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, freshRewards, makeFriend, MAX_FRIENDS, REFERRALS_ENABLED, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
+import { cashbackOf, cashbackUsd, CHECKIN_REWARDS, MISSION_USD_PER_XP, freshRewards, makeFriend, MAX_FRIENDS, REFERRALS_ENABLED, SHARE_COOLDOWN_TICKS, tickFriends, todayKey, yesterdayKey } from './rewardsEngine'
 
 export type View = 'discover' | 'trenches' | 'token' | 'portfolio' | 'missions' | 'leaderboard' | 'cooking' | 'copytrade' | 'sniper' | 'monitor' | 'track' | 'rewards' | 'admin'
 export type DockTab = 'positions' | 'watchlist' | 'history' | 'feed' | 'tracker' | 'social'
@@ -568,6 +568,12 @@ function initialState() {
     wallets: createWallets(new Rng((market.seed ^ 0xa11ce) >>> 0)), copies: [] as CopyConfig[], trackedWallets: [] as string[], walletFeed: [] as WalletFeedItem[],
     socialFeed: [] as SocialPost[], followedAccounts: [] as string[], walletLabels: {} as Record<string, WalletLabel>, alerts: [] as PriceAlert[], snipers: [] as SniperTask[],
   }
+}
+
+/** Where a reward also pays money: a solo Practice round (straight in), the World (its server pays), or nowhere. */
+function rewardMoneyWhere(s: { online: { round: { world?: boolean }; spectator?: boolean } | null; mode: string; runStatus: string }): 'solo' | 'world' | null {
+  if (s.online) return s.online.round.world && !s.online.spectator ? 'world' : null
+  return s.mode === 'practice' && s.runStatus === 'running' ? 'solo' : null
 }
 
 /** Solo: what your followers' copy bots hold (rooms keep this on the server). */
@@ -2217,14 +2223,16 @@ export const useGame = create<GameState>()((set, get) => {
       if (r.checkIn.lastDate === todayKey()) return
       const streak = r.checkIn.lastDate === yesterdayKey() ? (r.checkIn.streak % 7) + 1 : 1
       const amount = CHECKIN_REWARDS[streak - 1]
-      const asCash = s.mode === 'practice' && s.runStatus === 'running' && !s.online
-      const claim: RewardClaim = { id: `c${Date.now()}`, time: Date.now(), kind: 'checkin', amount, paidAs: asCash ? 'cash' : 'xp' }
+      // XP always; money too in solo Practice (straight in) and the World (the server pays it, and counts the streak).
+      const where = rewardMoneyWhere(s)
+      const claim: RewardClaim = { id: `c${Date.now()}`, time: Date.now(), kind: 'checkin', amount, paidAs: where ? 'both' : 'xp' }
       set({
         rewards: { ...r, checkIn: { lastDate: todayKey(), streak }, history: [claim, ...r.history].slice(0, 50) },
-        ...(asCash ? { portfolio: { ...s.portfolio, cash: s.portfolio.cash + amount } } : {}),
+        ...(where === 'solo' ? { portfolio: { ...s.portfolio, cash: s.portfolio.cash + amount } } : {}),
       })
-      s.notify({ title: `DAY ${streak} CHECK-IN`, body: asCash ? `+${fmtUsd(amount, 0)} cash` : `+${amount} XP`, tone: 'xp', icon: '📅' }, 'achievement')
-      if (!asCash) gainXp(amount, 'Daily check-in', true)
+      if (where === 'world') netHooks.op?.({ kind: 'reward', what: 'checkin' })
+      s.notify({ title: `DAY ${streak} CHECK-IN`, body: where === 'solo' ? `+${fmtUsd(amount, 0)} and +${amount} XP` : where === 'world' ? `+${amount} XP, and money for your wallet` : `+${amount} XP`, tone: 'xp', icon: '📅' }, 'achievement')
+      gainXp(amount, 'Daily check-in', true)
       persist()
     },
     trackDaily: (fills, cooked = 0) => {
@@ -2235,8 +2243,16 @@ export const useGame = create<GameState>()((set, get) => {
       // The same fills count toward this week's missions and the career ladders (see game/missions.ts).
       const more = foldMissions(s.rewards.weekly, s.rewards.career, fills, swept)
       for (const p of more.paid) paid.push([p.title, p.xp])
-      const claims: RewardClaim[] = paid.map(([, xp], i) => ({ id: `d${Date.now()}${i}`, time: Date.now(), kind: 'challenge', amount: xp, paidAs: 'xp' }))
-      set({ rewards: { ...s.rewards, dailies: state, weekly: more.weekly, career: more.career, history: claims.length ? [...claims, ...s.rewards.history].slice(0, 50) : s.rewards.history } })
+      // Each finished mission pays money too where rewards do ($1 an XP point): straight into a solo Practice round,
+      // or through the World's server (which caps it per day).
+      const where = rewardMoneyWhere(s)
+      const claims: RewardClaim[] = paid.map(([, xp], i) => ({ id: `d${Date.now()}${i}`, time: Date.now(), kind: 'challenge', amount: xp, paidAs: where ? 'both' : 'xp' }))
+      const usd = paid.reduce((a, [, xp]) => a + xp * MISSION_USD_PER_XP, 0)
+      set({
+        rewards: { ...s.rewards, dailies: state, weekly: more.weekly, career: more.career, history: claims.length ? [...claims, ...s.rewards.history].slice(0, 50) : s.rewards.history },
+        ...(where === 'solo' && usd > 0 ? { portfolio: { ...get().portfolio, cash: get().portfolio.cash + usd } } : {}),
+      })
+      if (where === 'world') for (const [title, xp] of paid) netHooks.op?.({ kind: 'reward', what: 'mission', usd: xp * MISSION_USD_PER_XP, title })
       for (const c of completed) s.notify({ title: 'DAILY CHALLENGE DONE', body: `${c.title} · +${c.xp} XP`, tone: 'xp', icon: c.icon }, 'achievement')
       if (swept) s.notify({ title: 'DAILY SWEEP', body: `All three done · +${DAILY_SWEEP_XP} XP bonus`, tone: 'xp', icon: '🧹' }, 'achievement')
       for (const p of more.paid) s.notify({ title: p.kind === 'career' ? 'CAREER BADGE' : p.kind === 'weeklySweep' ? 'WEEKLY SWEEP' : 'WEEKLY MISSION DONE', body: `${p.title} · +${p.xp} XP`, tone: 'xp', icon: p.icon }, 'achievement')

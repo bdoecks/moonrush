@@ -286,7 +286,7 @@ function onWallet(msg: Extract<ServerMsg, { t: 'wallet' }>) {
     useGame.getState().requestBoard()
     return
   }
-  if (msg.note) s.notify({ title: 'COPY TRADERS', body: msg.note, tone: 'info', icon: '👥' }) // e.g. your followers copying your buy
+  if (msg.note) s.notify(msg.noteKind === 'reward' ? { title: 'REWARD PAID', body: msg.note, tone: 'up', icon: '💵' } : { title: 'COPY TRADERS', body: msg.note, tone: 'info', icon: '👥' }) // e.g. a reward, or followers copying your buy
   let p = s.portfolio
   // A launch the server refused (it has rules the form can't check, like blocked words): its answer lists every coin
   // you cooked under `vaults`, and a refused one is not there. The server charged and counted nothing, so the launch

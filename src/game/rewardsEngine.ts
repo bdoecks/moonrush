@@ -30,7 +30,11 @@ export const SHARE_COOLDOWN_TICKS = 45
  */
 export const REFERRALS_ENABLED = false
 export const MAX_FRIENDS = 20
-export const CHECKIN_REWARDS = [50, 75, 100, 150, 200, 300, 500] // day 1..7 (cash in practice, XP elsewhere)
+export const CHECKIN_REWARDS = [50, 75, 100, 150, 200, 300, 500] // day 1..7: that much XP, plus that many dollars where rewards pay money
+// Rewards pay money too (on top of the XP) in the World and in solo Practice: $1 for each XP point a mission gives.
+// Timed solo rounds and friends' rooms stay XP only, so a race isn't decided by rewards.
+export const MISSION_USD_PER_XP = 1
+export const REWARD_USD_PER_DAY = 3_000 // the World's server pays at most this much mission money a day (check-in aside)
 
 export const tierFor = (tiers: { volume: number; rate: number }[], volume: number) => {
   let i = 0

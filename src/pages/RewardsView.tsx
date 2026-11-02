@@ -26,6 +26,7 @@ export function RewardsView() {
     save('rewardsTab', t)
   }
   const mode = useGame((s) => s.mode)
+  const online = useGame((s) => s.online)
   const r = useGame((s) => s.rewards)
   const native = useGame((s) => s.market.native)
   const cbPending = pendingUsd(cashbackOf(r), (c) => native?.[c]?.price ?? CHAINS[c].basePrice)
@@ -49,7 +50,7 @@ export function RewardsView() {
         ))}
         <span className="ml-auto flex items-center gap-1 text-[11px] text-dim">
           <Info size={12} />
-          {mode === 'practice' ? 'Practice: rewards pay out as cash' : `${MODES[mode].name}: cashback pays coins; check-in pays XP`}
+          {online?.round.world ? 'The World: check-in and missions pay XP and money' : online ? 'Rooms: check-in and missions pay XP (money would decide the race)' : mode === 'practice' ? 'Practice: check-in and missions pay XP and money' : `${MODES[mode].name}: check-in and missions pay XP (money would decide the race)`}
         </span>
       </div>
       <div className="p-3">
@@ -381,7 +382,7 @@ function History() {
               <td className="px-4 py-2 text-muted">{ago(h.time)}</td>
               <td className="px-4 py-2 font-semibold">{label[h.kind]}</td>
               <td className="px-4 py-2 text-right num text-up">
-                {h.paidAs === 'coin' && h.chain ? `+${fmtNative(h.native ?? 0, h.chain)}` : h.paidAs === 'xp' ? `+${Math.round(h.amount)} XP` : `+${fmtUsd(h.amount, h.amount < 10 ? 4 : 2)}${h.kind === 'cashback' ? ' USDC' : ''}`}
+                {h.paidAs === 'coin' && h.chain ? `+${fmtNative(h.native ?? 0, h.chain)}` : h.paidAs === 'xp' ? `+${Math.round(h.amount)} XP` : h.paidAs === 'both' ? `+${Math.round(h.amount)} XP · +${fmtUsd(h.amount, 0)}` : `+${fmtUsd(h.amount, h.amount < 10 ? 4 : 2)}${h.kind === 'cashback' ? ' USDC' : ''}`}
                 {h.paidAs === 'coin' && <span className="ml-1 text-[10px] text-dim">≈{fmtUsd(h.amount, 4)}</span>}
               </td>
             </tr>

@@ -317,7 +317,7 @@ export interface RewardClaim {
   time: number // ms timestamp
   kind: 'commission' | 'cashback' | 'checkin' | 'challenge'
   amount: number // USD value (or XP)
-  paidAs: 'cash' | 'xp' | 'coin'
+  paidAs: 'cash' | 'xp' | 'coin' | 'both' // both: XP and money
   chain?: Chain // cashback paid in a chain coin
   native?: number // chain-coin amount paid
 }

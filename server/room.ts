@@ -21,7 +21,7 @@ import { NARRATIVES } from '../src/data/narratives'
 import { addFunds, applyLayout, freshWallet, fundsIn, payNative, runBuy, runConvert, runGiveAway, runSell, runSwap, runTransfer, walletStateOf, type WalletLayout } from '../src/game/orders'
 import { accountOf, DEV_EMOJI } from '../src/game/accounts'
 import { nativePrice, setTradeImages } from '../src/game/tradingEngine'
-import { cashbackUsd } from '../src/game/rewardsEngine'
+import { cashbackUsd, CHECKIN_REWARDS, REWARD_USD_PER_DAY } from '../src/game/rewardsEngine'
 import { claimGifts } from './persist'
 import { CHAINS } from '../src/data/chains'
 import { LAUNCHPADS } from '../src/data/launchpads'
@@ -30,7 +30,7 @@ import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, giftTo, BOT_RATES, botOf, bot
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, TapeTrade, Timeframe, Trade, VolumeBot } from '../src/types'
-import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, WORLD_START_MAX, WORLD_START_MIN, worldStartOf, type AdminWallets, type BoardList, type BoardMsg, type BoardRow, type PlayerCard, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
+import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, WORLD_START_MAX, WORLD_START_MIN, worldStartOf, type AdminWallets, type BoardList, type OpMsg, type BoardMsg, type BoardRow, type PlayerCard, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
@@ -90,6 +90,8 @@ function round(v: unknown): unknown {
 const MAX_TABS = 6
 
 interface Member {
+  checkIn?: { day: string; streak: number } // World: the daily check-in the server paid last
+  rewardDay?: { day: string; usd: number } // World: mission money paid today (there is a daily cap)
   info: RoomPlayer
   focus?: string // World: the coin this player has open (the last one they asked the chart of): they get its live chart points and its whole tape
   seat?: string // guests: a hash of the private key they first joined with; only that key gets back in
@@ -280,7 +282,7 @@ export class Room {
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: m.info.bot ? m.info.online : false }, seat: m.seat, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
         cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, copyBook: m.copyBook, social: m.social, socialMissed: m.socialMissed, brain: m.brain,
-        weekBase: m.weekBase, dayBase: m.dayBase, seasonBase: m.seasonBase, chainPnl: m.chainPnl, chainBase: m.chainBase, dev: m.dev, trophies: m.trophies, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
+        weekBase: m.weekBase, checkIn: m.checkIn, rewardDay: m.rewardDay, dayBase: m.dayBase, seasonBase: m.seasonBase, chainPnl: m.chainPnl, chainBase: m.chainBase, dev: m.dev, trophies: m.trophies, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
       })),
     }
   }
@@ -770,7 +772,7 @@ export class Room {
   }
 
   /** Tell a player their wallets as the server has them (after the wallet message numbered `m.ack`). */
-  private sendWallet(m: Member, extra: { ref?: number; fills?: Trade[]; failures?: string[]; note?: string } = {}) {
+  private sendWallet(m: Member, extra: { ref?: number; fills?: Trade[]; failures?: string[]; note?: string; noteKind?: 'copy' | 'reward' } = {}) {
     if (!m.wallet) return
     if (this.world && m.wallet.trades.length > WORLD_TRADES_KEPT) m.wallet = { ...m.wallet, trades: m.wallet.trades.slice(0, WORLD_TRADES_KEPT) }
     const vaults: Record<string, number> = {}
@@ -908,6 +910,8 @@ export class Room {
         }
       } else if (o.kind === 'bankrupt') {
         return this.bankrupt(me)
+      } else if (o.kind === 'reward') {
+        return this.reward(me, o)
       } else if (o.kind === 'claimFees') {
         // Creator fees: each coin's vault goes to its dev wallet.
         const only = Array.isArray(o.tokenIds) ? new Set(o.tokenIds.map(String)) : null
@@ -2287,6 +2291,37 @@ export class Room {
     this.boardCache = null
     this.playersDirty = true
     return { wallets, coins: gone.size }
+  }
+
+  /**
+   * World rewards paid in money: the daily check-in (once a UTC day; the server keeps the streak) and finished missions
+   * ($1 an XP point, at most REWARD_USD_PER_DAY a day). Paid like a gift, so it isn't trading profit on the boards.
+   * The game works out missions itself, so the server can only cap them: it never pays more than the cap.
+   */
+  private reward(me: Member, o: Extract<OpMsg, { kind: 'reward' }>) {
+    const w = this.walletOf(me)
+    if (!this.world || !w || me.info.spectator) return this.sendWallet(me)
+    const today = dayKey()
+    let usd = 0
+    let note = ''
+    if (o.what === 'checkin') {
+      if (me.checkIn?.day === today) return this.sendWallet(me)
+      const yesterday = dayKey(new Date(Date.now() - 86_400_000))
+      const streak = me.checkIn?.day === yesterday ? (me.checkIn.streak % 7) + 1 : 1
+      me.checkIn = { day: today, streak }
+      usd = CHECKIN_REWARDS[streak - 1]
+      note = `Day ${streak} check-in: +$${usd.toLocaleString('en-US')}`
+    } else {
+      const asked = Math.max(0, Math.min(2_500, Math.round(Number(o.usd) || 0)))
+      const paid = me.rewardDay?.day === today ? me.rewardDay.usd : 0
+      usd = Math.min(asked, Math.max(0, REWARD_USD_PER_DAY - paid))
+      me.rewardDay = { day: today, usd: paid + usd }
+      if (!usd) return this.sendWallet(me, { note: `Today's mission money is used up ($${REWARD_USD_PER_DAY.toLocaleString('en-US')} a day). The XP still counts.`, noteKind: 'reward' })
+      note = `${String(o.title ?? 'Mission').slice(0, 60)}: +$${usd.toLocaleString('en-US')}`
+    }
+    const next = addFunds(w, 'usd', usd)
+    me.wallet = { ...next, startBalance: next.startBalance + usd }
+    this.sendWallet(me, { note, noteKind: 'reward' })
   }
 
   grant(playerId: string, amount: number, asset: 'usd' | 'sol' | 'bsc' | 'hood' = 'usd') {
