@@ -8,7 +8,7 @@ import { seasonNumber } from '../game/season'
 import { useGame } from '../game/store'
 import type { Profile, RewardsState, Settings } from '../types'
 import { load, save } from '../utils/storage'
-import { openedFromReset, supabase } from './supabase'
+import { openedFromReset, setRememberMe, supabase } from './supabase'
 import { giveLocal, type GiftAsset } from '../game/gifts'
 import { USERNAME_RE } from './supabaseConfig'
 
@@ -118,23 +118,49 @@ export async function usernameTaken(username: string): Promise<boolean> {
   return !!data?.length
 }
 
-export async function signUp(o: { email: string; password: string; username: string; avatar: string }): Promise<{ ok: boolean; error?: string; confirm?: boolean }> {
+export async function signUp(o: { email: string; password: string; username: string; avatar: string; updates?: boolean }): Promise<{ ok: boolean; error?: string; confirm?: boolean }> {
   if (!supabase) return { ok: false, error: 'Accounts are not available here' }
   const username = o.username.trim()
   if (!USERNAME_RE.test(username)) return { ok: false, error: 'Username: 3-16 letters, numbers or _' }
   if (o.password.length < 6) return { ok: false, error: 'Password needs at least 6 characters' }
   if (await usernameTaken(username)) return { ok: false, error: `"${username}" is taken. Pick another name.` }
-  const { data, error } = await supabase.auth.signUp({ email: o.email.trim(), password: o.password, options: { data: { username, avatar: o.avatar } } })
+  const { data, error } = await supabase.auth.signUp({ email: o.email.trim(), password: o.password, options: { data: { username, avatar: o.avatar, updates: o.updates !== false } } })
   if (error) return { ok: false, error: friendly(error.message) }
   // With "Confirm email" on, there's no session until they click the link in their inbox.
   if (!data.session) return { ok: true, confirm: true }
   return { ok: true }
 }
 
-export async function signIn(email: string, password: string): Promise<{ ok: boolean; error?: string }> {
+/**
+ * Sign in with your username or your email. An email goes straight to Supabase; a username goes through the game
+ * server, which turns it into the email privately (server/login.ts) and hands back the session.
+ */
+export async function signIn(login: string, password: string, remember = true): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) return { ok: false, error: 'Accounts are not available here' }
-  const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+  setRememberMe(remember)
+  const who = login.trim()
+  if (who.includes('@')) {
+    const { error } = await supabase.auth.signInWithPassword({ email: who, password })
+    return error ? { ok: false, error: friendly(error.message) } : { ok: true }
+  }
+  const r = await fetch('/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login: who, password }) }).catch(() => null)
+  if (!r) return { ok: false, error: 'Could not reach the game server. Try your email instead.' }
+  const data = (await r.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; error?: string }
+  if (!r.ok || !data.access_token || !data.refresh_token) return { ok: false, error: data.error ?? 'Could not sign in' }
+  const { error } = await supabase.auth.setSession({ access_token: data.access_token, refresh_token: data.refresh_token })
   return error ? { ok: false, error: friendly(error.message) } : { ok: true }
+}
+
+/** The email list (updates and events): on or off for the signed-in player. Needs supabase/011_mailing_list.sql. */
+export async function setMailing(on: boolean): Promise<boolean> {
+  if (!supabase) return false
+  const { error } = await supabase.rpc('set_mailing', { subscribe: on })
+  return !error
+}
+export async function mailingStatus(): Promise<boolean | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('mailing_status')
+  return error ? null : (data as boolean | null)
 }
 
 export async function signOut() {
@@ -185,7 +211,9 @@ async function onSignedIn(session: Session) {
   // Your player card (created on first sign-in from what you picked when signing up).
   let { data: prof } = await supabase.from('profiles').select('username, avatar').eq('id', uid).maybeSingle()
   if (!prof) {
-    const meta = session.user.user_metadata as { username?: string; avatar?: string }
+    const meta = session.user.user_metadata as { username?: string; avatar?: string; updates?: boolean }
+    // A brand-new account: put it on the email list if they kept that box ticked at sign-up.
+    if (meta.updates !== false) void setMailing(true)
     const username = meta.username && USERNAME_RE.test(meta.username) ? meta.username : `player_${uid.slice(0, 6)}`
     const row = { id: uid, username, avatar: meta.avatar || '🐸', level: levelFromXp(useGame.getState().profile.xp).level }
     const { error } = await supabase.from('profiles').insert(row)

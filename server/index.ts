@@ -13,6 +13,7 @@ import { deleteRoom, loadRoom, loadWorld, persistOn, pingDb, readFlag, saveRoom 
 import { health, noteDb, noteError, noteSave, noteTick, noteTickError, report, watchLoop } from './health'
 import { backupNow, checkBackups, isRestoring, listBackups, loadBackup, restoreWorldFrom, type WorldCopy } from './backup'
 import { nameBlocked } from './moderation'
+import { handleLogin } from './login'
 import { cut, isEmoji, tidyText, whole } from '../src/game/textRules'
 
 // What the database will not store inside a room (see the message handler below).
@@ -248,6 +249,15 @@ const http = createServer((req, res) => {
   } catch {
     res.writeHead(400, { 'content-type': 'text/plain' })
     res.end('Bad request')
+    return
+  }
+  // Sign in with a username or an email (server/login.ts: the username's email is looked up here, never sent out).
+  if (url.pathname === '/auth/login') {
+    handleLogin(req, res).catch((e) => {
+      console.error('[login] failed:', e)
+      if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Sign-in hit an error. Try again.' }))
+    })
     return
   }
   if (url.pathname.startsWith('/admin/api/')) {

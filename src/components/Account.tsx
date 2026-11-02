@@ -1,9 +1,10 @@
 import clsx from 'clsx'
 import { CheckCircle2, CloudOff, LogIn, LogOut, UserRound } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { levelFromXp } from '../game/progression'
 import { useGame } from '../game/store'
-import { resetPassword, setAvatar, setNewPassword, signIn, signOut, signUp, useAccount } from '../net/account'
+import { mailingStatus, resetPassword, setAvatar, setMailing, setNewPassword, signIn, signOut, signUp, useAccount } from '../net/account'
+import { rememberMe } from '../net/supabase'
 import { USERNAME_RE } from '../net/supabaseConfig'
 import { fmtAge } from '../utils/format'
 import { Modal } from './ui'
@@ -116,6 +117,7 @@ function Signed({ onClose }: { onClose: () => void }) {
         {a.syncError ? <CloudOff size={14} /> : <CheckCircle2 size={14} className="text-up" />}
         {a.syncError ? `Couldn't sync: ${a.syncError}` : a.syncedAt ? `Progress saved online · ${fmtAge(Math.max(0, (now - a.syncedAt) / 1000))} ago` : 'Syncing…'}
       </div>
+      <MailingSwitch />
       <p className="text-[11px] leading-snug text-dim">Your XP, level, season rank, badges, social following, rewards and settings follow you to any device you sign in on. Rounds you're playing stay on this device.</p>
       <button onClick={async () => { await signOut(); onClose() }} className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-line2 text-[12px] font-semibold text-muted hover:text-ink">
         <LogOut size={13} /> Sign out
@@ -124,8 +126,34 @@ function Signed({ onClose }: { onClose: () => void }) {
   )
 }
 
+/** Account window: on or off the email list (updates and events). */
+function MailingSwitch() {
+  const [on, setOn] = useState<boolean | null>(null)
+  const [missing, setMissing] = useState(false)
+  useEffect(() => {
+    void mailingStatus().then((v) => (v === null ? setOn(false) : setOn(v)))
+  }, [])
+  const flip = async (v: boolean) => {
+    setOn(v)
+    if (!(await setMailing(v))) {
+      setOn(!v)
+      setMissing(true)
+    }
+  }
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded-md bg-bg px-3 py-2 text-[12px] text-muted">
+      <input type="checkbox" checked={!!on} disabled={on === null} onChange={(e) => void flip(e.target.checked)} className="accent-[var(--accent)]" />
+      Email me about game updates and events
+      {missing && <span className="ml-auto text-[10px] text-warn">not available yet</span>}
+    </label>
+  )
+}
+
 function AuthForm({ onDone }: { onDone: () => void }) {
   const [mode, setMode] = useState<'in' | 'up' | 'reset'>('up')
+  const [login, setLogin] = useState('') // sign in: your username or your email
+  const [remember, setRemember] = useState(() => rememberMe())
+  const [updates, setUpdates] = useState(true) // sign up: join the email list (ticked unless they untick it)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
@@ -146,11 +174,11 @@ function AuthForm({ onDone }: { onDone: () => void }) {
         if (r.ok) setNote('Check your email for a link to set a new password.')
         else setError(r.error ?? 'Something went wrong')
       } else if (mode === 'in') {
-        const r = await signIn(email, password)
+        const r = await signIn(login, password, remember)
         if (r.ok) onDone()
         else setError(r.error ?? 'Could not sign in')
       } else {
-        const r = await signUp({ email, password, username, avatar })
+        const r = await signUp({ email, password, username, avatar, updates })
         if (!r.ok) setError(r.error ?? 'Could not create the account')
         else if (r.confirm) setNote('Almost done: check your email and click the link to confirm, then sign in here.')
         else onDone()
@@ -188,14 +216,31 @@ function AuthForm({ onDone }: { onDone: () => void }) {
           </div>
         </>
       )}
-      <label className="block">
-        <span className="mb-1 block text-[11px] font-semibold text-muted">Email</span>
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={input} autoComplete="email" required />
-      </label>
+      {mode === 'in' ? (
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-semibold text-muted">Username or email</span>
+          <input value={login} onChange={(e) => setLogin(e.target.value.trim())} className={input} autoComplete="username" placeholder="DegenDave" required />
+        </label>
+      ) : (
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-semibold text-muted">Email</span>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={input} autoComplete="email" required />
+        </label>
+      )}
       {mode !== 'reset' && (
         <label className="block">
           <span className="mb-1 block text-[11px] font-semibold text-muted">Password {mode === 'up' && <span className="font-normal text-dim">(6+ characters)</span>}</span>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={input} autoComplete={mode === 'up' ? 'new-password' : 'current-password'} minLength={6} required />
+        </label>
+      )}
+      {mode === 'in' && (
+        <label className="flex cursor-pointer items-center gap-2 text-[12px] text-muted">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="accent-[var(--accent)]" /> Remember me <span className="text-[10px] text-dim">(untick on a shared computer: you're signed out when the browser closes)</span>
+        </label>
+      )}
+      {mode === 'up' && (
+        <label className="flex cursor-pointer items-start gap-2 text-[12px] text-muted">
+          <input type="checkbox" checked={updates} onChange={(e) => setUpdates(e.target.checked)} className="mt-0.5 accent-[var(--accent)]" /> <span>Email me about game updates and events <span className="block text-[10px] text-dim">You can turn this off any time in your account.</span></span>
         </label>
       )}
       {error && <p className="rounded-md border border-down/40 bg-down/10 px-2 py-1.5 text-down">{error}</p>}

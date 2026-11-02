@@ -486,6 +486,52 @@ function Accounts() {
 interface DayRow { day: string; players: number; new_accounts: number; avg_minutes: number; world_players: number; back_next_day: number; back_in_week: number }
 
 /** Players per day, time played, and how many come back (signed-in players; needs supabase/006_activity.sql). */
+/** The email list: players who agreed to emails about updates and events (needs supabase/011_mailing_list.sql). */
+function MailingCard() {
+  const notify = useGame((s) => s.notify)
+  const [rows, setRows] = useState<{ email: string; username: string | null; since: string }[] | null>(null)
+  const [err, setErr] = useState('')
+  const load = useCallback(async () => {
+    if (!supabase) return setErr('Accounts are off')
+    const { data, error } = await supabase.rpc('mailing_export')
+    if (error) return setErr(/mailing_export|schema cache|does not exist/i.test(error.message) ? 'setup' : error.message)
+    setErr('')
+    setRows((data ?? []) as { email: string; username: string | null; since: string }[])
+  }, [])
+  useEffect(() => void load(), [load])
+  const copy = () => {
+    if (!rows?.length) return
+    navigator.clipboard?.writeText(rows.map((r) => r.email).join(', ')).catch(() => {})
+    notify({ title: 'COPIED', body: `${rows.length} email${rows.length === 1 ? '' : 's'} copied, separated by commas (paste into your email's Bcc).`, tone: 'info', icon: '📋' })
+  }
+  return (
+    <Card title={<>📧 Email list</>} right={<button onClick={() => void load()} className={clsx(btn, 'flex items-center gap-1 border-line2 text-muted hover:text-ink')}><RefreshCw size={11} /> Refresh</button>}>
+      {err === 'setup' ? (
+        <div className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-warn">One-time setup needed: run <b>supabase/011_mailing_list.sql</b> in the Supabase SQL Editor.</div>
+      ) : err ? <div className="text-[12px] text-down">{err}</div> : !rows ? <div className="text-[12px] text-dim">Loading…</div> : (
+        <div className="space-y-2 text-[12px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <span><b className="num">{rows.length}</b> player{rows.length === 1 ? '' : 's'} want emails about updates and events.</span>
+            <button onClick={copy} disabled={!rows.length} className={clsx(btn, 'ml-auto border-accent/50 text-accent hover:bg-accent/10 disabled:opacity-40')}>Copy all emails</button>
+          </div>
+          {rows.length > 0 && (
+            <div className="max-h-48 overflow-y-auto rounded-md border border-line">
+              {rows.map((r) => (
+                <div key={r.email} className="flex items-center gap-2 border-b border-line/40 px-2 py-1 last:border-0">
+                  <span className="min-w-0 flex-1 truncate">{r.email}</span>
+                  <span className="text-[11px] text-muted">{r.username ?? '—'}</span>
+                  <span className="text-[10px] text-dim">{new Date(r.since).toLocaleDateString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-[10px] text-dim">Only players who left the box ticked at sign-up (or turned it on in their account). Paste the list into Bcc so players don't see each other's emails.</p>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 function PlayerCounters() {
   const [rows, setRows] = useState<DayRow[] | null>(null)
   const [err, setErr] = useState('')
@@ -627,6 +673,7 @@ function Switches({ rooms }: { rooms: RoomSummary[] }) {
         <p className="mt-2 text-[10px] text-dim">"Active" = signed-in players whose progress synced in that time. Guests aren't counted.</p>
       </Card>
       <div className="lg:col-span-2"><PlayerCounters /></div>
+      <div className="lg:col-span-2"><MailingCard /></div>
     </div>
   )
 }
