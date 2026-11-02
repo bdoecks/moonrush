@@ -3,7 +3,7 @@ import { CheckCircle2, CloudOff, LogIn, LogOut, UserRound } from 'lucide-react'
 import { useState } from 'react'
 import { levelFromXp } from '../game/progression'
 import { useGame } from '../game/store'
-import { resetPassword, setAvatar, signIn, signOut, signUp, useAccount } from '../net/account'
+import { resetPassword, setAvatar, setNewPassword, signIn, signOut, signUp, useAccount } from '../net/account'
 import { USERNAME_RE } from '../net/supabaseConfig'
 import { fmtAge } from '../utils/format'
 import { Modal } from './ui'
@@ -29,9 +29,11 @@ export function AccountButton() {
   const status = useAccount((s) => s.status)
   const profile = useAccount((s) => s.profile)
   const [open, setOpen] = useState(false)
+  const recovery = useAccount((s) => s.recovery)
   if (status === 'off') return null
   return (
     <>
+      {recovery && status === 'signedIn' && <NewPasswordModal />}
       <button
         onClick={() => setOpen(true)}
         title={profile ? `Signed in as ${profile.username}` : 'Sign in to save your progress online'}
@@ -41,6 +43,39 @@ export function AccountButton() {
       </button>
       {open && <AccountModal onClose={() => setOpen(false)} />}
     </>
+  )
+}
+
+/** After clicking the link in a "reset your password" email: choose the new password. */
+function NewPasswordModal() {
+  const notify = useGame((s) => s.notify)
+  const email = useAccount((s) => s.email)
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const input = 'h-9 w-full rounded-md border border-line2 bg-bg px-2 text-[13px] outline-none focus:border-accent/60'
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    if (pw !== pw2) return setError('The two passwords are not the same')
+    setBusy(true)
+    const r = await setNewPassword(pw)
+    setBusy(false)
+    if (!r.ok) return setError(r.error ?? 'Could not change the password')
+    notify({ title: 'PASSWORD CHANGED', body: 'Your new password is set. Use it next time you sign in.', tone: 'up', icon: '🔑' })
+  }
+  return (
+    <Modal title={<span className="flex items-center gap-2"><UserRound size={15} className="text-accent" /> Choose a new password</span>} onClose={() => useAccount.setState({ recovery: false })}>
+      <form onSubmit={submit} className="space-y-3 text-[12px]">
+        <p className="text-muted">You opened the reset link from your email{email ? <> for <b className="text-ink">{email}</b></> : null}. Pick your new password.</p>
+        <input type="password" autoFocus autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="New password (at least 6 characters)" className={input} aria-label="New password" />
+        <input type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder="New password again" className={input} aria-label="New password again" />
+        {error && <div className="text-down">{error}</div>}
+        <button type="submit" disabled={busy || !pw || !pw2} className="h-9 w-full rounded-md bg-accent text-[13px] font-bold text-accent-ink disabled:opacity-40">{busy ? 'Saving…' : 'Set new password'}</button>
+        <p className="text-[10px] text-dim">Closing this keeps your old password. You can ask for another reset link any time.</p>
+      </form>
+    </Modal>
   )
 }
 

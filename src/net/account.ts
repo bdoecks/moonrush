@@ -8,7 +8,7 @@ import { seasonNumber } from '../game/season'
 import { useGame } from '../game/store'
 import type { Profile, RewardsState, Settings } from '../types'
 import { load, save } from '../utils/storage'
-import { supabase } from './supabase'
+import { openedFromReset, supabase } from './supabase'
 import { giveLocal, type GiftAsset } from '../game/gifts'
 import { USERNAME_RE } from './supabaseConfig'
 
@@ -25,6 +25,7 @@ interface AccountState {
   syncedAt: number | null
   syncError: string | null
   admin: boolean // on the admin list (the server and database check this too)
+  recovery: boolean // signed in through a password-reset link: ask for the new password
 }
 
 export const useAccount = create<AccountState>(() => ({
@@ -35,6 +36,7 @@ export const useAccount = create<AccountState>(() => ({
   syncedAt: null,
   syncError: null,
   admin: false,
+  recovery: false,
 }))
 
 interface CloudSave {
@@ -91,7 +93,19 @@ export function whenAccountReady(fn: () => void): () => void {
 export function initAccount() {
   if (!supabase) return
   supabase.auth.getSession().then(({ data }) => (data.session ? onSignedIn(data.session) : useAccount.setState({ status: 'guest' })))
+  // A reset-password link signs you in; the game then has to ask for the new password (it used to just sign you in).
+  if (openedFromReset) {
+    useAccount.setState({ recovery: true })
+    try {
+      const url = new URL(location.href)
+      url.searchParams.delete('reset')
+      history.replaceState(history.state, '', url.pathname + url.search + url.hash)
+    } catch {
+      /* odd address */
+    }
+  }
   supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY') useAccount.setState({ recovery: true })
     if (event === 'SIGNED_OUT') onSignedOut()
     else if (event === 'SIGNED_IN' && session && session.user.id !== useAccount.getState().userId) onSignedIn(session)
   })
@@ -130,8 +144,19 @@ export async function signOut() {
 
 export async function resetPassword(email: string): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) return { ok: false }
+  // Back to the game itself (already on Supabase's list of allowed addresses); the link is marked as a reset (see openedFromReset).
   const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: location.origin })
   return error ? { ok: false, error: friendly(error.message) } : { ok: true }
+}
+
+/** Set a new password (after arriving from a reset email, while signed in by its link). */
+export async function setNewPassword(password: string): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Accounts are not available here' }
+  if (password.length < 6) return { ok: false, error: 'Password needs at least 6 characters' }
+  const { error } = await supabase.auth.updateUser({ password })
+  if (error) return { ok: false, error: friendly(error.message) }
+  useAccount.setState({ recovery: false })
+  return { ok: true }
 }
 
 /** Change your avatar (your username is permanent). */

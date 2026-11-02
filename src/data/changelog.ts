@@ -35,6 +35,12 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-11-02-password-reset',
+    date: 'November 2, 2026',
+    title: 'Resetting your password works',
+    fixed: ['The link in a "reset your password" email signed you in but never let you choose a new password. It now opens a window to set one.'],
+  },
+  {
     id: '2026-11-02-fold-trade-panel',
     date: 'November 2, 2026',
     title: 'Fold away the buy / sell panel',
