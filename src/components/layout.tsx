@@ -1,6 +1,6 @@
 import { LG, useMediaQuery, useOnceTrue } from '../hooks/useMediaQuery'
 import clsx from 'clsx'
-import { BarChart3, ChefHat, ChevronDown, Copy, Crosshair, Eye, Flame, Gift, LineChart, Maximize2, Minimize2, Radar, ChevronUp, Compass, Radio, Target, Trophy, Wallet, X } from 'lucide-react'
+import { BarChart3, ChefHat, ChevronDown, ChevronLeft, ChevronRight, Copy, Crosshair, Eye, Flame, Gift, LineChart, Maximize2, Minimize2, Radar, ChevronUp, Compass, Radio, Target, Trophy, Wallet, X } from 'lucide-react'
 import { SocialTracker } from './SocialTracker'
 import { TrackerFeed } from './tracker/TrackerFeed'
 import { GlobalSearch } from './GlobalSearch'
@@ -107,9 +107,27 @@ export function Sidebar() {
   // Mounted when the screen is first desktop width (below that it was hidden by CSS but still drawn every tick; the
   // coin page has its own tablet and phone panels), then kept, so what you typed survives a resize.
   const lg = useOnceTrue(useMediaQuery(LG))
+  // Fold the whole buy / sell column away for a wider chart (Axiom / GMGN): a tab on the edge where the chart meets
+  // the column. Remembered in this browser.
+  const [open, setOpen0] = useState(() => load<boolean>('tradeColumnOpen') ?? true)
+  const setOpen = (v: boolean) => (setOpen0(v), save('tradeColumnOpen', v))
   if (!lg) return null
+  const tab = (to: boolean) => (
+    <button
+      onClick={() => setOpen(to)}
+      title={to ? 'Show the buy / sell panel' : 'Hide the buy / sell panel (wider chart)'}
+      aria-label={to ? 'Show the buy / sell panel' : 'Hide the buy / sell panel'}
+      aria-expanded={!to}
+      className="absolute top-1/2 z-30 grid h-12 w-4 -translate-y-1/2 place-items-center rounded-l-md border border-r-0 border-line2 bg-panel2 text-dim shadow-md shadow-black/40 transition-colors hover:bg-raise hover:text-accent"
+      style={{ right: '100%' }}
+    >
+      {to ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
+    </button>
+  )
+  if (!open) return <aside className="relative hidden w-0 shrink-0 border-l border-line lg:block">{tab(true)}</aside>
   return (
-    <aside className="hidden w-[320px] shrink-0 flex-col border-l border-line bg-panel lg:flex xl:w-[340px]">
+    <aside className="relative hidden w-[320px] shrink-0 flex-col border-l border-line bg-panel lg:flex xl:w-[340px]">
+      {tab(false)}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="border-b border-line"><FlowStats /></div>
         <TradePanel />

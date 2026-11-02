@@ -35,6 +35,12 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-11-02-fold-trade-panel',
+    date: 'November 2, 2026',
+    title: 'Fold away the buy / sell panel',
+    added: ['On a coin\'s page, the small tab where the chart meets the buy / sell panel folds the whole panel away for a wider chart. Click it again to bring the panel back. The game remembers your choice.'],
+  },
+  {
     id: '2026-10-15-open-tab',
     date: 'October 15, 2026',
     title: 'A coin in a new tab opens straight on the coin',
