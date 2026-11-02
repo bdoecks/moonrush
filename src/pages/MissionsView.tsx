@@ -4,6 +4,7 @@ import { Check, Lock, X } from 'lucide-react'
 import { useValuation } from '../hooks/useDerived'
 import { ACCENTS, levelFromXp, modeTagline, MODES, titleFor, UNLOCKS } from '../game/progression'
 import { selectSpeed, useGame } from '../game/store'
+import { useWorldBoard } from '../net/worldBoard'
 import { fmtClock, fmtCompact, fmtPct } from '../utils/format'
 import { DailyChallenges } from '../components/DailyChallenges'
 import { CareerMissions, MissionSummary, WeeklyMissions } from '../components/Missions'
@@ -14,6 +15,7 @@ import { useState } from 'react'
 
 export function MissionsView() {
   const profile = useGame((s) => s.profile)
+  const worldLife = useWorldBoard((s) => s.board?.me?.row.life) // in the World: the server's count (the Lifetime box on Portfolio asks for it)
   // (While the Cooking page is closed, the missions that need it are left out.)
   const cooking = useCooking()
   const allChallenges = useGame((s) => s.challenges)
@@ -107,7 +109,7 @@ export function MissionsView() {
             <div className="grid grid-cols-3 gap-2">
               <div><div className="text-[9px] text-dim">Rounds</div><div className="num">{profile.runsPlayed}</div></div>
               <div><div className="text-[9px] text-dim">Best return</div><div className="num text-up">{fmtPct(profile.bestReturnPct)}</div></div>
-              <div><div className="text-[9px] text-dim">Lifetime trades</div><div className="num">{profile.lifetimeTrades}</div></div>
+              <div><div className="text-[9px] text-dim">Lifetime trades</div><div className="num" title={worldLife ? 'Your World record, kept by the server' : 'Counted on this device'}>{worldLife?.trades ?? profile.lifetimeTrades}</div></div>
             </div>
           </div>
         </div>

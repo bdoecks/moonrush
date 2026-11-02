@@ -1,8 +1,9 @@
 import clsx from 'clsx'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { dayKey, sumDays, type Daily } from '../../game/daily'
 import { useGame } from '../../game/store'
+import { useWorldBoard } from '../../net/worldBoard'
 import { fmtCompact, fmtUsd, toneClass } from '../../utils/format'
 import { Segmented } from '../ui'
 
@@ -84,6 +85,16 @@ type Range = '7D' | '30D' | 'ALL'
 
 /** Lifetime stats from the calendar history (across rounds). */
 export function LifetimeStats({ className }: { className?: string }) {
+  // In the World the server keeps your lifetime record from every fill: shown first, since it is always right.
+  const inWorld = useGame((s) => !!s.online?.round.world && !s.online.spectator)
+  const requestBoard = useGame((s) => s.requestBoard)
+  const life = useWorldBoard((s) => s.board?.me?.row.life)
+  useEffect(() => {
+    if (!inWorld) return
+    requestBoard()
+    const id = setInterval(() => requestBoard(), 30_000)
+    return () => clearInterval(id)
+  }, [inWorld, requestBoard])
   const daily = useGame((s) => s.profile.daily)
   const runs = useGame((s) => s.profile.runsPlayed)
   const [range, setRange] = useState<Range>('7D')
@@ -105,6 +116,21 @@ export function LifetimeStats({ className }: { className?: string }) {
         <span className="text-[12px] font-bold">Lifetime</span>
         <Segmented value={range} onChange={setRange} options={[{ value: '7D', label: '7D' }, { value: '30D', label: '30D' }, { value: 'ALL', label: 'All' }]} />
       </div>
+      {inWorld && life && life.trades > 0 && (
+        <div className="mb-3 rounded-md border border-accent/30 bg-accent/5 p-2 text-[12px]">
+          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-accent">World record · kept by the server</div>
+          {([
+            ['Trades', <><span className="text-up">{life.buys}</span>/<span className="text-down">{life.sells}</span> <span className="text-dim">({life.trades})</span></>],
+            ['Volume', fmtUsd(life.volume)],
+            ['Realized PnL', <span className={toneClass(life.realized)}>{life.realized >= 0 ? '+' : '-'}{fmtUsd(Math.abs(life.realized))}</span>],
+            ['Win rate', life.sells ? `${((life.wins / life.sells) * 100).toFixed(1)}%` : '--'],
+            ['Best trade', life.bestTicker ? <span className="text-up">+{(life.bestPct * 100).toFixed(0)}% ${life.bestTicker}</span> : '--'],
+            ['Biggest win / loss', <><span className="text-up">{life.bestWin > 0 ? fmtUsd(life.bestWin, 0) : '--'}</span> / <span className="text-down">{life.worstLoss < 0 ? fmtUsd(-life.worstLoss, 0) : '--'}</span></>],
+          ] as [string, React.ReactNode][]).map(([label, v]) => (
+            <div key={label} className="flex items-center justify-between gap-2 py-0.5"><span className="text-dim">{label}</span><span className="num">{v}</span></div>
+          ))}
+        </div>
+      )}
       <div className="space-y-2 text-[12px]">
         {rows.map(([label, v]) => (
           <div key={label} className="flex items-center justify-between gap-2">

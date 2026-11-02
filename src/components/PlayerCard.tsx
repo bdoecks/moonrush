@@ -176,6 +176,17 @@ function Card({ id, onClose }: { id: string; onClose: () => void }) {
           <Box label="Win rate"><span className={card.sells ? (card.wins / card.sells >= 0.5 ? 'text-up' : 'text-down') : ''}>{card.sells ? `${((card.wins / card.sells) * 100).toFixed(0)}%` : '—'}</span><span className="text-[10px] font-normal text-dim"> {card.sells ? `of ${card.sells} sells` : ''}</span></Box>
           <Box label="Main wallet bags">{holdings.length ? fmtCompact(holdValue) : '—'}</Box>
         </div>
+        {card.life && card.life.trades > 0 && (
+          <div className="mx-3 mb-3 grid grid-cols-3 gap-x-3 gap-y-1.5 rounded-md border border-line bg-panel2 px-3 py-2 text-[11px]">
+            <div className="col-span-3 text-[9px] font-semibold uppercase tracking-wider text-dim">Lifetime record</div>
+            <Life label="Trades"><span className="text-up">{card.life.buys}</span>/<span className="text-down">{card.life.sells}</span></Life>
+            <Life label="Volume">{fmtCompact(card.life.volume)}</Life>
+            <Life label="Realized"><span className={toneClass(card.life.realized)}>{signed(card.life.realized)}</span></Life>
+            <Life label="Win rate">{card.life.sells ? `${Math.round((card.life.wins / card.life.sells) * 100)}%` : '—'}</Life>
+            <Life label="Best trade">{card.life.bestTicker ? <span className="text-up">{fmtPct(card.life.bestPct)} ${card.life.bestTicker}</span> : '—'}</Life>
+            <Life label="Biggest win / loss"><span className="text-up">{card.life.bestWin > 0 ? fmtCompact(card.life.bestWin) : '—'}</span> / <span className="text-down">{card.life.worstLoss < 0 ? fmtCompact(-card.life.worstLoss) : '—'}</span></Life>
+          </div>
+        )}
         {card.dev && card.dev.cooked > 0 && (
           <p className="px-3 pb-3 text-[11px] text-muted">
             🍳 Launched <span className="num font-semibold text-ink">{card.dev.cooked}</span> coin{card.dev.cooked === 1 ? '' : 's'}, <span className="num font-semibold text-ink">{card.dev.migrated}</span> migrated, <span className="num font-semibold text-up">{fmtUsd(card.dev.fees, 0)}</span> in creator fees
@@ -238,6 +249,15 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
     <div className="border-t border-line">
       <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-muted">{title}</div>
       {children}
+    </div>
+  )
+}
+
+function Life({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[9px] text-dim">{label}</div>
+      <div className="num truncate font-semibold text-ink">{children}</div>
     </div>
   )
 }

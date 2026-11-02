@@ -50,6 +50,7 @@ export interface BoardRow {
   chains: Record<Chain, number> // realized profit this season on each chain's coins
   dev?: DevStats // coins they've launched in the World
   trophies?: string[] // season awards, e.g. "🏆 S1"
+  life?: LifeStats // your own row only: your lifetime record
   restarts: number // bankruptcy restarts taken
 }
 /** A dev's record in the World (lifetime, and this season). */
@@ -104,6 +105,21 @@ export interface RoomPlayer {
  * MAIN wallet's bags and latest trades (side wallets stay hidden, as everywhere else). The server builds it from the
  * wallet it holds, so it is the same for a player who is off line and can't be dressed up by a modified game.
  */
+/** A player's lifetime record in the World, kept by the server from every fill (so it's always right). */
+export interface LifeStats {
+  trades: number
+  buys: number
+  sells: number
+  wins: number // sells closed in profit
+  volume: number // USD bought + sold
+  realized: number // profit and loss taken on sells
+  bestPct: number // best single sell, as a fraction (1 = +100%)
+  bestTicker?: string
+  bestWin: number // biggest single profit (USD)
+  worstLoss: number // biggest single loss (USD, negative)
+  since: number // ms: when the record started
+}
+
 export interface PlayerCard {
   id: string
   name: string
@@ -126,6 +142,7 @@ export interface PlayerCard {
   trophies?: string[]
   dev?: DevStats
   restarts: number
+  life?: LifeStats // the lifetime record (trades, volume, best trade…)
 }
 /**
  * Admin only (the admin API, never a room message): every wallet a player has in a room, side and dev wallets too.

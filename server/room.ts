@@ -30,7 +30,7 @@ import { AIRDROP_MAX_WALLETS, airdropFeePerWallet, giftTo, BOT_RATES, botOf, bot
 import { MODES } from '../src/game/progression'
 import { Rng } from '../src/utils/rng'
 import type { Candle, Chain, CookSpec, Narrative, SocialProfile, Token, WalletAction, WalletActionKind, GameMode, MarketEngine, MarketEvent, MarketState, Portfolio, SimWallet, SocialPost, TapeTrade, Timeframe, Trade, VolumeBot } from '../src/types'
-import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, WORLD_START_MAX, WORLD_START_MIN, worldStartOf, type AdminWallets, type BoardList, type OpMsg, type BoardMsg, type BoardRow, type PlayerCard, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
+import { WORLD_BROKE_BELOW, WORLD_RESTART_BALANCE, WORLD_RESTART_EVERY_MS, WORLD_START_BALANCE, WORLD_START_MAX, WORLD_START_MIN, worldStartOf, type AdminWallets, type BoardList, type LifeStats, type OpMsg, type BoardMsg, type BoardRow, type PlayerCard, type DevStats, type HallEntry, type ChatReport, type BotRun, type ClientMsg, type NetMarket, type NetToken, type RoomPlayer, type RoundInfo, type ServerMsg, type TickMsg, type TokenDiff, type TransferMsg, type WalletDiff } from '../src/net/protocol'
 
 const POSTS_KEPT = 60
 const EVENTS_KEPT = 60
@@ -90,6 +90,7 @@ function round(v: unknown): unknown {
 const MAX_TABS = 6
 
 interface Member {
+  life?: LifeStats // the lifetime record, from every fill (kept through resets and restarts)
   checkIn?: { day: string; streak: number } // World: the daily check-in the server paid last
   rewardDay?: { day: string; usd: number } // World: mission money paid today (there is a daily cap)
   info: RoomPlayer
@@ -282,7 +283,7 @@ export class Room {
       members: [...this.members.values()].filter((m) => !m.info.spectator).map((m) => ({
         info: { ...m.info, online: m.info.bot ? m.info.online : false }, seat: m.seat, protect: m.protect, addrs: m.addrs, inbox: m.inbox, wallet: m.wallet, layout: m.layout, lastPostTick: m.lastPostTick,
         cashback: m.cashback, cbVolume: m.cbVolume, cbAuto: m.cbAuto, cooks: m.cooks, lastCookTick: m.lastCookTick, cookTicks: m.cookTicks, copyBook: m.copyBook, social: m.social, socialMissed: m.socialMissed, brain: m.brain,
-        weekBase: m.weekBase, checkIn: m.checkIn, rewardDay: m.rewardDay, dayBase: m.dayBase, seasonBase: m.seasonBase, chainPnl: m.chainPnl, chainBase: m.chainBase, dev: m.dev, trophies: m.trophies, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
+        weekBase: m.weekBase, life: m.life, checkIn: m.checkIn, rewardDay: m.rewardDay, dayBase: m.dayBase, seasonBase: m.seasonBase, chainPnl: m.chainPnl, chainBase: m.chainBase, dev: m.dev, trophies: m.trophies, lastRestart: m.lastRestart, restarts: m.restarts, pnlCarry: m.pnlCarry, mutedUntil: m.mutedUntil,
       })),
     }
   }
@@ -801,6 +802,7 @@ export class Room {
   /** Cashback on a player's fills (a share of the platform fee, tiered by their volume), paid now if they auto-claim. */
   private earn(m: Member, fills: Trade[]) {
     this.realized(m, fills)
+    this.recordLife(m, fills)
     if (!m.wallet || !fills.length) return
     const earned: [Chain, number][] = []
     for (const f of fills) {
@@ -1574,6 +1576,7 @@ export class Room {
     m.wallet = r.portfolio
     this.market = r.market
     const nt = this.market.tokens.find((x) => x.id === t.id) ?? t
+    this.recordLife(m, r.fills)
     this.mirrorFill(m, nt, r.fills[0], had ? 'more' : 'first', actions)
     m.brain!.fills = (m.brain!.fills ?? 0) + 1
     m.brain!.entries[t.id] ??= { tick: this.market.tick, peak: nt.price }
@@ -1592,6 +1595,7 @@ export class Room {
     const nt = this.market.tokens.find((x) => x.id === t.id) ?? t
     const all = !m.wallet.accounts?.[0]?.positions[t.id]
     this.realized(m, r.fills)
+    this.recordLife(m, r.fills)
     this.mirrorFill(m, nt, r.fills[0], all ? 'all' : 'partial', actions)
     m.brain!.fills = (m.brain!.fills ?? 0) + 1
     if ((r.fills[0].pnl ?? 0) > 0) m.brain!.wins = (m.brain!.wins ?? 0) + 1
@@ -2016,6 +2020,24 @@ export class Room {
   hall: HallEntry[] = [] // finished World seasons and their winners, newest first
   seasonKey: string | null = null // the season the boards are counting (saved, so a month that ends while the server is down still closes)
 
+  /** Add fills to a player's lifetime record (trades, volume, wins, best and worst trade). */
+  private recordLife(m: Member, fills: Trade[]) {
+    if (!this.world || !fills.length) return
+    const l = (m.life ??= { trades: 0, buys: 0, sells: 0, wins: 0, volume: 0, realized: 0, bestPct: 0, bestWin: 0, worstLoss: 0, since: Date.now() })
+    for (const f of fills) {
+      l.trades++
+      l.volume += f.value
+      if (f.side === 'buy') { l.buys++; continue }
+      l.sells++
+      const pnl = f.pnl ?? 0
+      l.realized += pnl
+      if (pnl > 0) l.wins++
+      if (pnl > l.bestWin) l.bestWin = pnl
+      if (pnl < l.worstLoss) l.worstLoss = pnl
+      if ((f.pnlPct ?? 0) > l.bestPct) Object.assign(l, { bestPct: f.pnlPct ?? 0, bestTicker: f.ticker })
+    }
+  }
+
   /** Realized profit on each chain's coins (for the SOL / BNB / ETH boards). */
   private realized(m: Member, fills: Trade[]) {
     if (!this.world) return
@@ -2138,7 +2160,7 @@ export class Room {
       t: 'board', list: pick, week: seasonNumber(), season: { n: s.n, name: s.name, endsAt: s.endsAt }, total: ranked.length, rows: round(ranked.slice(0, 100)) as BoardRow[],
       // (Seasons closed while bots were still ranked have bot winners saved in them: not shown.)
       hall: this.hall.map((h) => (h.winners.some((x) => x.bot) ? { ...h, winners: h.winners.filter((x) => !x.bot) } : h)),
-      ...(mine ? { me: { row: round(mine) as BoardRow, rank: ranked.indexOf(mine) + 1, restartAt: next > Date.now() ? next : null } } : {}),
+      ...(mine ? { me: { row: round({ ...mine, ...(me.life ? { life: me.life } : {}) }) as BoardRow, rank: ranked.indexOf(mine) + 1, restartAt: next > Date.now() ? next : null } } : {}),
     }
     this.sendTo(me.info.id, msg)
   }
@@ -2173,6 +2195,7 @@ export class Room {
       holdings,
       recent: m.wallet.trades.filter((t) => (t.walletId ?? mainId) === mainId).slice(0, CARD_ROWS).map((t) => ({ id: t.id, time: t.time, tokenId: t.tokenId, ticker: t.ticker, emoji: t.emoji, hue: t.hue, side: t.side, usd: t.value, ...(t.pnl !== undefined ? { pnl: t.pnl } : {}) })),
       ...(row?.trophies ? { trophies: row.trophies } : {}), ...(row?.dev ? { dev: row.dev } : {}), restarts: row?.restarts ?? m.restarts ?? m.brain?.busts ?? 0,
+      ...(m.life ? { life: m.life } : {}),
     }
     this.sendTo(me.info.id, { t: 'card', id, card: round(card) as PlayerCard })
   }
