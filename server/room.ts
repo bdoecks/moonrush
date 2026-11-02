@@ -2052,7 +2052,7 @@ export class Room {
     }
     const rows: BoardRow[] = []
     for (const m of this.members.values()) {
-      if (m.info.spectator || m.info.bot || !m.wallet) continue
+      if (m.info.spectator || !m.wallet) continue // bots are ranked too (players like racing them); they never win trophies
       const equity = valuePortfolio(m.wallet, byId, this.market).equity
       // Deposits, gifts and transfers move startBalance, so this is trading profit; losses from before a restart carry over.
       const pnl = equity - m.wallet.startBalance + (m.pnlCarry ?? 0)
@@ -2065,7 +2065,7 @@ export class Room {
       const cb = m.chainBase
       const dev = m.dev && (m.dev as DevStats & { key?: string }).key !== season ? { ...m.dev, season: { cooked: 0, migrated: 0, fees: 0 } } : m.dev
       rows.push({
-        id: m.info.id, name: m.info.name, avatar: m.info.avatar, level: m.info.level, online: m.info.online, verified: m.info.verified,
+        id: m.info.id, name: m.info.name, avatar: m.info.avatar, level: m.info.level, online: m.info.online, verified: m.info.verified, ...(m.info.bot ? { bot: true } : {}),
         equity, pnl, week: pnl - m.weekBase.pnl, day: pnl - m.dayBase.pnl, season: pnl - m.seasonBase.pnl,
         chains: { sol: cp.sol - cb.sol, bsc: cp.bsc - cb.bsc, hood: cp.hood - cb.hood },
         ...(dev ? { dev: { cooked: dev.cooked, migrated: dev.migrated, fees: dev.fees, bestAth: dev.bestAth, bestTicker: dev.bestTicker, season: dev.season } } : {}),
@@ -2108,7 +2108,7 @@ export class Room {
     const lists: [BoardList, string][] = [['season', '🏆'], ['sol', '◎'], ['bsc', '◆'], ['hood', '⟠'], ['dev', '🍳'], ['worth', '💰']]
     const winners: HallEntry['winners'] = []
     for (const [list, icon] of lists) {
-      const sorted = rows.filter((r) => Room.boardValue(list, r) > 0).sort((a, b) => Room.boardValue(list, b) - Room.boardValue(list, a))
+      const sorted = rows.filter((r) => !r.bot && Room.boardValue(list, r) > 0).sort((a, b) => Room.boardValue(list, b) - Room.boardValue(list, a))
       sorted.slice(0, list === 'season' ? 3 : 1).forEach((r, i) => {
         winners.push({ list, name: r.name, avatar: r.avatar, value: Room.boardValue(list, r) })
         const m = this.members.get(r.id)
@@ -2154,7 +2154,7 @@ export class Room {
     if (!m || m.info.spectator || !m.wallet) return this.sendTo(me.info.id, { t: 'card', id, card: null })
     const byId = new Map(this.market.tokens.map((t) => [t.id, t]))
     const rows = this.boardRows()
-    const row = rows.find((r) => r.id === id) // (a bot has none: it is on no board)
+    const row = rows.find((r) => r.id === id)
     const equity = row?.equity ?? valuePortfolio(m.wallet, byId, this.market).equity
     const main = m.wallet.accounts?.[0]
     const mainId = main?.id ?? 'w-main'

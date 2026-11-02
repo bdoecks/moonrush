@@ -70,11 +70,11 @@ const b1 = askBoard()
 // (A second real player, so there is somebody to be ranked against.)
 const other: ServerMsg[] = []
 back.join(sock(other), { t: 'hello', name: 'Second', avatar: '🐶', level: 1, playerId: 'u-ccc', verified: true })
-ok(!!b1 && b1.list === 'worth' && b1.total === 1 && b1.rows.length === 1, `with ${BOT_ROSTER.length} bots in the World and one real player, the board ranks 1`)
+ok(!!b1 && b1.list === 'worth' && b1.total === BOT_ROSTER.length + 1 && b1.rows.length === Math.min(100, b1.total), `with ${BOT_ROSTER.length} bots in the World and one real player, the board ranks ${b1?.total} (the AI traders are ranked too)`)
 const b1b = askBoard()
-ok(b1b.total === 2 && b1b.rows.length === 2 && b1b.rows.every((r, i) => i === 0 || b1b.rows[i - 1].equity >= r.equity), `a second real player joins: the board ranks ${b1b.total}, by net worth`)
+ok(b1b.total === BOT_ROSTER.length + 2 && b1b.rows.every((r, i) => i === 0 || b1b.rows[i - 1].equity >= r.equity), `a second real player joins: the board ranks ${b1b.total}, by net worth`)
 ok(!!b1.me && b1.me.row.id === 'u-aaa' && b1.me.rank >= 1 && b1.me.restartAt === null, `you're on it: #${b1.me?.rank} net worth`)
-ok(['worth', 'day', 'week', 'season', 'sol', 'bsc', 'hood', 'dev'].every((list) => { const x = askBoard(list); return x.rows.every((r) => !r.id.startsWith('bot-') && !r.bot) && x.total <= 2 }), 'no bot is on any of the eight boards')
+ok(['worth', 'day', 'week', 'season', 'sol', 'bsc', 'hood'].every((list) => { const x = askBoard(list); return x.rows.some((r) => r.bot) && x.rows.filter((r) => r.id.startsWith('bot-')).every((r) => r.bot) }), 'the AI traders are on the boards, each marked as a bot')
 // The other lists: today / season / each chain are ranked by their own number; the season is the calendar month.
 for (const list of ['day', 'week', 'season', 'sol', 'bsc', 'hood'] as const) {
   const bl = askBoard(list)
@@ -173,7 +173,7 @@ ok(b.market.tokens.length < 400, `after 3000 more ticks: ${b.market.tokens.lengt
     trades: [{ ...second.wallet.trades[0], id: 999_999, walletId: 'w-side', tokenId: live[2].id }, ...second.wallet.trades],
   } as never
   const c1 = ask('u-aaa', back2, 'u-ccc')
-  ok(!!c1 && c1.name === 'Second' && c1.online && !c1.bot && c1.equity > 0 && c1.rank !== undefined && c1.ranked === 2, `a player's card: ${c1?.name}, net worth $${c1?.equity.toFixed(0)}, #${c1?.rank} of ${c1?.ranked}`)
+  ok(!!c1 && c1.name === 'Second' && c1.online && !c1.bot && c1.equity > 0 && c1.rank !== undefined && c1.ranked === BOT_ROSTER.length + 2, `a player's card: ${c1?.name}, net worth $${c1?.equity.toFixed(0)}, #${c1?.rank} of ${c1?.ranked}`)
   ok(!!c1 && mainBags.length >= 1 && JSON.stringify(c1.holdings.map((h) => h.tokenId).sort()) === JSON.stringify(mainBags) && c1.holdings.every((h) => h.qty !== 777) && c1.recent.length === mainTrades && c1.recent.every((t) => t.id !== 999_999),
     `it shows the main wallet only: ${c1?.holdings.length} bags and ${c1?.recent.length} trades (the side wallet's bag and trade are not on it)`)
   // What the player's own game reports about its bags doesn't reach the card.
@@ -189,7 +189,7 @@ ok(b.market.tokens.length < 400, `after 3000 more ticks: ${b.market.tokens.lengt
   back.join(sock(guest), { t: 'hello', name: 'Looker', avatar: '👀', level: 1, playerId: 'g-look', verified: false })
   const c4 = ask('g-look', guest, 'u-ccc')
   const c5 = ask('u-aaa', back2, BOT_ROSTER[0].id)
-  ok(!!c4 && c4.name === 'Second' && !!c5 && c5.bot === true && c5.rank === undefined && c5.name === BOT_ROSTER[0].name, 'a watching guest can open a card; a bot\'s card says it is a simulated trader and has no rank')
+  ok(!!c4 && c4.name === 'Second' && !!c5 && c5.bot === true && c5.name === BOT_ROSTER[0].name, 'a watching guest can open a card; a bot\'s card says it is a simulated trader')
   ok(ask('u-aaa', back2, 'u-nobody') === null && ask('u-aaa', back2, 'g-look') === null, 'no card for somebody who is not here, or for a watching guest (no wallet)')
   // Asked twice in a row: one answer (a held-down key must not turn into work).
   back2.length = 0

@@ -1,7 +1,7 @@
 // World bots: a crowd of simulated players who trade the World next to real people. Their names carry no label (a
 // name with a robot on every chat line and trade made the room read as a test); what they are is said where it
-// matters: `bot` on their player card and public wallet, the note on their wallet page, Help, and they are kept
-// off every leaderboard. Each has a style, a real
+// matters: `bot` on their player card and public wallet, the note on their wallet page, Help, and an AI tag on the
+// World leaderboards (they are ranked so players can race them, but never win a season trophy). Each has a style, a real
 // server wallet (same rules as everyone), comes and goes like a person, chats, posts calls, cooks coins, and goes
 // broke sometimes. Each also has a public "mirror" wallet so players can track and copy-trade it.
 import type { SimWallet, Token, WalletStyle } from '../src/types'

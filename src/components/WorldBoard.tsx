@@ -152,6 +152,7 @@ function Who({ r, you, start }: { r: BoardRow; you: boolean; start: number }) {
         <span className="flex items-center gap-1 font-semibold">
           <span className="truncate">{r.name}</span>
           {r.verified && <span className="text-[10px] font-bold text-up" title="Signed in">✓</span>}
+          {r.bot && <span className="rounded bg-info/15 px-1 text-[9px] font-bold text-info" title="An AI trader: plays by the same rules as you, ranked so you can race it, never wins a trophy">AI</span>}
           {r.trophies?.slice(-3).map((t, i) => <span key={i} className="rounded bg-warn/10 px-1 text-[9px] font-bold text-warn" title="Season trophy">{t}</span>)}
           {you && <span className="text-[10px] text-accent">(you)</span>}
         </span>
