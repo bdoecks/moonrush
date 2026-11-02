@@ -11,7 +11,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "server": "tsx server/index.ts",
+    "server": "node --max-semi-space-size=8 --max-old-space-size=300 --import tsx server/index.ts",
     "server:dev": "tsx watch server/index.ts",
     "play-online": "node scripts/play-online.mjs",
     "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
