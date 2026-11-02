@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { Ban, Crown, DoorClosed, Flag, Megaphone, MicOff, RefreshCw, RotateCcw, ShieldCheck, UserX } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { CHAIN_IDS, CHAINS } from '../data/chains'
-import { setFlag, useFlags, type GameFlags } from '../game/flags'
+import { postNews, setFlag, useFlags, type GameFlags } from '../game/flags'
 import type { AdminMarketAction } from '../game/marketEngine'
 import { adminAct, adminApi, adminBan, adminDownload, adminMarketOn, serverStatus, type BackupRow, type RoomSummary, type ServerHealth } from '../net/adminApi'
 import { levelFromXp, xpForLevel } from '../game/progression'
@@ -219,14 +219,25 @@ function WorldStartCard({ rooms, act }: { rooms: RoomSummary[]; act: (b: unknown
   if (!world) return null
   const save = async () => {
     if (!good) return
-    if (await act({ action: 'startBalance', room: 'WORLD', usd }, `New World wallets now start with ${fmtUsd(Math.round(usd), 0)}`)) setText('')
+    const why = window.prompt(`Why are World wallets changing to ${fmtUsd(Math.round(usd), 0)}? Players will read this in Updates.\n(Leave empty to not post an announcement.)`)
+    if (why === null) return
+    if (await act({ action: 'startBalance', room: 'WORLD', usd }, `New World wallets now start with ${fmtUsd(Math.round(usd), 0)}`)) {
+      setText('')
+      if (why.trim()) void postNews(`New World wallets start with ${fmtUsd(Math.round(usd), 0)}`, why)
+    }
   }
   const resetAll = async () => {
     const typed = window.prompt(`Start EVERY World player over?\n\n• Every wallet (online or not) goes back to ${fmtUsd(now, 0)} and loses its coins.\n• Every coin a player made is removed from the market.\n• Leaderboards, profit history, coin-maker stats, trophies and the hall of fame go back to zero.\n\nXP, levels and accounts are kept. A backup of the World is taken first (Switches → Backups).\n\nType RESET to go ahead.`)
     if (typed !== 'RESET') return
+    const why = window.prompt('Why is the World being reset? Players will read this in Updates (and it goes on the banner for a day).')
+    if (why === null) return
     setBusy(true)
     try {
       const r = await adminApi<{ wallets?: number; coins?: number; backup?: boolean }>('/admin/api/action', { action: 'resetWorld', room: 'WORLD', confirm: 'RESET' })
+      if (r.ok) {
+        void postNews('The World was reset', `Every World wallet went back to ${fmtUsd(now, 0)}, coins made by players were taken off the market, and the leaderboards and records started over. XP, levels and accounts were kept.${why.trim() ? `\n\nWhy: ${why.trim()}` : ''}`)
+        void setFlag('notice', `🔄 The World was reset: everyone starts again with ${fmtUsd(now, 0)}. See Updates for why.`)
+      }
       notify(r.ok ? { title: 'WORLD RESET', body: `${r.data?.wallets ?? 0} wallets back to ${fmtUsd(now, 0)}, ${r.data?.coins ?? 0} player coins removed${r.data?.backup ? '. A backup was taken first.' : ''}`, tone: 'info', icon: '🔄' } : { title: 'RESET FAILED', body: r.error ?? 'Failed', tone: 'warn', icon: '⚠️' })
     } finally {
       setBusy(false)
@@ -486,6 +497,29 @@ function Accounts() {
 interface DayRow { day: string; players: number; new_accounts: number; avg_minutes: number; world_players: number; back_next_day: number; back_in_week: number }
 
 /** Players per day, time played, and how many come back (signed-in players; needs supabase/006_activity.sql). */
+/** Post an announcement to everyone's Updates window (resets post one by themselves). */
+function NewsComposer() {
+  const notify = useGame((s) => s.notify)
+  const news = useFlags((s) => s.news)
+  const [title, setTitle] = useState('')
+  const [why, setWhy] = useState('')
+  const post = async () => {
+    if (!title.trim() || !why.trim()) return
+    const err = await postNews(title, why)
+    notify(err ? { title: 'NOT POSTED', body: err, tone: 'warn', icon: '⚠️' } : { title: 'POSTED', body: 'Everyone sees it in Updates within a minute.', tone: 'info', icon: '📣' })
+    if (!err) { setTitle(''); setWhy('') }
+  }
+  return (
+    <div className="rounded-md bg-bg px-3 py-2">
+      <div className="text-[12px] font-semibold">Announcement in Updates</div>
+      <div className="mb-1 text-[10px] text-dim">Tell players what changed and why (World resets and new start balances post one by themselves).{news?.length ? ` Latest: "${news[0].title}".` : ''}</div>
+      <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="Title, e.g. Wallets reset for the new season" className="mb-1 h-8 w-full rounded-md border border-line2 bg-panel px-2 text-[12px] outline-none focus:border-info/60" />
+      <textarea value={why} onChange={(e) => setWhy(e.target.value)} maxLength={800} rows={3} placeholder="What happened and why, in plain words" className="w-full rounded-md border border-line2 bg-panel px-2 py-1 text-[12px] outline-none focus:border-info/60" />
+      <button onClick={() => void post()} disabled={!title.trim() || !why.trim()} className={clsx(btn, 'mt-1 border-info/50 text-info hover:bg-info/10 disabled:opacity-40')}>Post announcement</button>
+    </div>
+  )
+}
+
 /** The email list: players who agreed to emails about updates and events (needs supabase/011_mailing_list.sql). */
 function MailingCard() {
   const notify = useGame((s) => s.notify)
@@ -651,6 +685,7 @@ function Switches({ rooms }: { rooms: RoomSummary[] }) {
               <button onClick={() => { setNotice(''); void flip('notice', '', 'Notice banner') }} className={clsx(btn, 'border-line2 text-muted')}>Clear</button>
             </div>
           </div>
+          <NewsComposer />
           <p className="text-[10px] text-dim">Players pick up changes within a minute.</p>
         </div>
       </Card>

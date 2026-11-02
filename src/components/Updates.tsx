@@ -19,9 +19,12 @@ const markSeen = (newest?: string) => {
 /** Is there an update this player has not opened yet? */
 export function useUnseenUpdate() {
   const seen = useSyncExternalStore((f) => (listeners.add(f), () => listeners.delete(f)), seenNow)
-  const newest = useFlags((s) => shownUpdates(s)[0]?.id)
+  const newest = useFlags((s) => newestId(s))
   return !!newest && seen !== newest
 }
+
+/** The newest thing in Updates: an announcement if it is newer than the last change-list entry. */
+const newestId = (flags: ReturnType<typeof useFlags.getState>) => flags.news?.[0]?.id ?? shownUpdates(flags)[0]?.id
 
 const PART: { key: 'fixed' | 'added' | 'changed'; label: string; cls: string }[] = [
   { key: 'fixed', label: '🔧 Fixed', cls: 'text-up' },
@@ -54,13 +57,27 @@ export function UpdatesModal() {
   const setModal = useGame((s) => s.setModal)
   const flags = useFlags()
   const updates = shownUpdates(flags)
-  const newest = updates[0]?.id
+  const newest = newestId(flags)
   useEffect(() => markSeen(newest), [newest])
+  const news = flags.news ?? []
   const closed = CLOSED.filter((c) => !flags[c.flag])
   return (
     <Modal title="📜 Updates" onClose={() => setModal(null)} wide>
       <div className="space-y-3 p-3 text-[12px]">
         <p className="text-muted">What changed, what we are working on, and why something is closed. Found a problem or have an idea? Use Report a bug or Share an idea (top right, or in Help).</p>
+        {!!news.length && (
+          <div className="rounded-lg border border-info/40 bg-info/5 p-3">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-info">📣 Announcements</div>
+            <ul className="mt-1.5 space-y-2.5">
+              {news.slice(0, 8).map((n) => (
+                <li key={n.id}>
+                  <div className="flex flex-wrap items-baseline gap-x-2"><b className="text-ink">{n.title}</b><span className="text-[11px] text-dim">{new Date(n.at).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}</span></div>
+                  <p className="whitespace-pre-line text-muted">{n.why}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {!!closed.length && (
           <div className="rounded-lg border border-warn/40 bg-warn/5 p-3">
             <div className="text-[11px] font-bold uppercase tracking-wider text-warn">🚧 Closed for now, and why</div>

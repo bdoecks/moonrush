@@ -14,9 +14,18 @@ export interface GameFlags {
   tech: boolean // tech coins: posts that announce a tool, coins with a site and a demo (off: only admins, in their own solo game)
   larps: boolean // real or larp: some posts are fakes (off: only admins get it, in their own solo game with the story market)
   sparks: boolean // the story market: posts that coins get launched on (off: only admins get it, in solo play on the real-time engine)
+  news: NewsItem[] // announcements in the Updates window: World / wallet resets and other admin changes, with the reason
 }
 
-export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false, cooking: false, sparks: false, larps: false, tech: false }
+/** An announcement the admin posts (by hand, or as part of a reset), shown at the top of Updates for everyone. */
+export interface NewsItem {
+  id: string
+  at: number // ms
+  title: string
+  why: string // what happened and why, in the admin's words
+}
+
+export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false, cooking: false, sparks: false, larps: false, tech: false, news: [] }
 
 // (`labsDev`, `sparksDev`: test copies only, so the UI bots can open the hidden pages and play the story market.
 // Never set by the live game.)
@@ -72,6 +81,13 @@ let timer: ReturnType<typeof setInterval> | null = null
 export function watchFlags() {
   void loadFlags()
   if (!timer) timer = setInterval(() => void loadFlags(), 60_000)
+}
+
+/** Admin: post an announcement to the Updates window (newest first; the 30 newest are kept). */
+export async function postNews(title: string, why: string) {
+  const item: NewsItem = { id: `n${Date.now()}`, at: Date.now(), title: title.trim().slice(0, 120), why: why.trim().slice(0, 800) }
+  await loadFlags() // build on the latest list, not this browser's old copy
+  return setFlag('news', [item, ...(useFlags.getState().news ?? [])].slice(0, 30))
 }
 
 /** Admin only (the database refuses anyone else). */
