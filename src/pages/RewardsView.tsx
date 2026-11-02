@@ -274,7 +274,8 @@ function Cashback() {
         <div className="flex flex-wrap items-center gap-2">
           <div>
             <div className="text-[10px] uppercase tracking-wider text-dim">Claimable cashback</div>
-            <div className="num text-[26px] font-bold text-up">{fmtUsd(total, total < 10 ? 4 : 2)}</div>
+            <div className="num text-[22px] font-bold text-up">{CHAIN_IDS.filter((c) => cb.pending[c] > 1e-9).map((c) => fmtNative(cb.pending[c], c)).join(' + ') || '0'}</div>
+            <div className="num text-[11px] text-dim" title="Cashback is held in each chain's coin, so its dollar value rises and falls with the coin's price even when you aren't trading">≈ {fmtUsd(total, total < 10 ? 4 : 2)} right now · moves with the coins' prices</div>
           </div>
           <div className="ml-auto flex flex-wrap gap-2">
             <button disabled={!any || !running} onClick={() => claim('all', 'coin')} className="flex h-10 items-center gap-1.5 rounded-md bg-up px-4 text-[13px] font-extrabold text-black hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40">

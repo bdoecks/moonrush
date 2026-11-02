@@ -35,6 +35,12 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-11-02-cashback-coins',
+    date: 'November 2, 2026',
+    title: 'Cashback shows coins first',
+    fixed: ['Cashback looked like it kept growing while you weren\'t trading. It is kept in each chain\'s coin (SOL, BNB, ETH), so its dollar value moves with the coin\'s price. The Rewards page now shows the coin amount first, with the dollar value marked as moving with the price. In the World, only the game server counts cashback now.'],
+  },
+  {
     id: '2026-11-02-player-asks',
     date: 'November 2, 2026',
     title: 'Sign in with your username, rewards pay money, AI traders back on the boards',

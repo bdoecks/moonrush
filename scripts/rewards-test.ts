@@ -39,6 +39,17 @@ ok(me().wallet.cash === c2 + 300 + 2_500, 'one mission pays at most $2,500, what
 for (let i = 0; i < 5; i++) op({ kind: 'reward', what: 'mission', usd: 2_500, title: 'More' })
 ok(me().wallet.cash === c2 + REWARD_USD_PER_DAY && /used up/.test(lastNote()), `mission money stops at $${REWARD_USD_PER_DAY.toLocaleString('en-US')} a day: "${lastNote()}"`)
 
+// Cashback: earned on real trades, and the admin can reset everyone's to zero.
+{
+  const mm = me() as unknown as { cashback?: Record<string, number>; wallet: { accounts: { id: string }[] } }
+  const main = mm.wallet.accounts[0].id
+  op({ kind: 'swap', from: 'usd', to: 'sol', amount: 500, walletId: main })
+  const coin = (world as unknown as { market: { tokens: { id: string; chain: string; status: string; liquidity: number }[] } }).market.tokens.find((t) => t.chain === 'sol' && (t.status === 'bonding' || t.status === 'graduated') && t.liquidity > 20_000)!
+  w.handle('u-p', { t: 'order', seq: seq++, ref: 50, order: { side: 'buy', tokenId: coin.id, walletIds: [main], usdEach: 300 } })
+  ok((mm.cashback?.sol ?? 0) > 0, `a real trade earns cashback (${(mm.cashback?.sol ?? 0).toFixed(6)} SOL)`)
+  const n = world.resetCashback()
+  ok(n >= 1 && !mm.cashback, `the admin reset clears it (${n} player)`)
+}
 // It's kept across a restart (so a restart doesn't hand out a second check-in).
 const back = Room.restore(JSON.parse(JSON.stringify(world.snapshot())), null) as unknown as { members: Map<string, M>; handle(id: string, m: unknown): void; dispose(): void }
 ok(back.members.get('u-p')?.checkIn?.day === new Date().toISOString().slice(0, 10), 'the check-in day is saved with the World')

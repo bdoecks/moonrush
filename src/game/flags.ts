@@ -15,6 +15,7 @@ export interface GameFlags {
   larps: boolean // real or larp: some posts are fakes (off: only admins get it, in their own solo game with the story market)
   sparks: boolean // the story market: posts that coins get launched on (off: only admins get it, in solo play on the real-time engine)
   news: NewsItem[] // announcements in the Updates window: World / wallet resets and other admin changes, with the reason
+  cashbackReset: number // ms: every game clears its cashback record (balance, claimed total, history) when this is newer than the last it saw
 }
 
 /** An announcement the admin posts (by hand, or as part of a reset), shown at the top of Updates for everyone. */
@@ -25,7 +26,7 @@ export interface NewsItem {
   why: string // what happened and why, in the admin's words
 }
 
-export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false, cooking: false, sparks: false, larps: false, tech: false, news: [] }
+export const DEFAULT_FLAGS: GameFlags = { events: false, eventPopups: false, multiplayer: true, world: false, notice: '', labs: false, cooking: false, sparks: false, larps: false, tech: false, news: [], cashbackReset: 0 }
 
 // (`labsDev`, `sparksDev`: test copies only, so the UI bots can open the hidden pages and play the story market.
 // Never set by the live game.)
@@ -75,7 +76,11 @@ export async function loadFlags() {
   const next: Partial<GameFlags> = {}
   for (const row of data as { key: keyof GameFlags; value: never }[]) if (row.key in DEFAULT_FLAGS) next[row.key] = row.value
   useFlags.setState({ ...next, loaded: true })
+  if (next.cashbackReset) onCashbackReset?.(next.cashbackReset)
 }
+/** Set by the store (it can't be imported here without a loop): clears the local cashback record after an admin reset. */
+export let onCashbackReset: ((at: number) => void) | null = null
+export const setOnCashbackReset = (f: (at: number) => void) => (onCashbackReset = f)
 
 let timer: ReturnType<typeof setInterval> | null = null
 export function watchFlags() {

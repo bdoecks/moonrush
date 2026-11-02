@@ -520,6 +520,32 @@ function NewsComposer() {
   )
 }
 
+/** Reset everyone's cashback: the World server's unclaimed balances, and every game's own cashback record. */
+function CashbackResetCard() {
+  const notify = useGame((s) => s.notify)
+  const [busy, setBusy] = useState(false)
+  const go = async () => {
+    if (window.prompt('Reset EVERYONE\'s cashback?\n\n• Unclaimed cashback goes to zero for every player.\n• Each game\'s claimed total, cashback volume and claim history are cleared.\n• Wallets, coins, XP and leaderboards are NOT touched.\n\nType RESET to go ahead.') !== 'RESET') return
+    setBusy(true)
+    try {
+      const r = await adminApi<{ players?: number }>('/admin/api/action', { action: 'resetCashback', room: 'WORLD' })
+      const err = r.ok ? await setFlag('cashbackReset', Date.now()) : r.error
+      if (!err) void postNews('Cashback was reset', 'Everyone\'s cashback (unclaimed balance, claimed total and history) started over from zero, after a fix to how it is counted and shown. Your wallet, coins, XP and leaderboard places were not touched.')
+      notify(err ? { title: 'RESET FAILED', body: err ?? 'Failed', tone: 'warn', icon: '⚠️' } : { title: 'CASHBACK RESET', body: `${r.data?.players ?? 0} World players' unclaimed cashback cleared; every game clears its own record within a minute.`, tone: 'info', icon: '🔄' })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Card title={<>💸 Cashback</>}>
+      <div className="flex flex-wrap items-center gap-2 text-[12px]">
+        <span className="text-muted">Start everyone's cashback over from zero (unclaimed balance, claimed total, history). Wallets, XP and boards are untouched. It posts an announcement in Updates.</span>
+        <button disabled={busy} onClick={() => void go()} className={clsx(btn, 'ml-auto border-down/50 text-down hover:bg-down/10 disabled:opacity-40')}>{busy ? 'Resetting…' : "Reset everyone's cashback"}</button>
+      </div>
+    </Card>
+  )
+}
+
 /** The email list: players who agreed to emails about updates and events (needs supabase/011_mailing_list.sql). */
 function MailingCard() {
   const notify = useGame((s) => s.notify)
@@ -709,6 +735,7 @@ function Switches({ rooms }: { rooms: RoomSummary[] }) {
       </Card>
       <div className="lg:col-span-2"><PlayerCounters /></div>
       <div className="lg:col-span-2"><MailingCard /></div>
+      <div className="lg:col-span-2"><CashbackResetCard /></div>
     </div>
   )
 }

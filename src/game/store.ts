@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { SocialProfile, CashbackState, SniperTask, Trade, VolumeBot, Chain, Challenge, CookSpec, CopyConfig, GameMode, LaunchRecord, MarketEvent, MarketState, Player, Portfolio, Profile, RunStatus, Settings, PriceAlert, RewardClaim, RewardsState, SimWallet, SocialPost, Toast, Token, TrackerSettings, WalletAction, WalletActionKind, WalletLabel } from '../types'
 import { clamp, Rng } from '../utils/rng'
-import { cookingVisible, labsVisible, larpsVisible, sparksVisible, techVisible, useFlags } from './flags'
+import { cookingVisible, labsVisible, larpsVisible, sparksVisible, techVisible, useFlags, setOnCashbackReset } from './flags'
 import { restoreCharts, saveCharts } from './chartSave'
 import { fmtCompact, fmtPct, fmtUsd } from '../utils/format'
 import { fakeAddress } from '../utils/address'
@@ -568,6 +568,18 @@ function initialState() {
     wallets: createWallets(new Rng((market.seed ^ 0xa11ce) >>> 0)), copies: [] as CopyConfig[], trackedWallets: [] as string[], walletFeed: [] as WalletFeedItem[],
     socialFeed: [] as SocialPost[], followedAccounts: [] as string[], walletLabels: {} as Record<string, WalletLabel>, alerts: [] as PriceAlert[], snipers: [] as SniperTask[],
   }
+}
+
+/**
+ * The admin's "reset everyone's cashback": when the switch carries a newer time than this game last saw, clear its
+ * cashback record (unclaimed balance, claimed total, volume, claim history). The World's server clears its side.
+ */
+export function applyCashbackReset(at: number) {
+  if (!(at > 0) || at <= (load<number>('cashbackResetSeen') ?? 0)) return
+  save('cashbackResetSeen', at)
+  const s = useGame.getState()
+  const r = s.rewards
+  useGame.setState({ rewards: { ...r, cashback: { ...cashbackOf(r), pending: { sol: 0, bsc: 0, hood: 0 }, volume: 0, roundVolume: 0, roundUsd: 0, lifetimeUsd: 0 }, history: r.history.filter((h) => h.kind !== 'cashback') } })
 }
 
 /** Where a reward also pays money: a solo Practice round (straight in), the World (its server pays), or nowhere. */
@@ -2318,6 +2330,9 @@ useGame.subscribe((s, prev) => {
   const fresh = s.portfolio.trades.filter((tr) => !seen.has(key(tr)) && tr.status === 'FILLED')
   // A new round (or a load) swaps the whole list; only count trades added on top of the old one.
   if (!fresh.length || fresh.length === s.portfolio.trades.length && prev.portfolio.trades.length > 0) return
+  // Rooms and the World: the server counts cashback and sends it with every wallet update. Counting here too could add
+  // a trade twice (the instant fill, then the server's own copy of it).
+  if (s.online) return
   const cb = cashbackOf(s.rewards)
   const chainOf = (tr: Trade): Chain => tr.chain ?? s.market.tokens.find((t) => t.id === tr.tokenId)?.chain ?? 'sol'
   const pending = { ...cb.pending }
@@ -2375,3 +2390,6 @@ if (typeof window !== 'undefined') {
     saveCharts([...Object.keys(s.portfolio.positions), ...(s.selectedId ? [s.selectedId] : []), ...traded])
   })
 }
+
+// The admin's cashback reset reaches every game through the switches (see applyCashbackReset).
+setOnCashbackReset(applyCashbackReset)

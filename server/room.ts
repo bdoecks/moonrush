@@ -2276,6 +2276,19 @@ export class Room {
    * records start from zero: the boards, profit history, coin-maker stats, trophies, restarts and the hall of fame.
    * Accounts, XP, levels, followers and chat are not touched. Returns what it did.
    */
+  /** Admin: everyone's unclaimed cashback back to zero (wallets, volume and records are untouched). */
+  resetCashback(): number {
+    let n = 0
+    for (const m of this.members.values()) {
+      if (m.info.bot || (!m.cashback && !m.cbVolume)) continue
+      m.cashback = undefined
+      m.cbVolume = undefined
+      n++
+      if (m.ws) this.sendWallet(m)
+    }
+    return n
+  }
+
   resetWorld(): { wallets: number; coins: number } | null {
     if (!this.world || this.round.state !== 'running') return null
     const wallets = this.resetWallets()

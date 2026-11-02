@@ -17,6 +17,7 @@ export type AdminAction =
   | { action: 'reset'; room: string; playerId?: string } // wipe a wallet back to the start (no player = everyone)
   | { action: 'startBalance'; room: string; usd: number } // World: what a new (or reset) wallet starts with from now on
   | { action: 'resetWorld'; room: string; confirm?: string } // World: every wallet back to the start, players' coins off the market, records to zero
+  | { action: 'resetCashback'; room: string } // World: everyone's unclaimed cashback back to zero
 
 /** Guests banned from this server (until it restarts); accounts are banned in the database. */
 export const bannedGuests = new Set<string>()
@@ -135,6 +136,10 @@ export async function handleAdmin(req: IncomingMessage, res: ServerResponse, pat
         if (a.confirm !== 'RESET') return json(res, 400, { error: 'Type RESET to confirm' })
         const r = await ops.resetWorld()
         return json(res, r.ok ? 200 : 500, r.ok ? r : { error: r.error ?? 'The reset failed' })
+      }
+      case 'resetCashback': {
+        if (!room.world) return json(res, 400, { error: 'Only the World keeps cashback on the server' })
+        return json(res, 200, { ok: true, players: room.resetCashback() })
       }
       case 'market': {
         const r = room.adminMarket(a.market)
