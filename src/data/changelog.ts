@@ -35,6 +35,18 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-11-real-or-fake',
+    flag: 'larps',
+    date: 'November 2026',
+    title: 'Real or fake: check who posted',
+    added: [
+      'Not every post from a famous name is real. An impersonator has the same name and picture, but the handle is one letter off, there is no check mark and the follower count is lower.',
+      'A screenshot of a famous account\'s post, shared by a nobody, may be made up. The post says it is a screenshot and whose post it claims to be.',
+      'Now and then a real account is hacked. Nothing gives that one away until it comes out.',
+      'When a fake comes out, the real account says so on the timeline and the crowd leaves every coin that was launched on it.',
+    ],
+  },
+  {
     id: '2026-11-02-cashback-coins',
     date: 'November 2, 2026',
     title: 'Cashback shows coins first',
@@ -186,18 +198,6 @@ export const UPDATES: Update[] = [
       'Each of those coins has a site. Open it from the coin\'s page (the blue line under its name) and try the demo.',
       'On some coins the demo really works. On others it gives the same answer whatever you type, says "coming soon", or just keeps loading. Try it with two different things.',
       'The timeline tends to settle on a coin whose demo works. A coin with a working demo and a clean risk tag is the better bet.',
-    ],
-  },
-  {
-    id: '2026-10-09-real-or-fake',
-    flag: 'larps',
-    date: 'October 2026',
-    title: 'Real or fake: check who posted',
-    added: [
-      'Not every post from a famous name is real. An impersonator has the same name and picture, but the handle is one letter off, there is no check mark and the follower count is lower.',
-      'A screenshot of a famous account\'s post, shared by a nobody, may be made up. The post says it is a screenshot and whose post it claims to be.',
-      'Now and then a real account is hacked. Nothing gives that one away until it comes out.',
-      'When a fake comes out, the real account says so on the timeline and the crowd leaves every coin that was launched on it.',
     ],
   },
   {

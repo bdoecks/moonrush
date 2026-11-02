@@ -5,6 +5,7 @@ import { WORLD_CODE } from '../src/net/protocol'
 
 // (STORY_MARKET=1: the same with the story market on, as it is once the owner's switch is.)
 if (process.env.STORY_MARKET === '1') Room.storyMarket = true
+if (process.env.STORY_LARPS === '1') Room.larps = true // and some posts are fakes (stage 2)
 
 const hours = Number(process.argv[2] ?? 6)
 const world = new Room(WORLD_CODE, true)

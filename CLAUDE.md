@@ -702,6 +702,11 @@ swing) on top of the real-data brain; 4) the data-source plug with provenance; 5
   trades and +7.4% on accounts of 500K to 20M; the careful reader who does not check -1.0% overall; the exact name
   alone -3.2% (-4.9% on big accounts); the first coin -4.4% (-16% on big accounts, -20% on the huge ones).
   Run more rounds before quoting finer than that, and before touching `SPARK.larp`.
+- Re-measured 2026-11-02 on the live market (sparks ON since 2026-10-12, gain 0.6, rush), TWO rounds of 12 World
+  hours a rule: checked +6.6% overall (+10.7% on 500K-20M, +11% on 20M+, 21% of trades won); careful -1.1%
+  (+7.2% on 500K-20M); right -3.7%; first -4.0% (-29% on 20M+); news -17.7%; any -4.3%. Checked at size (--loose):
+  -4.6% at $500, -7.0% at $1,000 (the edge belongs to a small careful player only). fair-test with story + larps
+  (2 x 6 h): every simple rule loses (-3% to -20%). Soak 8 h with both on: 110-150 coins, ~11 ms/tick, steady.
 
 ## Story market stage 3: tech coins (the `tech` switch)
 

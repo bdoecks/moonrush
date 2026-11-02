@@ -23,6 +23,7 @@ const { Room } = (await load('server/room.ts')) as typeof import('../server/room
 // The story market is the owner's switch (off until he turns it on): the rules are measured with it on by asking.
 // What reading a post earns has its own test with real orders (scripts/post-test.ts).
 if (process.env.STORY_MARKET === '1' && 'storyMarket' in Room) Room.storyMarket = true
+if (process.env.STORY_LARPS === '1' && 'larps' in Room) Room.larps = true // STORY_LARPS=1: and some posts are fakes (stage 2)
 const { gradPriceNative, startPriceNative } = (await load('src/game/curve.ts')) as typeof import('../src/game/curve')
 const { LAUNCHPADS } = (await load('src/data/launchpads.ts')) as typeof import('../src/data/launchpads')
 const { quoteBuy, quoteSell, createMarket, setClock, secPerTickOf, tickMarket } = (await load('src/game/marketEngine.ts')) as typeof import('../src/game/marketEngine')
