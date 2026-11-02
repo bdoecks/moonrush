@@ -35,6 +35,23 @@ export const CLOSED: { what: string; why: string; flag: 'cooking' | 'labs' }[] =
 /** Newest first. */
 export const UPDATES: Update[] = [
   {
+    id: '2026-11-02-player-asks',
+    date: 'November 2, 2026',
+    title: 'Sign in with your username, rewards pay money, AI traders back on the boards',
+    added: [
+      'Sign in with your username or your email, and a "Remember me" box (untick it on a shared computer: you are signed out when the browser closes).',
+      'An email list for game updates and events. The box is ticked when you create an account, and you can turn it off any time in your account window.',
+      'Your lifetime record in the World, kept by the game server so it is always right: trades, volume, profit taken, win rate, best trade, biggest win and loss. On your player card, Portfolio and Missions.',
+      'Announcements at the top of Updates: when the World or wallets are reset, or the starting balance changes, it says what happened and why.',
+      'Cashback tiers with names (Bronze to Diamond), how much more you need to trade for the next one, and a history of what you claimed.',
+    ],
+    changed: [
+      'The daily check-in and missions pay money as well as XP: in the World and in solo Practice, $1 for every XP point (the check-in pays $50 to $500 over a 7-day streak). Timed rounds and friends\' rooms stay XP only, so rewards never decide a race.',
+      'The AI traders are on the World leaderboards again, marked AI, so you can race them. Season trophies still only go to real players.',
+      'In the World, your cashback tier now comes from the game server\'s own count of your trading volume.',
+    ],
+  },
+  {
     id: '2026-11-02-password-reset',
     date: 'November 2, 2026',
     title: 'Resetting your password works',

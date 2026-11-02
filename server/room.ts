@@ -806,7 +806,7 @@ export class Room {
     if (!m.wallet || !fills.length) return
     const earned: [Chain, number][] = []
     for (const f of fills) {
-      const usd = cashbackUsd(f, m.cbVolume ?? 0)
+      const usd = cashbackUsd(f, this.world ? (m.life?.volume ?? 0) : (m.cbVolume ?? 0)) // World: the tier comes from the server's own volume count
       m.cbVolume = (m.cbVolume ?? 0) + f.value
       const chain = f.chain ?? this.market.tokens.find((t) => t.id === f.tokenId)?.chain ?? 'sol'
       if (usd > 0) earned.push([chain, usd / nativePrice(this.market, chain)])

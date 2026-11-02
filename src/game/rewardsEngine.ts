@@ -9,11 +9,11 @@ export const REF_TIERS = [
 ]
 // Cashback tiers use lifetime volume (GMGN / Axiom style): everyone earns from the first trade.
 export const CASHBACK_TIERS = [
-  { volume: 0, rate: 0.1 },
-  { volume: 25_000, rate: 0.15 },
-  { volume: 100_000, rate: 0.2 },
-  { volume: 500_000, rate: 0.25 },
-  { volume: 2_000_000, rate: 0.3 },
+  { volume: 0, rate: 0.1, name: 'Bronze', icon: '🥉', color: '#cd7f32' },
+  { volume: 25_000, rate: 0.15, name: 'Silver', icon: '🥈', color: '#b4bed2' },
+  { volume: 100_000, rate: 0.2, name: 'Gold', icon: '🥇', color: '#ffc93d' },
+  { volume: 500_000, rate: 0.25, name: 'Platinum', icon: '💠', color: '#7fe3e0' },
+  { volume: 2_000_000, rate: 0.3, name: 'Diamond', icon: '💎', color: '#b9a3ff' },
 ]
 export const PLATFORM_FEE = 0.01 // cashback is a share of the platform fee only (not token taxes)
 

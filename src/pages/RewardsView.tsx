@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { CalendarCheck, Copy, DollarSign, Gift, Info, Share2, Users } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Area, AreaChart, CartesianGrid, ReferenceDot, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ChainBadge } from '../components/chain'
 import { EmptyState, Segmented } from '../components/ui'
@@ -12,6 +12,7 @@ import { selectSpeed, useGame } from '../game/store'
 import { fmtCompact, fmtUsd } from '../utils/format'
 import { load, save } from '../utils/storage'
 import { InviteTab } from '../components/InviteTab'
+import { useWorldBoard } from '../net/worldBoard'
 import { DailyChallenges } from '../components/DailyChallenges'
 import { useInvites } from '../net/invites'
 
@@ -218,7 +219,16 @@ function Referral() {
 }
 
 function Cashback() {
-  const cb = cashbackOf(useGame((s) => s.rewards))
+  const cb0 = cashbackOf(useGame((s) => s.rewards))
+  // In the World your tier comes from the server's own count of your volume (the same one it pays by).
+  const inWorld = useGame((s) => !!s.online?.round.world && !s.online.spectator)
+  const requestBoard = useGame((s) => s.requestBoard)
+  const serverVolume = useWorldBoard((s) => s.board?.me?.row.life?.volume)
+  useEffect(() => {
+    if (inWorld) requestBoard()
+  }, [inWorld, requestBoard])
+  const cb = inWorld && serverVolume !== undefined ? { ...cb0, volume: serverVolume } : cb0
+  const history = useGame((s) => s.rewards.history).filter((h) => h.kind === 'cashback').slice(0, 12)
   const native = useGame((s) => s.market.native)
   const running = useGame((s) => s.runStatus === 'running')
   const claim = useGame((s) => s.claimCashback)
@@ -232,13 +242,27 @@ function Cashback() {
     <div className="space-y-3">
       <Card className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
         <div className="flex flex-col justify-center">
+          {(() => {
+            const t = CASHBACK_TIERS[tier.index]
+            const next = CASHBACK_TIERS[tier.index + 1]
+            return (
+              <div className="mb-4 flex items-center gap-3 rounded-lg border p-3" style={{ borderColor: `${t.color}66`, background: `radial-gradient(circle at 0% 0%, ${t.color}22, transparent 65%)` }}>
+                <span className="text-[38px] leading-none">{t.icon}</span>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-dim">Your tier</div>
+                  <div className="font-display text-[22px] font-bold leading-tight" style={{ color: t.color }}>{t.name} · {Math.round(t.rate * 100)}% back</div>
+                  <div className="text-[11px] text-muted">{next ? <>Trade <b className="num text-ink">{fmtCompact(Math.max(0, next.volume - cb.volume))}</b> more to reach {next.icon} <b style={{ color: next.color }}>{next.name}</b> ({Math.round(next.rate * 100)}% back)</> : 'Top tier: the most cashback there is.'}</div>
+                </div>
+              </div>
+            )
+          })()}
           <div className="text-[22px] font-bold leading-tight">Trade & earn cashback, up to</div>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="font-display text-[48px] font-bold leading-none text-up">{Math.round(top * 100)}%</span>
             <span className="text-[18px] font-semibold">of your fees back</span>
           </div>
           <p className="mt-2 text-[12px] text-muted">
-            Every buy and sell pays part of its trading fee (up to the 1% platform fee, not token taxes) back in that chain's coin: <b style={{ color: CHAINS.sol.color }}>SOL</b> on Solana, <b style={{ color: CHAINS.bsc.color }}>BNB</b> on BNB Chain, <b style={{ color: CHAINS.hood.color }}>ETH</b> on Robinhood Chain. Claim it as the coin or as USDC. Your rate climbs with your lifetime volume.
+            Every buy and sell pays part of its trading fee (up to the 1% platform fee, not token taxes) back in that chain's coin: <b style={{ color: CHAINS.sol.color }}>SOL</b> on Solana, <b style={{ color: CHAINS.bsc.color }}>BNB</b> on BNB Chain, <b style={{ color: CHAINS.hood.color }}>ETH</b> on Robinhood Chain. Claim it as the coin or as USDC. Your rate climbs with your lifetime volume{inWorld ? ' (in the World, counted by the server)' : ''}.
           </p>
           <div className="mt-4"><Progress tiers={CASHBACK_TIERS} volume={cb.volume} /></div>
         </div>
@@ -304,11 +328,23 @@ function Cashback() {
         <div className="grid grid-cols-2 gap-px bg-line/50 sm:grid-cols-5">
           {CASHBACK_TIERS.map((t, i) => (
             <div key={t.volume} className={clsx('bg-panel px-4 py-3', i === tier.index && 'bg-up/5 shadow-[inset_0_-2px_0_#19d989]')}>
-              <div className="text-[10px] text-dim">{tierLabel(t.volume)}</div>
+              <div className="flex items-center gap-1 text-[12px] font-bold" style={{ color: i <= tier.index ? t.color : undefined }}><span>{t.icon}</span>{t.name}</div>
               <div className={clsx('num text-[16px] font-bold', i <= tier.index ? 'text-up' : 'text-muted')}>{Math.round(t.rate * 100)}%</div>
+              <div className="text-[10px] text-dim">{tierLabel(t.volume)}</div>
             </div>
           ))}
         </div>
+      </Card>
+      <Card className="p-0">
+        <div className="border-b border-line px-4 py-2.5 text-[12px] font-bold">Claim history</div>
+        {history.length === 0 ? <div className="px-4 py-5 text-center text-[12px] text-dim">Nothing claimed yet. Trade, then claim here (or turn on auto-claim).</div> : history.map((h) => (
+          <div key={h.id} className="flex items-center gap-2 border-b border-line/40 px-4 py-2 text-[12px] last:border-0">
+            <span className="num w-36 shrink-0 text-dim">{new Date(h.time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+            {h.chain && <ChainBadge chain={h.chain} />}
+            <span className="num font-semibold text-up">{h.paidAs === 'coin' && h.chain ? `+${fmtNative(h.native ?? 0, h.chain)}` : `+${fmtUsd(h.amount, h.amount < 10 ? 4 : 2)} USDC`}</span>
+            <span className="num ml-auto text-[11px] text-dim">≈ {fmtUsd(h.amount, h.amount < 10 ? 4 : 2)}</span>
+          </div>
+        ))}
       </Card>
     </div>
   )
